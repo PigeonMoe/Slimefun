@@ -21,7 +21,7 @@ import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.inventory.EquipmentSlot;
 
 import io.github.bakedlibs.dough.common.ChatColors;
-import io.github.bakedlibs.dough.skins.PlayerHead;
+import io.github.thebusybiscuit.slimefun4.utils.CustomHeads;
 import io.github.thebusybiscuit.slimefun4.api.items.SlimefunItem;
 import io.github.thebusybiscuit.slimefun4.core.attributes.EnergyNetComponent;
 import io.github.thebusybiscuit.slimefun4.core.attributes.EnergyNetProvider;
@@ -95,7 +95,7 @@ public class DebugFishListener implements Listener {
                 Block block = b.getRelative(face);
                 block.setType(Material.PLAYER_HEAD);
 
-                PlayerHead.setSkin(block, HeadTexture.MISSING_TEXTURE.getAsSkin(), true);
+                CustomHeads.setSkin(block, HeadTexture.MISSING_TEXTURE.getTexture(), true);
                 SoundEffect.DEBUG_FISH_CLICK_SOUND.playFor(p);
             }, 2L);
         } else if (BlockStorage.hasBlockInfo(b)) {

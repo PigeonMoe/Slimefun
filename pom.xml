@@ -9,27 +9,27 @@
 
     <!-- Our default version will be UNOFFICIAL, this will prevent auto updates -->
     <!-- from overriding our local test file -->
-    <version>4.9-UNOFFICIAL</version>
+    <version>4.9.1-UNOFFICIAL</version>
     <inceptionYear>2013</inceptionYear>
     <packaging>jar</packaging>
 
     <!-- Project Info -->
     <description>Slimefun is a Paper plugin that simulates a modpack-like atmosphere by adding over 500 new items and recipes to your Minecraft Server.</description>
-    <url>https://github.com/Slimefun/Slimefun4</url>
+    <url>https://github.com/PigeonMoe/Slimefun</url>
 
     <properties>
         <!-- UTF-8 is our standard encoding for source files -->
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
-        <!-- Target Java 16 -->
-        <maven.compiler.source>16</maven.compiler.source>
-        <maven.compiler.target>16</maven.compiler.target>
+        <!-- Minecraft 1.21.11 requires Java 21 -->
+        <maven.compiler.source>21</maven.compiler.source>
+        <maven.compiler.target>21</maven.compiler.target>
         <!-- Run tests using java 21 -->
         <maven.compiler.testSource>21</maven.compiler.testSource>
         <maven.compiler.testTarget>21</maven.compiler.testTarget>
 
         <!-- Spigot properties -->
-        <paper.version>1.21.1</paper.version>
+        <paper.version>1.21.11</paper.version>
         <paper.javadocs>https://hub.spigotmc.org/javadocs/spigot/</paper.javadocs>
 
         <!-- Default settings for sonarcloud.io -->
@@ -43,7 +43,7 @@
     <issueManagement>
         <!-- Bug Tracker -->
         <system>GitHub Issues</system>
-        <url>https://github.com/Slimefun/Slimefun4/issues</url>
+        <url>https://github.com/PigeonMoe/Slimefun/issues</url>
     </issueManagement>
 
     <licenses>
@@ -59,9 +59,9 @@
     <!-- Well, any that aren't found on maven-central. -->
     <repositories>
         <repository>
-            <!-- Spigot-API -->
-            <id>spigot-repo</id>
-            <url>https://hub.spigotmc.org/nexus/content/repositories/snapshots</url>
+            <id>central</id>
+            <url>https://repo.maven.apache.org/maven2</url>
+            <snapshots><enabled>false</enabled></snapshots>
         </repository>
         <repository>
             <!-- PaperLib -->
@@ -72,31 +72,37 @@
             <!-- ItemsAdder -->
             <id>jitpack.io</id>
             <url>https://jitpack.io</url>
+            <snapshots><enabled>false</enabled></snapshots>
         </repository>
         <repository>
             <!-- WorldEdit -->
             <id>worldedit-repo</id>
             <url>https://maven.enginehub.org/repo/</url>
+            <snapshots><enabled>false</enabled></snapshots>
         </repository>
         <repository>
             <!-- PlaceholderAPI -->
             <id>placeholderapi-repo</id>
             <url>https://repo.extendedclip.com/content/repositories/placeholderapi</url>
+            <snapshots><enabled>false</enabled></snapshots>
         </repository>
         <repository>
             <!-- mcMMO -->
             <id>mcmmo-repo</id>
             <url>https://nexus.neetgames.com/repository/maven-public</url>
+            <snapshots><enabled>false</enabled></snapshots>
         </repository>
         <repository>
             <!-- ClearLag -->
             <id>walshy-public</id>
             <url>https://repo.walshy.dev/public</url>
+            <snapshots><enabled>false</enabled></snapshots>
         </repository>
         <repository>
             <!-- Orebfuscator -->
             <id>codemc-repo</id>
             <url>https://repo.codemc.io/repository/maven-public/</url>
+            <snapshots><enabled>false</enabled></snapshots>
         </repository>
     </repositories>
 
@@ -168,7 +174,7 @@
                 <!-- Code Coverage Reports -->
                 <groupId>org.jacoco</groupId>
                 <artifactId>jacoco-maven-plugin</artifactId>
-                <version>0.8.12</version>
+                <version>0.8.14</version>
 
                 <executions>
                     <execution>
@@ -337,7 +343,7 @@
             <dependency>
                 <groupId>org.junit</groupId>
                 <artifactId>junit-bom</artifactId>
-                <version>5.11.4</version>
+                <version>6.0.3</version>
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
@@ -355,12 +361,6 @@
 
         <!-- Shaded packages -->
 
-        <dependency>
-            <groupId>com.github.Slimefun.dough</groupId>
-            <artifactId>dough-api</artifactId>
-            <version>cb22e71335</version>
-            <scope>compile</scope>
-        </dependency>
         <dependency>
             <groupId>com.github.Slimefun.dough</groupId>
             <artifactId>dough-api</artifactId>
@@ -402,9 +402,9 @@
         </dependency>
         <!-- This needs to be before Spigot because MockBukkit will fail otherwise. -->
         <dependency>
-            <groupId>com.github.seeseemelk</groupId>
-            <artifactId>MockBukkit-v1.21</artifactId>
-            <version>3.133.2</version>
+            <groupId>org.mockbukkit.mockbukkit</groupId>
+            <artifactId>mockbukkit-v1.21</artifactId>
+            <version>4.116.3</version>
             <scope>test</scope>
 
             <exclusions>

@@ -1,6 +1,6 @@
 package io.github.thebusybiscuit.slimefun4.test.mocks;
 
-import be.seeseemelk.mockbukkit.inventory.InventoryViewMock;
+import org.mockbukkit.mockbukkit.inventory.InventoryViewMock;
 import org.bukkit.entity.HumanEntity;
 import org.bukkit.event.inventory.InventoryType;
 import org.bukkit.inventory.Inventory;
@@ -29,7 +29,8 @@ public class InventoryViewWrapper extends InventoryViewMock {
                                  Inventory top,
                                  Inventory bottom,
                                  InventoryType type) {
-        super(player, name, top, bottom, type);
+        super(player, top, bottom, type);
+        setTitle(name);
     }
 
     @Nonnull

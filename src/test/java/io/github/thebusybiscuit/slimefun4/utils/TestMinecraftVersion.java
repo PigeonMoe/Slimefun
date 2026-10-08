@@ -9,6 +9,16 @@ import io.github.thebusybiscuit.slimefun4.api.MinecraftVersion;
 class TestMinecraftVersion {
 
     @Test
+    @DisplayName("Resolve the supported 1.21.11 API boundary")
+    void test12111Boundary() {
+        Assertions.assertTrue(MinecraftVersion.MINECRAFT_1_21_11.isMinecraftVersion(21, 11));
+        Assertions.assertFalse(MinecraftVersion.MINECRAFT_1_21.isMinecraftVersion(21, 11));
+        Assertions.assertFalse(MinecraftVersion.MINECRAFT_1_21_11.isMinecraftVersion(21, 10));
+        Assertions.assertFalse(MinecraftVersion.MINECRAFT_1_21_11.isMinecraftVersion(21, 12));
+        Assertions.assertTrue(MinecraftVersion.MINECRAFT_1_21_11.isAtLeast(MinecraftVersion.MINECRAFT_1_20_5));
+    }
+
+    @Test
     @DisplayName("Test if Minecraft versions match themselves")
     void testMatches() {
         Assertions.assertTrue(MinecraftVersion.MINECRAFT_1_16.isMinecraftVersion(16, -1));

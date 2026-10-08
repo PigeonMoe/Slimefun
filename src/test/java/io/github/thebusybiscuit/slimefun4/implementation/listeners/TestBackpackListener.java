@@ -1,8 +1,8 @@
 package io.github.thebusybiscuit.slimefun4.implementation.listeners;
 
-import be.seeseemelk.mockbukkit.MockBukkit;
-import be.seeseemelk.mockbukkit.ServerMock;
-import be.seeseemelk.mockbukkit.entity.ItemEntityMock;
+import org.mockbukkit.mockbukkit.MockBukkit;
+import org.mockbukkit.mockbukkit.ServerMock;
+import org.mockbukkit.mockbukkit.entity.ItemEntityMock;
 import io.github.bakedlibs.dough.items.CustomItemStack;
 import io.github.thebusybiscuit.slimefun4.api.exceptions.TagMisconfigurationException;
 import io.github.thebusybiscuit.slimefun4.api.items.ItemGroup;
@@ -82,13 +82,14 @@ class TestBackpackListener {
         PlayerProfile profile = TestUtilities.awaitProfile(player);
 
         PlayerBackpack backpack = profile.createBackpack(size);
-        listener.setBackpackId(player, item.item(), 2, backpack.getId());
+        ItemStack backpackItem = item.item();
+        listener.setBackpackId(player, backpackItem, 2, backpack.getId());
 
         ItemGroup itemGroup = new ItemGroup(new NamespacedKey(plugin, "test_backpacks"), CustomItemStack.create(Material.CHEST, "&4Test Backpacks"));
         SlimefunBackpack slimefunBackpack = new SlimefunBackpack(size, itemGroup, item, RecipeType.NULL, new ItemStack[9]);
         slimefunBackpack.register(plugin);
 
-        listener.openBackpack(player, item.item(), slimefunBackpack);
+        listener.openBackpack(player, backpackItem, slimefunBackpack);
         return backpack;
     }
 

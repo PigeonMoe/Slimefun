@@ -147,7 +147,7 @@ public class Slimefun extends JavaPlugin implements SlimefunAddon {
      * This does not necessarily mean that it's the minimum version
      * required to run Slimefun.
      */
-    private static final int RECOMMENDED_JAVA_VERSION = 17;
+    private static final int RECOMMENDED_JAVA_VERSION = 21;
 
     /**
      * Our static instance of {@link Slimefun}.
@@ -174,7 +174,7 @@ public class Slimefun extends JavaPlugin implements SlimefunAddon {
     private final CustomItemDataService itemDataService = new CustomItemDataService(this, "slimefun_item");
     private final BlockDataService blockDataService = new BlockDataService(this, "slimefun_block");
     private final CustomTextureService textureService = new CustomTextureService(new Config(this, "item-models.yml"));
-    private final GitHubService gitHubService = new GitHubService("Slimefun/Slimefun4");
+    private final GitHubService gitHubService = new GitHubService("PigeonMoe/Slimefun");
     private final UpdaterService updaterService = new UpdaterService(this, getDescription().getVersion(), getFile());
     private final MetricsService metricsService = new MetricsService(this);
     private final AutoSavingService autoSavingService = new AutoSavingService();
@@ -218,7 +218,7 @@ public class Slimefun extends JavaPlugin implements SlimefunAddon {
 
         // Check that we got loaded by MockBukkit rather than Bukkit's loader
         // TODO: This is very much a hack and we can hopefully move to a more native way in the future
-        if (getClassLoader().getClass().getPackageName().startsWith("be.seeseemelk.mockbukkit")) {
+        if (getClassLoader().getClass().getPackageName().startsWith("org.mockbukkit.mockbukkit")) {
             minecraftVersion = MinecraftVersion.UNIT_TEST;
         }
     }
@@ -399,7 +399,7 @@ public class Slimefun extends JavaPlugin implements SlimefunAddon {
 
     @Override
     public String getBugTrackerURL() {
-        return "https://github.com/Slimefun/Slimefun4/issues";
+        return "https://github.com/PigeonMoe/Slimefun/issues";
     }
 
     /**
@@ -532,6 +532,10 @@ public class Slimefun extends JavaPlugin implements SlimefunAddon {
                 for (MinecraftVersion supportedVersion : MinecraftVersion.values()) {
                     if (supportedVersion.isMinecraftVersion(version, patchVersion)) {
                         minecraftVersion = supportedVersion;
+                        if (supportedVersion.isBefore(MinecraftVersion.MINECRAFT_1_21_11)) {
+                            StartupWarnings.invalidMinecraftVersion(getLogger(), version, getDescription().getVersion());
+                            return true;
+                        }
                         return false;
                     }
                 }
@@ -574,7 +578,7 @@ public class Slimefun extends JavaPlugin implements SlimefunAddon {
         List<String> list = new ArrayList<>();
 
         for (MinecraftVersion version : MinecraftVersion.values()) {
-            if (!version.isVirtual()) {
+            if (!version.isVirtual() && version.isAtLeast(MinecraftVersion.MINECRAFT_1_21_11)) {
                 list.add(version.getName());
             }
         }
