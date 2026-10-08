@@ -1,11 +1,8 @@
-blank_issues_enabled: false
+blank_issues_enabled: true
 contact_links:
-  - name: Code of Conduct
-    url: https://github.com/Slimefun/Slimefun4/blob/master/.github/CODE_OF_CONDUCT.md
-    about: Please read this before posting
-  - name: Bug Report Guidelines
-    url: https://github.com/Slimefun/Slimefun4/wiki/How-to-report-bugs
-    about: Guidelines on how to make good Bug reports
-  - name: Discord Server (for Questions and Suggestions)
-    url: https://discord.gg/slimefun
-    about: Please ask and answer questions here.
+  - name: 兼容性与验证记录
+    url: https://github.com/PigeonMoe/Slimefun/blob/1.21.11/docs/COMPATIBILITY.md
+    about: 查看分支支持范围和当前验收边界。
+  - name: Slimefun5 国际化说明
+    url: https://github.com/PigeonMoe/Slimefun/blob/26.2/docs/TRANSLATIONS.md
+    about: 查看简繁中文配置、译文来源和开发进度。
