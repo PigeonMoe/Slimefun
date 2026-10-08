@@ -20,7 +20,7 @@ mvn -B -ntp clean verify
 
 本分支使用 JDK 21。插件、对应源码包和内嵌 GPLv3 许可证位于 `target/`。仓库名、Bukkit 插件名和数据目录仍为 `Slimefun`；保留原 Java 包名、物品 ID 和持久化键。`experimental` 已改变 `SlimefunItemStack` 等 API，旧附属插件需要单独核对，不能推定全部兼容。
 
-## 本地运行验证（当前待用户提供核心并授权启动）
+## 本地运行验证
 
 ```sh
 python3 scripts/runtime-smoke.py --minecraft-version 1.21.11 \

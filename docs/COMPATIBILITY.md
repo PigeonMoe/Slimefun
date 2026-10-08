@@ -8,7 +8,7 @@
 - 升级测试后端至 MockBukkit `4.116.3`，迁移包名并修复测试中的旧库存模拟和背包副本引用。
 - 修复 `Attribute.MAX_HEALTH`，将头颅物品、机器人移动和电容纹理更新迁移到 Bukkit 公共 PlayerProfile API，移除这些路径对 NMS/authlib 反射的依赖。
 - 限制本分支的服务端版本为 1.21.11。保留历史版本枚举供附属插件引用，不代表继续支持旧服务端。
-- 分支构建关闭原项目的自动更新及远程指标模块下载，保留原插件名称、包名、物品 ID 和数据键。
+- 分支构建关闭原项目的自动更新，新增 `metrics.enabled: false`，完全关闭远程指标模块的初次下载和启动，保留原插件名称、包名、物品 ID 和数据键。
 - **已验证**：JDK 21 下 `mvn -B -ntp verify`，1,789 项测试，0 失败、0 错误、0 跳过；插件 JAR、源码 JAR 和内嵌 LICENSE 生成成功。
 - **真实 Paper 已验证**：用户提供的 `paper-1.21.11-132.jar`，Java 21；插件启用，555 个注册物品的二进制序列化往返及内部 ID、全部内置头颅纹理、放置头颅纹理更新、简繁中文资源加载、`sf versions` 命令均通过。探针完成后自动关闭测试服，未启动游戏客户端。
 - 验证记录：`target/runtime-smoke/1.21.11/result.json` 与 `console.log`（构建目录，不提交）。Paper SHA-256：`5ffef465eeeb5f2a3c23a24419d97c51afd7dbb4923ff42df9a3f58bba1ccfba`。

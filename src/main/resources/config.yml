@@ -46,6 +46,7 @@ talismans:
   use-actionbar: true
 
 metrics:
+  enabled: false
   auto-update: false
   analytics: false
 

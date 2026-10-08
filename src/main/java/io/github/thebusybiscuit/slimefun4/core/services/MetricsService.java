@@ -102,6 +102,9 @@ public class MetricsService {
      * This method loads the metric module and starts the metrics collection.
      */
     public void start() {
+        if (!Slimefun.getCfg().getBoolean("metrics.enabled")) {
+            return;
+        }
         if (!metricsModuleFile.exists()) {
             plugin.getLogger().info(JAR_NAME + " does not exist, downloading...");
 

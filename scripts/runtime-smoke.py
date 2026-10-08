@@ -58,7 +58,7 @@ def main():
     with socket.socket() as sock:
         sock.bind(('127.0.0.1', 0))
         port = sock.getsockname()[1]
-    (runtime / 'server.properties').write_text(f'server-ip=127.0.0.1\nserver-port={port}\nonline-mode=false\nlevel-type=minecraft:flat\ngenerate-structures=false\nview-distance=2\nsimulation-distance=2\nspawn-protection=0\nenable-rcon=false\nenable-query=false\n')
+    (runtime / 'server.properties').write_text(f'server-ip=127.0.0.1\nserver-port={port}\nonline-mode=false\nlevel-type=minecraft:flat\ngenerator-settings={{"layers":[{{"block":"minecraft:bedrock","height":1}},{{"block":"minecraft:dirt","height":2}},{{"block":"minecraft:grass_block","height":1}}],"biome":"minecraft:plains"}}\ngenerate-structures=false\nview-distance=2\nsimulation-distance=2\nspawn-protection=0\nenable-rcon=false\nenable-query=false\n')
     (runtime / 'eula.txt').write_text('eula=true\n')
     slimefun = plugins / 'Slimefun'
     slimefun.mkdir(exist_ok=True)
@@ -83,7 +83,7 @@ def main():
             raise
     content = log.read_text()
     errors = [line for line in content.splitlines() if 'SLIMEFUN_SMOKE_FAILED' in line
-              or '[Slimefun]' in line and ('ERROR' in line or 'SEVERE' in line)]
+              or any(prefix in line for prefix in ('[Slimefun]', '[dough:')) and ('ERROR' in line or 'SEVERE' in line)]
     success = process.returncode == 0 and 'SLIMEFUN_SMOKE_OK' in content and not errors
     result = {'minecraft': version, 'paper_sha256': hashlib.sha256(paper.read_bytes()).hexdigest(),
               'plugin_sha256': hashlib.sha256(jar.read_bytes()).hexdigest(), 'success': success,
