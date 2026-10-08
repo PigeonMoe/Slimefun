@@ -287,16 +287,16 @@ public class SurvivalSlimefunGuide implements SlimefunGuideImplementation {
 
         if (isSurvivalMode() && !hasPermission(p, sfitem)) {
             List<String> message = Slimefun.getPermissionsService().getLore(sfitem);
-            menu.addItem(index, CustomItemStack.create(ChestMenuUtils.getNoPermissionItem(), sfitem.getItemName(), message.toArray(new String[0])));
+            menu.addItem(index, CustomItemStack.create(ChestMenuUtils.getNoPermissionItem(), ItemUtils.getItemName(Slimefun.getLocalization().localizeItem(p, sfitem.getItem())), message.toArray(new String[0])));
             menu.addMenuClickHandler(index, ChestMenuUtils.getEmptyClickHandler());
         } else if (isSurvivalMode() && research != null && !profile.hasUnlocked(research)) {
-            menu.addItem(index, CustomItemStack.create(ChestMenuUtils.getNotResearchedItem(), ChatColor.WHITE + ItemUtils.getItemName(sfitem.getItem()), "&4&l" + Slimefun.getLocalization().getMessage(p, "guide.locked"), "", "&a> Click to unlock", "", "&7Cost: &b" + research.getCost() + " Level(s)"));
+            menu.addItem(index, CustomItemStack.create(ChestMenuUtils.getNotResearchedItem(), ChatColor.WHITE + ItemUtils.getItemName(Slimefun.getLocalization().localizeItem(p, sfitem.getItem())), "&4&l" + Slimefun.getLocalization().getMessage(p, "guide.locked"), "", Slimefun.getLocalization().getMessage(p, "guide.unlock"), "", Slimefun.getLocalization().getMessage(p, "guide.research-cost").replace("%cost%", String.valueOf(research.getCost()))));
             menu.addMenuClickHandler(index, (pl, slot, item, action) -> {
                 research.unlockFromGuide(this, p, profile, sfitem, itemGroup, page);
                 return false;
             });
         } else {
-            menu.addItem(index, sfitem.getItem());
+            menu.addItem(index, Slimefun.getLocalization().localizeItem(p, sfitem.getItem()));
             menu.addMenuClickHandler(index, (pl, slot, item, action) -> {
                 try {
                     if (isSurvivalMode()) {
@@ -357,8 +357,8 @@ public class SurvivalSlimefunGuide implements SlimefunGuideImplementation {
                 break;
             }
 
-            if (!slimefunItem.isHidden() && isItemGroupAccessible(p, slimefunItem) && isSearchFilterApplicable(slimefunItem, searchTerm)) {
-                ItemStack itemstack = CustomItemStack.create(slimefunItem.getItem(), meta -> {
+            if (!slimefunItem.isHidden() && isItemGroupAccessible(p, slimefunItem) && isSearchFilterApplicable(p, slimefunItem, searchTerm)) {
+                ItemStack itemstack = CustomItemStack.create(Slimefun.getLocalization().localizeItem(p, slimefunItem.getItem()), meta -> {
                     ItemGroup itemGroup = slimefunItem.getItemGroup();
                     meta.setLore(Arrays.asList("", ChatColor.DARK_GRAY + "\u21E8 " + ChatColor.WHITE + itemGroup.getDisplayName(p)));
                     meta.addItemFlags(ItemFlag.HIDE_ATTRIBUTES, ItemFlag.HIDE_ENCHANTS, VersionedItemFlag.HIDE_ADDITIONAL_TOOLTIP);
@@ -392,9 +392,10 @@ public class SurvivalSlimefunGuide implements SlimefunGuideImplementation {
     }
 
     @ParametersAreNonnullByDefault
-    private boolean isSearchFilterApplicable(SlimefunItem slimefunItem, String searchTerm) {
+    private boolean isSearchFilterApplicable(Player p, SlimefunItem slimefunItem, String searchTerm) {
         String itemName = ChatColor.stripColor(slimefunItem.getItemName()).toLowerCase(Locale.ROOT);
-        return !itemName.isEmpty() && (itemName.equals(searchTerm) || itemName.contains(searchTerm));
+        String localized = ChatColor.stripColor(ItemUtils.getItemName(Slimefun.getLocalization().localizeItem(p, slimefunItem.getItem()))).toLowerCase(Locale.ROOT);
+        return itemName.contains(searchTerm) || localized.contains(searchTerm) || slimefunItem.getId().toLowerCase(Locale.ROOT).contains(searchTerm);
     }
 
     @Override
@@ -577,7 +578,7 @@ public class SurvivalSlimefunGuide implements SlimefunGuideImplementation {
         }
 
         menu.addItem(10, recipeType.getItem(p), ChestMenuUtils.getEmptyClickHandler());
-        menu.addItem(16, output, ChestMenuUtils.getEmptyClickHandler());
+        menu.addItem(16, Slimefun.getLocalization().localizeItem(p, output), ChestMenuUtils.getEmptyClickHandler());
     }
 
     @ParametersAreNonnullByDefault
@@ -639,6 +640,7 @@ public class SurvivalSlimefunGuide implements SlimefunGuideImplementation {
 
     @ParametersAreNonnullByDefault
     private static @Nonnull ItemStack getDisplayItem(Player p, boolean isSlimefunRecipe, ItemStack item) {
+        item = Slimefun.getLocalization().localizeItem(p, item);
         if (isSlimefunRecipe) {
             SlimefunItem slimefunItem = SlimefunItem.getByItem(item);
 
@@ -646,7 +648,7 @@ public class SurvivalSlimefunGuide implements SlimefunGuideImplementation {
                 return item;
             }
 
-            String lore = hasPermission(p, slimefunItem) ? "&fNeeds to be unlocked in " + slimefunItem.getItemGroup().getDisplayName(p) : "&fNo Permission";
+            String lore = hasPermission(p, slimefunItem) ? Slimefun.getLocalization().getMessage(p, "guide.unlock-in").replace("%group%", slimefunItem.getItemGroup().getDisplayName(p)) : Slimefun.getLocalization().getMessage(p, "messages.no-permission");
             return slimefunItem.canUse(p, false) ? item : CustomItemStack.create(Material.BARRIER, ItemUtils.getItemName(item), "&4&l" + Slimefun.getLocalization().getMessage(p, "guide.locked"), "", lore);
         } else {
             return item;

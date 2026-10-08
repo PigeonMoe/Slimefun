@@ -16,7 +16,8 @@ import javax.annotation.Nullable;
 
 import org.bukkit.Bukkit;
 
-import io.github.bakedlibs.dough.skins.PlayerSkin;
+import org.bukkit.profile.PlayerProfile;
+import io.github.thebusybiscuit.slimefun4.utils.CustomHeads;
 import io.github.bakedlibs.dough.skins.UUIDLookup;
 import io.github.thebusybiscuit.slimefun4.implementation.Slimefun;
 
@@ -141,10 +142,13 @@ class GitHubTask implements Runnable {
         }
 
         if (uuid.isPresent()) {
-            CompletableFuture<PlayerSkin> future = PlayerSkin.fromPlayerUUID(Slimefun.instance(), uuid.get());
-            Optional<String> skin = Optional.of(future.get().getProfile().getBase64Texture());
-            skins.put(contributor.getMinecraftName(), skin.orElse(""));
-            return skin.orElse(null);
+            PlayerProfile profile = Bukkit.createPlayerProfile(uuid.get()).update().get(30, TimeUnit.SECONDS);
+            if (profile.getTextures().getSkin() == null) {
+                return null;
+            }
+            String skin = CustomHeads.encodeProfile(profile);
+            skins.put(contributor.getMinecraftName(), skin);
+            return skin;
         } else {
             return null;
         }

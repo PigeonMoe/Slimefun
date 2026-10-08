@@ -1,0 +1,2019 @@
+# Guide names and exact static lore translations. See docs/TRANSLATIONS.md.
+# Chinese translations: SlimefunGuguProject contributors, GPL-3.0; source commit 3b8b3caff03ccc6a0ecb1b5a3b5efeaacbec36c3.
+PORTABLE_CRAFTER:
+  name: '&6便携工作台'
+  lore:
+  - source: '&a&oA portable Crafting Table'
+    target: '&a&o一个便携式的工作台'
+PORTABLE_DUSTBIN:
+  name: '&6便携垃圾箱'
+  lore:
+  - source: '&fYour portable Item-Destroyer'
+    target: '&r轻松的消除多余的物品'
+ENDER_BACKPACK:
+  name: '&6末影背包'
+  lore:
+  - source: '&a&oA portable Ender Chest'
+    target: '&a&o便携式末影箱'
+MAGIC_EYE_OF_ENDER:
+  name: '&6&l魔法末影之眼'
+  lore:
+  - source: '&4&lRequires full Ender Armor'
+    target: '&4&l需要全套末影护甲'
+  - source: '&7&eRight Click&7 to shoot an Ender Pearl'
+    target: '&7&e右键&7 以射出一颗末影珍珠'
+BROKEN_SPAWNER:
+  name: '&c已损坏的刷怪笼'
+  lore:
+  - source: '&7Type: &b<Type>'
+    target: '&7类型: &b<类型>'
+  - source: '&cFractured, must be repaired in an Ancient Altar'
+    target: '&c已损坏, 需要在古代祭坛中修复'
+REINFORCED_SPAWNER:
+  name: '&b已修复的刷怪笼'
+  lore:
+  - source: '&7Type: &b<Type>'
+    target: '&7类型: &b<类型>'
+INFERNAL_BONEMEAL:
+  name: '&4地狱骨粉'
+TAPE_MEASURE:
+  name: '&6卷尺'
+  lore:
+  - source: '&eCrouch & Right Click &7to set an anchor'
+    target: '&eShift + 右键 &7设置测量起点'
+  - source: '&eRight Click &7to measure'
+    target: '&e右键 &7测量距离'
+GOLD_PAN:
+  name: '&6淘金盘'
+  lore:
+  - source: '&7from Gravel'
+    target: '&7&e右键&7 从沙砾中淘金'
+NETHER_GOLD_PAN:
+  name: '&4下界淘金盘'
+PARACHUTE:
+  name: '&r&l降落伞'
+GRAPPLING_HOOK:
+  name: '&6抓钩'
+SOLAR_HELMET:
+  name: '&b太阳能头盔'
+  lore:
+  - source: '&a&oCharges held Items and Armor'
+    target: '&a&o为你拿着的物品和装备充电'
+CLOTH:
+  name: '&b布'
+REINFORCED_CLOTH:
+  name: '&b强化布料'
+CAN:
+  name: '&r锡罐'
+NIGHT_VISION_GOGGLES:
+  name: '&a夜视眼镜'
+  lore:
+  - source: '&9+ Night Vision'
+    target: '&9+ 夜视效果'
+ELYTRA_CAP:
+  name: '&5鞘翅帽'
+  lore:
+  - source: '&7This helmet will protect you from'
+    target: '&7能使你在用鞘翅飞行途中'
+  - source: '&7crashing while flying with an elytra.'
+    target: '&7不会摔下来变成肉酱'
+FARMER_SHOES:
+  name: '&e农夫的靴子'
+  lore:
+  - source: '&6&oPrevents you from trampling your Crops'
+    target: '&6&o能够防止你踩坏农田'
+INFUSED_MAGNET:
+  name: '&a吸入磁铁'
+RAG:
+  name: '&c破布'
+  lore:
+  - source: '&aLevel I - Medical Supply'
+    target: '&a1级医疗供给'
+  - source: '&fRestores 2 Hearts'
+    target: '&r恢复2点血量'
+  - source: '&fExtinguishes Fire'
+    target: '&r可以熄灭身上的火'
+BANDAGE:
+  name: '&c绷带'
+  lore:
+  - source: '&aLevel II - Medical Supply'
+    target: '&a2级医疗供给'
+  - source: '&fRestores 4 Hearts'
+    target: '&r恢复4点血量'
+  - source: '&fExtinguishes Fire'
+    target: '&r可以熄灭身上的火'
+SPLINT:
+  name: '&c夹板'
+  lore:
+  - source: '&aLevel I - Medical Supply'
+    target: '&a1级医疗供给'
+  - source: '&fRestores 2 Hearts'
+    target: '&r恢复2点血量'
+VITAMINS:
+  name: '&c维他命'
+  lore:
+  - source: '&aLevel III - Medical Supply'
+    target: '&a3级医疗供给'
+  - source: '&fRestores 4 Hearts'
+    target: '&r恢复4点血量'
+  - source: '&fExtinguishes Fire'
+    target: '&r可以熄灭身上的火'
+  - source: '&fCures Poison/Wither/Radiation'
+    target: '&r治愈中毒/凋零/辐射的负面效果'
+MEDICINE:
+  name: '&c药物'
+MAGICAL_ZOMBIE_PILLS:
+  name: '&6还魂丹'
+FLASK_OF_KNOWLEDGE:
+  name: '&c学识之瓶'
+FILLED_FLASK_OF_KNOWLEDGE:
+  name: '&a学识之瓶'
+SMALL_BACKPACK:
+  name: '&e小型背包'
+  lore:
+  - source: '&7Size: &e9'
+    target: '&7大小: &e9'
+MEDIUM_BACKPACK:
+  name: '&e普通背包'
+  lore:
+  - source: '&7Size: &e18'
+    target: '&7大小: &e18'
+LARGE_BACKPACK:
+  name: '&e中型背包'
+  lore:
+  - source: '&7Size: &e27'
+    target: '&7大小: &e27'
+WOVEN_BACKPACK:
+  name: '&e编织背包'
+  lore:
+  - source: '&7Size: &e36'
+    target: '&7大小: &e36'
+GILDED_BACKPACK:
+  name: '&e镀金背包'
+  lore:
+  - source: '&7Size: &e45'
+    target: '&7大小: &e45'
+RADIANT_BACKPACK:
+  name: '&e金光闪闪的背包'
+  lore:
+  - source: '&7Size: &e54 (Double chest)'
+    target: '&7大小: &e54 (大箱子)'
+BOUND_BACKPACK:
+  name: '&c灵魂绑定背包'
+  lore:
+  - source: '&7Size: &e36'
+    target: '&7大小: &e36'
+COOLER:
+  name: '&b小冰柜'
+  lore:
+  - source: '&fAllows you to store Juices/Smoothies'
+    target: '&r可以储存果汁和冰沙'
+  - source: '&fand automatically consumes them when you are hungry'
+    target: '&r当小冰柜在你的物品栏里时'
+  - source: '&fand you have this in your Inventory'
+    target: '&r在你饥饿时将会自动消耗里面的食物'
+  - source: '&7Size: &e27'
+    target: '&7大小: &e27'
+RESTORED_BACKPACK:
+  name: '&e背包恢复器'
+  lore:
+  - source: '&7Retrieve your lost items'
+    target: '&7重新获取你丢失背包里的物品'
+DURALUMIN_JETPACK:
+  name: '&9电力喷气背包 &7- &eI'
+  lore:
+  - source: '&8⇨ &7Thrust: &c0.35'
+    target: '&8⇨ &7推力: &c0.35'
+SOLDER_JETPACK:
+  name: '&9电力喷气背包 &7- &eII'
+  lore:
+  - source: '&8⇨ &7Thrust: &c0.4'
+    target: '&8⇨ &7推力: &c0.4'
+BILLON_JETPACK:
+  name: '&9电力喷气背包 &7- &eIII'
+  lore:
+  - source: '&8⇨ &7Thrust: &c0.45'
+    target: '&8⇨ &7推力: &c0.45'
+STEEL_JETPACK:
+  name: '&9电力喷气背包 &7- &eIV'
+  lore:
+  - source: '&8⇨ &7Thrust: &c0.5'
+    target: '&8⇨ &7推力: &c0.5'
+DAMASCUS_STEEL_JETPACK:
+  name: '&9电力喷气背包 &7- &eV'
+  lore:
+  - source: '&8⇨ &7Thrust: &c0.55'
+    target: '&8⇨ &7推力: &c0.55'
+REINFORCED_ALLOY_JETPACK:
+  name: '&9电力喷气背包 &7- &eVI'
+  lore:
+  - source: '&8⇨ &7Thrust: &c0.6'
+    target: '&8⇨ &7推力: &c0.6'
+CARBONADO_JETPACK:
+  name: '&9电力喷气背包 &7- &eVII'
+  lore:
+  - source: '&8⇨ &7Thrust: &c0.7'
+    target: '&8⇨ &7推力: &c0.7'
+ARMORED_JETPACK:
+  name: '&9装甲喷气背包'
+  lore:
+  - source: '&8⇨ &7Thrust: &c0.5'
+    target: '&8⇨ &7推力: &c0.5'
+DURALUMIN_JETBOOTS:
+  name: '&9喷气靴 &7- &eI'
+  lore:
+  - source: '&8⇨ &7Accuracy: &c50%'
+    target: '&8⇨ &7准确度: &c50%'
+SOLDER_JETBOOTS:
+  name: '&9喷气靴 &7- &eII'
+  lore:
+  - source: '&8⇨ &7Accuracy: &660%'
+    target: '&8⇨ &7准确度: &660%'
+BILLON_JETBOOTS:
+  name: '&9喷气靴 &7- &eIII'
+  lore:
+  - source: '&8⇨ &7Accuracy: &665%'
+    target: '&8⇨ &7准确度: &665%'
+STEEL_JETBOOTS:
+  name: '&9喷气靴 &7- &eIV'
+  lore:
+  - source: '&8⇨ &7Accuracy: &e70%'
+    target: '&8⇨ &7准确度: &e70%'
+DAMASCUS_STEEL_JETBOOTS:
+  name: '&9喷气靴 &7- &eV'
+  lore:
+  - source: '&8⇨ &7Accuracy: &a75%'
+    target: '&8⇨ &7准确度: &a75%'
+REINFORCED_ALLOY_JETBOOTS:
+  name: '&9喷气靴 &7- &eVI'
+  lore:
+  - source: '&8⇨ &7Accuracy: &c80%'
+    target: '&8⇨ &7准确度: &c80%'
+CARBONADO_JETBOOTS:
+  name: '&9喷气靴 &7- &eVII'
+  lore:
+  - source: '&8⇨ &7Accuracy: &c99.9%'
+    target: '&8⇨ &7准确度: &c99.9%'
+ARMORED_JETBOOTS:
+  name: '&9装甲喷气靴'
+  lore:
+  - source: '&8⇨ &7Accuracy: &e70%'
+    target: '&8⇨ &7准确度: &e70%'
+DURALUMIN_MULTI_TOOL:
+  name: '&9多功能工具 &7- &eI'
+SOLDER_MULTI_TOOL:
+  name: '&9多功能工具 &7- &eII'
+BILLON_MULTI_TOOL:
+  name: '&9多功能工具 &7- &eIII'
+STEEL_MULTI_TOOL:
+  name: '&9多功能工具 &7- &eIV'
+DAMASCUS_STEEL_MULTI_TOOL:
+  name: '&9多功能工具 &7- &eV'
+REINFORCED_ALLOY_MULTI_TOOL:
+  name: '&9多功能工具 &7- &eVI'
+CARBONADO_MULTI_TOOL:
+  name: '&9多功能工具 &7- &eVII'
+FORTUNE_COOKIE:
+  name: '&6幸运饼干'
+  lore:
+  - source: '&a&oTells you stuff about your Future :o'
+    target: '&a&o告诉你未来发生的事 :o'
+DIET_COOKIE:
+  name: '&6减肥曲奇'
+  lore:
+  - source: '&aA very &olightweight &f&acookie.'
+    target: '&a一个非常&o轻&r&a的曲奇'
+MAGIC_SUGAR:
+  name: '&6魔法糖'
+  lore:
+  - source: '&a&oFeel the Power of Hermes!'
+    target: '&a&o感受赫尔墨斯的力量!'
+MONSTER_JERKY:
+  name: '&6怪物肉干'
+  lore:
+  - source: '&a&oNo longer hungry'
+    target: '&a&o提神抗饥饿'
+APPLE_JUICE:
+  name: '&c苹果汁'
+MELON_JUICE:
+  name: '&c西瓜汁'
+CARROT_JUICE:
+  name: '&6胡萝卜汁'
+PUMPKIN_JUICE:
+  name: '&6南瓜汁'
+SWEET_BERRY_JUICE:
+  name: '&c浆果汁'
+GLOW_BERRY_JUICE:
+  name: '&6发光浆果汁'
+GOLDEN_APPLE_JUICE:
+  name: '&b金苹果汁'
+BEEF_JERKY:
+  name: '&6牛肉干'
+  lore:
+  - source: '&fExtra saturating!'
+    target: '&r横扫饥饿!'
+PORK_JERKY:
+  name: '&6猪肉干'
+  lore:
+  - source: '&fExtra saturating!'
+    target: '&r横扫饥饿!'
+CHICKEN_JERKY:
+  name: '&6鸡肉干'
+  lore:
+  - source: '&fExtra saturating!'
+    target: '&r横扫饥饿!'
+MUTTON_JERKY:
+  name: '&6羊肉干'
+  lore:
+  - source: '&fExtra saturating!'
+    target: '&r横扫饥饿!'
+RABBIT_JERKY:
+  name: '&6兔肉干'
+  lore:
+  - source: '&fExtra saturating!'
+    target: '&r横扫饥饿!'
+FISH_JERKY:
+  name: '&6鱼干'
+  lore:
+  - source: '&fExtra saturating!'
+    target: '&r横扫饥饿!'
+KELP_COOKIE:
+  name: '&2海带曲奇'
+CHRISTMAS_MILK:
+  name: '&6一杯牛奶'
+CHRISTMAS_CHOCOLATE_MILK:
+  name: '&6巧克力牛奶'
+CHRISTMAS_EGG_NOG:
+  name: '&a蛋酒'
+CHRISTMAS_APPLE_CIDER:
+  name: '&c苹果酒'
+CHRISTMAS_APPLE_PIE:
+  name: '&r苹果派'
+CHRISTMAS_HOT_CHOCOLATE:
+  name: '&6热可可'
+CHRISTMAS_CARAMEL:
+  name: '&6焦糖'
+CHRISTMAS_CARAMEL_APPLE:
+  name: '&6焦糖苹果'
+CHRISTMAS_CHOCOLATE_APPLE:
+  name: '&6巧克力苹果'
+CHRISTMAS_PRESENT:
+  name: '&7来自 &eTheBusyBiscuit &7的礼物'
+  lore:
+  - source: '&7To: &eYou'
+    target: '&7收件人: &e你'
+EASTER_EGG:
+  name: '&r复活节彩蛋'
+  lore:
+  - source: '&dHappy Easter! Have a surprise.'
+    target: '&d复活节快乐! 拆开礼物看看吧.'
+CARROT_PIE:
+  name: '&6胡萝卜派'
+EASTER_APPLE_PIE:
+  name: '&r苹果派'
+GRANDMAS_WALKING_STICK:
+  name: '&7奶奶的拐杖'
+GRANDPAS_WALKING_STICK:
+  name: '&7爷爷的拐杖'
+SWORD_OF_BEHEADING:
+  name: '&6处决之剑'
+  lore:
+  - source: '&7Beheading II'
+    target: '&7斩首处决 II'
+  - source: '&fHas a chance to behead Mobs'
+    target: '&r有几率砍下生物的头'
+  - source: '&f(even a higher chance for Wither Skeletons)'
+    target: '&r(提高掉落凋灵骷髅头的几率)'
+BLADE_OF_VAMPIRES:
+  name: '&c吸血鬼之刀'
+SEISMIC_AXE:
+  name: '&a地震斧'
+  lore:
+  - source: '&7&oA portable Earthquake...'
+    target: '&7&o制造一场地震...'
+EXPLOSIVE_BOW:
+  name: '&c爆裂之弓'
+ICY_BOW:
+  name: '&b冰封之弓'
+SMELTERS_PICKAXE:
+  name: '&6熔炉镐'
+  lore:
+  - source: '&c&lAuto-Smelting'
+    target: '&c&l自动熔炼'
+  - source: '&9Works with Fortune'
+    target: '&9在挖矿时有时运效果'
+LUMBER_AXE:
+  name: '&6伐木斧'
+  lore:
+  - source: '&a&oCuts down the whole Tree...'
+    target: '&a&o砍倒整棵树木...'
+PICKAXE_OF_CONTAINMENT:
+  name: '&c刷怪笼之镐'
+  lore:
+  - source: '&9Can pickup Spawners'
+    target: '&9可以获取刷怪笼'
+EXPLOSIVE_PICKAXE:
+  name: '&e爆炸镐'
+EXPLOSIVE_SHOVEL:
+  name: '&e爆炸铲'
+PICKAXE_OF_THE_SEEKER:
+  name: '&a寻矿镐'
+  lore:
+  - source: '&fWill always point you to the nearest Ore'
+    target: '&r使用时将会指出你附近的矿物'
+  - source: '&fbut might get damaged when doing it'
+    target: '&r但可能它会受到损伤'
+  - source: '&7&eRight Click&7 to be pointed to the nearest Ore'
+    target: '&7&e右键&7 以寻找四周的矿物'
+COBALT_PICKAXE:
+  name: '&9钴镐'
+PICKAXE_OF_VEIN_MINING:
+  name: '&e矿脉镐'
+  lore:
+  - source: '&fThis Pickaxe will dig out'
+    target: '&r这个镐子将会挖出'
+  - source: '&fwhole Veins of Ores...'
+    target: '&r整个矿脉的矿物...'
+CLIMBING_PICK:
+  name: '&b攀岩镐'
+GLOWSTONE_HELMET:
+  name: '&e&l萤石头盔'
+  lore:
+  - source: '&a&oShining like the sun!'
+    target: '&a&o像太阳一样闪耀!'
+  - source: '&9+ Night Vision'
+    target: '&9+ 夜视效果'
+GLOWSTONE_CHESTPLATE:
+  name: '&e&l萤石胸甲'
+  lore:
+  - source: '&a&oShining like the sun!'
+    target: '&a&o像太阳一样闪耀!'
+  - source: '&9+ Night Vision'
+    target: '&9+ 夜视效果'
+GLOWSTONE_LEGGINGS:
+  name: '&e&l萤石护腿'
+  lore:
+  - source: '&a&oShining like the sun!'
+    target: '&a&o像太阳一样闪耀!'
+  - source: '&9+ Night Vision'
+    target: '&9+ 夜视效果'
+GLOWSTONE_BOOTS:
+  name: '&e&l萤石靴子'
+  lore:
+  - source: '&a&oShining like the sun!'
+    target: '&a&o像太阳一样闪耀!'
+  - source: '&9+ Night Vision'
+    target: '&9+ 夜视效果'
+RAINBOW_LEATHER:
+  name: '&d彩虹皮革'
+  lore:
+  - source: '&fCan be used to craft rainbow armor'
+    target: '&f用于合成彩虹装备'
+RAINBOW_HELMET:
+  name: '&d&l彩虹头盔'
+RAINBOW_CHESTPLATE:
+  name: '&d&l彩虹胸甲'
+RAINBOW_LEGGINGS:
+  name: '&d&l彩虹护腿'
+RAINBOW_BOOTS:
+  name: '&d&l彩虹靴子'
+ENDER_HELMET:
+  name: '&5&l末影头盔'
+  lore:
+  - source: '&a&oSometimes its here, sometimes there!'
+    target: '&a&o任意移动'
+ENDER_CHESTPLATE:
+  name: '&5&l末影胸甲'
+  lore:
+  - source: '&a&oSometimes its here, sometimes there!'
+    target: '&a&o任意移动'
+ENDER_LEGGINGS:
+  name: '&5&l末影护腿'
+  lore:
+  - source: '&a&oSometimes its here, sometimes there!'
+    target: '&a&o任意移动'
+ENDER_BOOTS:
+  name: '&5&l末影靴子'
+  lore:
+  - source: '&a&oSometimes its here, sometimes there!'
+    target: '&a&o任意移动'
+  - source: '&9+ No Enderpearl Damage'
+    target: '&9+ 使用末影珍珠时无伤害'
+SLIME_HELMET:
+  name: '&a&l史莱姆头盔'
+  lore:
+  - source: '&a&oBouncy Feeling'
+    target: '&a&o有弹性的感觉'
+SLIME_CHESTPLATE:
+  name: '&a&l史莱姆胸甲'
+  lore:
+  - source: '&a&oBouncy Feeling'
+    target: '&a&o有弹性的感觉'
+SLIME_LEGGINGS:
+  name: '&a&l史莱姆护腿'
+  lore:
+  - source: '&a&oBouncy Feeling'
+    target: '&a&o有弹性的感觉'
+  - source: '&9+ Speed'
+    target: '&9+ 速度'
+SLIME_BOOTS:
+  name: '&a&l史莱姆靴子'
+  lore:
+  - source: '&a&oBouncy Feeling'
+    target: '&a&o有弹性的感觉'
+  - source: '&9+ Jump Boost'
+    target: '&9+ 跳跃提升'
+  - source: '&9+ No Fall Damage'
+    target: '&9+ 减免摔落伤害'
+CACTUS_HELMET:
+  name: '&2仙人掌头盔'
+CACTUS_CHESTPLATE:
+  name: '&2仙人掌胸甲'
+CACTUS_LEGGINGS:
+  name: '&2仙人掌护腿'
+CACTUS_BOOTS:
+  name: '&2仙人掌靴子'
+DAMASCUS_STEEL_HELMET:
+  name: '&7大马士革钢头盔'
+DAMASCUS_STEEL_CHESTPLATE:
+  name: '&7大马士革钢胸甲'
+DAMASCUS_STEEL_LEGGINGS:
+  name: '&7大马士革钢护腿'
+DAMASCUS_STEEL_BOOTS:
+  name: '&7大马士革钢靴子'
+REINFORCED_ALLOY_HELMET:
+  name: '&b强化合金头盔'
+REINFORCED_ALLOY_CHESTPLATE:
+  name: '&b强化合金胸甲'
+REINFORCED_ALLOY_LEGGINGS:
+  name: '&b强化合金护腿'
+REINFORCED_ALLOY_BOOTS:
+  name: '&b强化合金靴子'
+SCUBA_HELMET:
+  name: '&c潜水头盔'
+  lore:
+  - source: '&7Allows you to breathe underwater'
+    target: '&7让你能够在水下呼吸'
+HAZMAT_CHESTPLATE:
+  name: '&c防化服'
+  lore:
+  - source: '&7Allows you to walk through fire and lava'
+    target: '&7让你能在火焰和岩浆里行走'
+HAZMAT_LEGGINGS:
+  name: '&c防化护腿'
+RUBBER_BOOTS:
+  name: '&c防化靴'
+GILDED_IRON_HELMET:
+  name: '&6镀金铁头盔'
+GILDED_IRON_CHESTPLATE:
+  name: '&6镀金铁胸甲'
+GILDED_IRON_LEGGINGS:
+  name: '&6镀金铁护腿'
+GILDED_IRON_BOOTS:
+  name: '&6镀金铁靴子'
+GOLD_12K_HELMET:
+  name: '&6金头盔'
+GOLD_12K_CHESTPLATE:
+  name: '&6金胸甲'
+GOLD_12K_LEGGINGS:
+  name: '&6金护腿'
+GOLD_12K_BOOTS:
+  name: '&6金靴子'
+SLIME_STEEL_HELMET:
+  name: '&a&l史莱姆头盔'
+  lore:
+  - source: '&7&oReinforced'
+    target: '&7&o已强化'
+  - source: '&a&oBouncy Feeling'
+    target: '&a&o有弹性的感觉'
+SLIME_STEEL_CHESTPLATE:
+  name: '&a&l史莱姆胸甲'
+  lore:
+  - source: '&7&oReinforced'
+    target: '&7&o已强化'
+  - source: '&a&oBouncy Feeling'
+    target: '&a&o有弹性的感觉'
+SLIME_STEEL_LEGGINGS:
+  name: '&a&l史莱姆护腿'
+  lore:
+  - source: '&7&oReinforced'
+    target: '&7&o已强化'
+  - source: '&a&oBouncy Feeling'
+    target: '&a&o有弹性的感觉'
+  - source: '&9+ Speed'
+    target: '&9+ 速度'
+SLIME_STEEL_BOOTS:
+  name: '&a&l史莱姆靴子'
+  lore:
+  - source: '&7&oReinforced'
+    target: '&7&o已强化'
+  - source: '&a&oBouncy Feeling'
+    target: '&a&o有弹性的感觉'
+  - source: '&9+ Jump Boost'
+    target: '&9+ 跳跃提升'
+  - source: '&9+ No Fall Damage'
+    target: '&9+ 减免摔落伤害'
+BOOTS_OF_THE_STOMPER:
+  name: '&b践踏者之靴'
+  lore:
+  - source: '&9All Fall Damage you receive'
+    target: '&9你受到的所有摔落伤害'
+  - source: '&9will be applied to nearby Mobs/Players'
+    target: '&9将转给附近的生物/玩家'
+  - source: '&9+ No Fall Damage'
+    target: '&9+ 减免摔落伤害'
+BEE_HELMET:
+  name: '&e&l蜜蜂头盔'
+  lore:
+  - source: '&fBzzzzzzz'
+    target: '&f嗡嗡嗡'
+BEE_WINGS:
+  name: '&e&l蜂翅'
+BEE_LEGGINGS:
+  name: '&e&l蜜蜂护腿'
+  lore:
+  - source: '&fBzzzzzzz'
+    target: '&f嗡嗡嗡'
+BEE_BOOTS:
+  name: '&e&l蜜蜂护靴'
+MAGIC_LUMP_1:
+  name: '&6魔法结晶 &7- &eI'
+  lore:
+  - source: '&c&oTier: I'
+    target: '&c&o等级: I'
+MAGIC_LUMP_2:
+  name: '&6魔法结晶 &7- &eII'
+  lore:
+  - source: '&c&oTier: II'
+    target: '&c&o等级: II'
+MAGIC_LUMP_3:
+  name: '&6魔法结晶 &7- &eIII'
+  lore:
+  - source: '&c&oTier: III'
+    target: '&c&o等级: III'
+ENDER_LUMP_1:
+  name: '&5末影结晶 &7- &eI'
+  lore:
+  - source: '&c&oTier: I'
+    target: '&c&o等级: I'
+ENDER_LUMP_2:
+  name: '&5末影结晶 &7- &eII'
+  lore:
+  - source: '&c&oTier: II'
+    target: '&c&o等级: II'
+ENDER_LUMP_3:
+  name: '&5末影结晶 &7- &eIII'
+  lore:
+  - source: '&c&oTier: III'
+    target: '&c&o等级: III'
+MAGICAL_BOOK_COVER:
+  name: '&6魔法书皮'
+  lore:
+  - source: '&a&oUsed for various Magic Books'
+    target: '&a&o用于各种魔法书'
+MAGICAL_GLASS:
+  name: '&6魔法玻璃'
+  lore:
+  - source: '&a&oUsed for various Magical Gadgets'
+    target: '&a&o被多种魔法道具使用'
+SYNTHETIC_SHULKER_SHELL:
+  name: '&d人造潜影壳'
+  lore:
+  - source: '&fThis item can be used in a'
+    target: '&f可以用于工作台合成'
+  - source: '&fworkbench like a normal Shulker Shell'
+    target: '&f就像普通的潜影壳一样'
+BASIC_CIRCUIT_BOARD:
+  name: '&b基础电路板'
+ADVANCED_CIRCUIT_BOARD:
+  name: '&b高级电路板'
+WHEAT_FLOUR:
+  name: '&r小麦粉'
+STEEL_PLATE:
+  name: '&7&l钢板'
+BATTERY:
+  name: '&6电池'
+CARBON:
+  name: '&e碳'
+COMPRESSED_CARBON:
+  name: '&c压缩碳'
+CARBON_CHUNK:
+  name: '&4碳块'
+STEEL_THRUSTER:
+  name: '&7&l钢推进器'
+POWER_CRYSTAL:
+  name: '&c&l能量水晶'
+CHAIN:
+  name: '&b锁链'
+HOOK:
+  name: '&b钩子'
+SIFTED_ORE:
+  name: '&6筛矿'
+STONE_CHUNK:
+  name: '&6石块'
+LAVA_CRYSTAL:
+  name: '&4岩浆水晶'
+SALT:
+  name: '&r盐'
+CHEESE:
+  name: '&r奶酪'
+BUTTER:
+  name: '&r黄油'
+DUCT_TAPE:
+  name: '&8强力胶布'
+  lore:
+  - source: '&fYou can repair Items using this'
+    target: '&r可以用这个在自动铁砧里'
+  - source: '&fin an Auto-Anvil'
+    target: '&r修复物品'
+HEAVY_CREAM:
+  name: '&r浓奶油'
+CRUSHED_ORE:
+  name: '&6已粉碎的矿石'
+PULVERIZED_ORE:
+  name: '&6粉末状的矿石'
+PURE_ORE_CLUSTER:
+  name: '&6纯矿簇'
+SMALL_URANIUM:
+  name: '&c一小块铀'
+TINY_URANIUM:
+  name: '&c一小撮铀'
+SOLAR_PANEL:
+  name: '&b光伏电池'
+PLASTIC_SHEET:
+  name: '&r塑料纸'
+MAGNET:
+  name: '&c磁铁'
+NECROTIC_SKULL:
+  name: '&c坏死颅骨'
+ESSENCE_OF_AFTERLIFE:
+  name: '&4来世精华'
+STRANGE_NETHER_GOO:
+  name: '&5奇怪的下界粘液'
+ELECTRO_MAGNET:
+  name: '&c电磁铁'
+HEATING_COIL:
+  name: '&c加热线圈'
+COOLING_UNIT:
+  name: '&b冷却装置'
+ELECTRIC_MOTOR:
+  name: '&c电动马达'
+CARGO_MOTOR:
+  name: '&3货运马达'
+SCROLL_OF_DIMENSIONAL_TELEPOSITION:
+  name: '&6维度传送卷轴'
+  lore:
+  - source: '&cThis Scroll is capable of creating'
+    target: '&c这个卷轴可以便携地创建'
+  - source: '&ca temporary black Hole which pulls'
+    target: '&c一个临时的黑洞'
+  - source: '&cnearby Entities into itself and sends'
+    target: '&c将附近的实体都传送至'
+  - source: '&cthem into another Dimension where'
+    target: '&c另一个维度上'
+  - source: '&ceverything is turned around'
+    target: '&c所有东西都反转了'
+  - source: '&fIn other words: Makes Entities turn by 180 Degrees'
+    target: '&r就是说: 让实体转180°'
+TOME_OF_KNOWLEDGE_SHARING:
+  name: '&6学识巨著'
+HARDENED_GLASS:
+  name: '&7钢化玻璃'
+  lore:
+  - source: '&fWithstands Explosions'
+    target: '&r可以抵抗爆炸'
+WITHER_PROOF_OBSIDIAN:
+  name: '&5防凋灵黑曜石'
+  lore:
+  - source: '&fWithstands Explosions'
+    target: '&r可以抵抗爆炸和'
+  - source: '&fWithstands Wither Bosses'
+    target: '&r凋灵的攻击'
+WITHER_PROOF_GLASS:
+  name: '&5防凋灵玻璃'
+  lore:
+  - source: '&fWithstands Explosions'
+    target: '&r可以抵抗爆炸和'
+  - source: '&fWithstands Wither Bosses'
+    target: '&r凋灵的攻击'
+REINFORCED_PLATE:
+  name: '&7钢筋板'
+ANCIENT_PEDESTAL:
+  name: '&d古代基座'
+  lore:
+  - source: '&5Part of the Ancient Altar'
+    target: '&5古代祭坛的一部分'
+ANCIENT_ALTAR:
+  name: '&d古代祭坛'
+  lore:
+  - source: '&5Multi-Block Altar for'
+    target: '&5在世界里建造祭坛'
+  - source: '&5magical Crafting Processes'
+    target: '&5并用古老的仪式合成物品'
+COPPER_WIRE:
+  name: '&6铜线'
+  lore:
+  - source: '&6Crucial component in electric modules'
+    target: '&6电子配件中的重要组成部分'
+CRAFTING_MOTOR:
+  name: '&6合成机马达'
+  lore:
+  - source: '&7Important component of Auto-Crafters'
+    target: '&7自动合成机重要的零件'
+RAINBOW_WOOL:
+  name: '&5彩虹羊毛'
+RAINBOW_GLASS:
+  name: '&5彩虹玻璃'
+RAINBOW_CLAY:
+  name: '&5彩虹粘土块'
+RAINBOW_GLASS_PANE:
+  name: '&5彩虹玻璃板'
+RAINBOW_CONCRETE:
+  name: '&5彩虹混凝土'
+RAINBOW_GLAZED_TERRACOTTA:
+  name: '&5彩虹带釉陶瓦'
+RAINBOW_WOOL_XMAS:
+  name: '&5彩虹羊毛 &7(圣诞节版)'
+RAINBOW_GLASS_XMAS:
+  name: '&5彩虹玻璃 &7(圣诞节版)'
+RAINBOW_CLAY_XMAS:
+  name: '&5彩虹粘土块 &7(圣诞节版)'
+RAINBOW_GLASS_PANE_XMAS:
+  name: '&5彩虹玻璃板 &7(圣诞节版)'
+RAINBOW_CONCRETE_XMAS:
+  name: '&5彩虹混凝土 &7(圣诞节版)'
+RAINBOW_GLAZED_TERRACOTTA_XMAS:
+  name: '&5彩虹带釉陶瓦 &7(圣诞节版)'
+RAINBOW_WOOL_VALENTINE:
+  name: '&5彩虹羊毛 &7(情人节版)'
+RAINBOW_GLASS_VALENTINE:
+  name: '&5彩虹玻璃 &7(情人节版)'
+RAINBOW_CLAY_VALENTINE:
+  name: '&5彩虹粘土块 &7(情人节版)'
+RAINBOW_GLASS_PANE_VALENTINE:
+  name: '&5彩虹玻璃板 &7(情人节版)'
+RAINBOW_CONCRETE_VALENTINE:
+  name: '&5彩虹混凝土 &7(情人节版)'
+RAINBOW_GLAZED_TERRACOTTA_VALENTINE:
+  name: '&5彩虹带釉陶瓦 &7(情人节版)'
+RAINBOW_WOOL_HALLOWEEN:
+  name: '&5彩虹羊毛 &7(万圣节版)'
+RAINBOW_GLASS_HALLOWEEN:
+  name: '&5彩虹玻璃 &7(万圣节版)'
+RAINBOW_CLAY_HALLOWEEN:
+  name: '&5彩虹粘土块 &7(万圣节版)'
+RAINBOW_GLASS_PANE_HALLOWEEN:
+  name: '&5彩虹玻璃板 &7(万圣节版)'
+RAINBOW_CONCRETE_HALLOWEEN:
+  name: '&5彩虹混凝土 &7(万圣节版)'
+RAINBOW_GLAZED_TERRACOTTA_HALLOWEEN:
+  name: '&5彩虹带釉陶瓦 &7(万圣节版)'
+COPPER_INGOT:
+  name: '&b铜锭'
+TIN_INGOT:
+  name: '&b锡锭'
+SILVER_INGOT:
+  name: '&b银锭'
+ALUMINUM_INGOT:
+  name: '&b铝锭'
+LEAD_INGOT:
+  name: '&b铅锭'
+ZINC_INGOT:
+  name: '&b锌锭'
+MAGNESIUM_INGOT:
+  name: '&b镁锭'
+STEEL_INGOT:
+  name: '&b钢锭'
+BRONZE_INGOT:
+  name: '&b青铜锭'
+DURALUMIN_INGOT:
+  name: '&b硬铝锭'
+BILLON_INGOT:
+  name: '&b银铜合金锭'
+BRASS_INGOT:
+  name: '&b黄铜锭'
+ALUMINUM_BRASS_INGOT:
+  name: '&b铝黄铜锭'
+ALUMINUM_BRONZE_INGOT:
+  name: '&b铝青铜锭'
+CORINTHIAN_BRONZE_INGOT:
+  name: '&b科林斯青铜锭'
+SOLDER_INGOT:
+  name: '&b焊锡锭'
+DAMASCUS_STEEL_INGOT:
+  name: '&b大马士革钢锭'
+HARDENED_METAL_INGOT:
+  name: '&b&l硬化金属'
+REINFORCED_ALLOY_INGOT:
+  name: '&b&l强化合金锭'
+FERROSILICON:
+  name: '&b硅铁'
+GILDED_IRON:
+  name: '&6&l镀金铁锭'
+REDSTONE_ALLOY:
+  name: '&c红石合金锭'
+NICKEL_INGOT:
+  name: '&b镍锭'
+COBALT_INGOT:
+  name: '&9钴锭'
+GOLD_4K:
+  name: '&r金锭 &7(4克拉)'
+GOLD_6K:
+  name: '&r金锭 &7(6克拉)'
+GOLD_8K:
+  name: '&r金锭 &7(8克拉)'
+GOLD_10K:
+  name: '&r金锭 &7(10克拉)'
+GOLD_12K:
+  name: '&r金锭 &7(12克拉)'
+GOLD_14K:
+  name: '&r金锭 &7(14克拉)'
+GOLD_16K:
+  name: '&r金锭 &7(16克拉)'
+GOLD_18K:
+  name: '&r金锭 &7(18克拉)'
+GOLD_20K:
+  name: '&r金锭 &7(20克拉)'
+GOLD_22K:
+  name: '&r金锭 &7(22克拉)'
+GOLD_24K:
+  name: '&r金锭 &7(24克拉)'
+IRON_DUST:
+  name: '&6铁粉'
+GOLD_DUST:
+  name: '&6金粉'
+TIN_DUST:
+  name: '&6锡粉'
+COPPER_DUST:
+  name: '&6铜粉'
+SILVER_DUST:
+  name: '&6银粉'
+ALUMINUM_DUST:
+  name: '&6铝粉'
+LEAD_DUST:
+  name: '&6铅粉'
+ZINC_DUST:
+  name: '&6锌粉'
+MAGNESIUM_DUST:
+  name: '&6镁粉'
+SULFATE:
+  name: '&6硫酸盐'
+SILICON:
+  name: '&6硅'
+GOLD_24K_BLOCK:
+  name: '&r&r金块 &7(24克拉)'
+SYNTHETIC_DIAMOND:
+  name: '&b人造钻石'
+SYNTHETIC_EMERALD:
+  name: '&b人造绿宝石'
+SYNTHETIC_SAPPHIRE:
+  name: '&b人造蓝宝石'
+CARBONADO:
+  name: '&b&l黑金刚石'
+  lore:
+  - source: '&7&o"Black Diamond"'
+    target: '&7&o"黑色钻石"'
+RAW_CARBONADO:
+  name: '&b黑金刚石原矿'
+URANIUM:
+  name: '&4铀'
+NEPTUNIUM:
+  name: '&a镎'
+PLUTONIUM:
+  name: '&7钚'
+BOOSTED_URANIUM:
+  name: '&2钚铀混合氧化物核燃料'
+COMMON_TALISMAN:
+  name: '&6普通护身符'
+ENDER_TALISMAN:
+  name: '&5末影护身符'
+ANVIL_TALISMAN:
+  name: '&a铁砧护身符'
+MINER_TALISMAN:
+  name: '&a矿工护身符'
+FARMER_TALISMAN:
+  name: '&a农夫护身符'
+HUNTER_TALISMAN:
+  name: '&a猎人护身符'
+LAVA_TALISMAN:
+  name: '&a岩浆行者护身符'
+WATER_TALISMAN:
+  name: '&a潜水者护身符'
+ANGEL_TALISMAN:
+  name: '&a天使护身符'
+FIRE_TALISMAN:
+  name: '&a消防员护身符'
+MAGICIAN_TALISMAN:
+  name: '&a魔法师护身符'
+TRAVELLER_TALISMAN:
+  name: '&a旅行者护身符'
+WARRIOR_TALISMAN:
+  name: '&a战士护身符'
+KNIGHT_TALISMAN:
+  name: '&a骑士护身符'
+WHIRLWIND_TALISMAN:
+  name: '&a旋风护身符'
+WIZARD_TALISMAN:
+  name: '&a巫师护身符'
+CAVEMAN_TALISMAN:
+  name: '&a穴居人护身符'
+WISE_TALISMAN:
+  name: '&a智者的护身符'
+STAFF_ELEMENTAL:
+  name: '&6元素法杖'
+STAFF_ELEMENTAL_WIND:
+  name: '&6元素法杖 &7- &b&o风'
+  lore:
+  - source: '&7Element: &b&oWind'
+    target: '&7元素: &b&o风'
+  - source: '&eRight Click&7 to launch yourself forward'
+    target: '&7&e右键&7 以将你吹飞'
+STAFF_ELEMENTAL_FIRE:
+  name: '&6元素法杖 &7- &c&o火'
+STAFF_ELEMENTAL_WATER:
+  name: '&6元素法杖 &7- &1&o水'
+  lore:
+  - source: '&7Element: &1&oWater'
+    target: '&7元素: &1&o水'
+  - source: '&eRight Click&7 to extinguish yourself'
+    target: '&7&e右键&7 以灭掉你身上的火'
+STAFF_ELEMENTAL_STORM:
+  name: '&6元素法杖 &7- &8&o雷'
+  lore:
+  - source: '&7Element: &8&oStorm'
+    target: '&7元素: &8&o雷'
+  - source: '&eRight Click&7 to summon a lightning'
+    target: '&e右键&7 召唤一道闪电'
+ENHANCED_CRAFTING_TABLE:
+  name: '&e增强型工作台'
+  lore:
+  - source: '&aA regular Crafting Table cannot'
+    target: '&a&o一个原始的工作台'
+  - source: '&ahold this massive Amount of Power...'
+    target: '&a&o无法承受强大的力量...'
+GRIND_STONE:
+  name: '&b磨石'
+  lore:
+  - source: '&aGrinds items down into other items'
+    target: '&a&o更高效的磨物品'
+ARMOR_FORGE:
+  name: '&6盔甲锻造台'
+  lore:
+  - source: '&aGives you the ability to create powerful armor'
+    target: '&a&o给你创造强大防具的力量'
+MAKESHIFT_SMELTERY:
+  name: '&e简易冶炼炉'
+SMELTERY:
+  name: '&6冶炼炉'
+ORE_CRUSHER:
+  name: '&b矿石粉碎机'
+  lore:
+  - source: '&aCrushes ores to double them'
+    target: '&a&o粉碎矿石并且得到双倍的矿粉'
+COMPRESSOR:
+  name: '&b压缩机'
+  lore:
+  - source: '&aCompresses Items'
+    target: '&a压缩物品'
+PRESSURE_CHAMBER:
+  name: '&b压力机'
+  lore:
+  - source: '&aCompresses Items even further'
+    target: '&a压缩更多的物品'
+MAGIC_WORKBENCH:
+  name: '&6魔法工作台'
+  lore:
+  - source: '&dInfuses Items with magical Energy'
+    target: '&d给物品注入魔法能量'
+ORE_WASHER:
+  name: '&6洗矿机'
+  lore:
+  - source: '&aWashes Sifted Ore to filter Ores'
+    target: '&a&o清洗筛矿变成过滤矿石'
+  - source: '&aand gives you small Stone Chunks'
+    target: '&a&o并且给你一些小石块'
+TABLE_SAW:
+  name: '&6台锯'
+  lore:
+  - source: '&aAllows you to get 8 planks from 1 Log'
+    target: '&a&o从1个木头里获得8个木板'
+  - source: '&a(Works with all log types)'
+    target: '&a&o(支持所有的原木)'
+JUICER:
+  name: '&a榨汁机'
+  lore:
+  - source: '&aAllows you to create delicious Juice'
+    target: '&a让你创造美味的果汁'
+AUTOMATED_PANNING_MACHINE:
+  name: '&a自动淘金机'
+INDUSTRIAL_MINER:
+  name: '&b工业矿机'
+  lore:
+  - source: '&fThis Multiblock will mine any Ores'
+    target: '&r工业矿机能够开采其下方 7x7'
+  - source: '&fin a 7x7 area underneath it.'
+    target: '&r的范围内的所有矿物.'
+  - source: '&fPlace coal or similar in its chest'
+    target: '&r将煤炭或其他燃料放入'
+  - source: '&fto fuel this machine.'
+    target: '&r机器的箱子中为它添加燃料.'
+ADVANCED_INDUSTRIAL_MINER:
+  name: '&c进阶工业矿机'
+  lore:
+  - source: '&fThis Multiblock will mine any Ores'
+    target: '&r进阶工业矿机能够开采其下方 11x11'
+  - source: '&fin a 11x11 area underneath it.'
+    target: '&r的范围中的所有矿物.'
+  - source: '&fPlace a bucket of fuel or lava in'
+    target: '&r将燃油或岩浆放入机器的箱子中'
+  - source: '&fits chest to fuel this machine.'
+    target: '&r为它添加燃料.'
+  - source: '&a+ Silk Touch'
+    target: '&a+ 精准采集'
+COMPOSTER:
+  name: '&a搅拌机'
+  lore:
+  - source: '&a&oCan convert various Materials over Time...'
+    target: '&a&o随着时间的推移可以转换各种材料...'
+CRUCIBLE:
+  name: '&c坩埚'
+  lore:
+  - source: '&a&oUsed to smelt Items into Liquids'
+    target: '&a&o用来把物品变为液体'
+OUTPUT_CHEST:
+  name: '&4物品输出箱'
+IGNITION_CHAMBER:
+  name: '&4自动点火机'
+HOLOGRAM_PROJECTOR:
+  name: '&b全息投影仪'
+  lore:
+  - source: '&fProjects an Editable Hologram'
+    target: '&r投影出可编辑的全息文字'
+BLOCK_PLACER:
+  name: '&a方块放置机'
+  lore:
+  - source: '&fAll Blocks in this Dispenser'
+    target: '&r所有在这个发射器内的方块'
+  - source: '&fwill automatically get placed'
+    target: '&r都会被自动放置'
+ENHANCED_FURNACE:
+  name: '&7强化熔炉 - &eI'
+  lore:
+  - source: '&7Processing Speed: &e1x'
+    target: '&7燃烧速度: &e1x'
+  - source: '&7Fuel Efficiency: &e1x'
+    target: '&7燃料效率: &e1x'
+  - source: '&7Luck Multiplier: &e1x'
+    target: '&7产物翻倍倍数: &e1x'
+ENHANCED_FURNACE_2:
+  name: '&7强化熔炉 - &eII'
+  lore:
+  - source: '&7Processing Speed: &e2x'
+    target: '&7燃烧速度: &e2x'
+  - source: '&7Fuel Efficiency: &e1x'
+    target: '&7燃料效率: &e1x'
+  - source: '&7Luck Multiplier: &e1x'
+    target: '&7产物翻倍倍数: &e1x'
+ENHANCED_FURNACE_3:
+  name: '&7强化熔炉 - &eIII'
+  lore:
+  - source: '&7Processing Speed: &e2x'
+    target: '&7燃烧速度: &e2x'
+  - source: '&7Fuel Efficiency: &e2x'
+    target: '&7燃料效率: &e2x'
+  - source: '&7Luck Multiplier: &e1x'
+    target: '&7产物翻倍倍数: &e1x'
+ENHANCED_FURNACE_4:
+  name: '&7强化熔炉 - &eIV'
+  lore:
+  - source: '&7Processing Speed: &e3x'
+    target: '&7燃烧速度: &e3x'
+  - source: '&7Fuel Efficiency: &e2x'
+    target: '&7燃料效率: &e2x'
+  - source: '&7Luck Multiplier: &e1x'
+    target: '&7产物翻倍倍数: &e1x'
+ENHANCED_FURNACE_5:
+  name: '&7强化熔炉 - &eV'
+  lore:
+  - source: '&7Processing Speed: &e3x'
+    target: '&7燃烧速度: &e3x'
+  - source: '&7Fuel Efficiency: &e2x'
+    target: '&7燃料效率: &e2x'
+  - source: '&7Luck Multiplier: &e2x'
+    target: '&7产物翻倍倍数: &e2x'
+ENHANCED_FURNACE_6:
+  name: '&7强化熔炉 - &eVI'
+  lore:
+  - source: '&7Processing Speed: &e3x'
+    target: '&7燃烧速度: &e3x'
+  - source: '&7Fuel Efficiency: &e3x'
+    target: '&7燃料效率: &e3x'
+  - source: '&7Luck Multiplier: &e2x'
+    target: '&7产物翻倍倍数: &e2x'
+ENHANCED_FURNACE_7:
+  name: '&7强化熔炉 - &eVII'
+  lore:
+  - source: '&7Processing Speed: &e4x'
+    target: '&7燃烧速度: &e4x'
+  - source: '&7Fuel Efficiency: &e3x'
+    target: '&7燃料效率: &e3x'
+  - source: '&7Luck Multiplier: &e2x'
+    target: '&7产物翻倍倍数: &e2x'
+ENHANCED_FURNACE_8:
+  name: '&7强化熔炉 - &eVIII'
+  lore:
+  - source: '&7Processing Speed: &e4x'
+    target: '&7燃烧速度: &e4x'
+  - source: '&7Fuel Efficiency: &e4x'
+    target: '&7燃料效率: &e4x'
+  - source: '&7Luck Multiplier: &e2x'
+    target: '&7产物翻倍倍数: &e2x'
+ENHANCED_FURNACE_9:
+  name: '&7强化熔炉 - &eIX'
+  lore:
+  - source: '&7Processing Speed: &e5x'
+    target: '&7燃烧速度: &e5x'
+  - source: '&7Fuel Efficiency: &e4x'
+    target: '&7燃料效率: &e4x'
+  - source: '&7Luck Multiplier: &e2x'
+    target: '&7产物翻倍倍数: &e2x'
+ENHANCED_FURNACE_10:
+  name: '&7强化熔炉 - &eX'
+  lore:
+  - source: '&7Processing Speed: &e5x'
+    target: '&7燃烧速度: &e5x'
+  - source: '&7Fuel Efficiency: &e5x'
+    target: '&7燃料效率: &e5x'
+  - source: '&7Luck Multiplier: &e2x'
+    target: '&7产物翻倍倍数: &e2x'
+ENHANCED_FURNACE_11:
+  name: '&7强化熔炉 - &eXI'
+  lore:
+  - source: '&7Processing Speed: &e5x'
+    target: '&7燃烧速度: &e5x'
+  - source: '&7Fuel Efficiency: &e5x'
+    target: '&7燃料效率: &e5x'
+  - source: '&7Luck Multiplier: &e3x'
+    target: '&7产物翻倍倍数: &e3x'
+REINFORCED_FURNACE:
+  name: '&7强化合金熔炉'
+  lore:
+  - source: '&7Processing Speed: &e10x'
+    target: '&7燃烧速度: &e10x'
+  - source: '&7Fuel Efficiency: &e10x'
+    target: '&7燃料效率: &e10x'
+  - source: '&7Luck Multiplier: &e3x'
+    target: '&7产物翻倍倍数: &e3x'
+CARBONADO_EDGED_FURNACE:
+  name: '&7黑金刚石镶边熔炉'
+  lore:
+  - source: '&7Processing Speed: &e20x'
+    target: '&7燃烧速度: &e20x'
+  - source: '&7Fuel Efficiency: &e10x'
+    target: '&7燃料效率: &e10x'
+  - source: '&7Luck Multiplier: &e3x'
+    target: '&7产物翻倍倍数: &e3x'
+SOULBOUND_SWORD:
+  name: '&c灵魂绑定剑'
+SOULBOUND_BOW:
+  name: '&c灵魂绑定弓'
+SOULBOUND_PICKAXE:
+  name: '&c灵魂绑定镐'
+SOULBOUND_AXE:
+  name: '&c灵魂绑定斧'
+SOULBOUND_SHOVEL:
+  name: '&c灵魂绑定铲'
+SOULBOUND_HOE:
+  name: '&c灵魂绑定锄'
+SOULBOUND_TRIDENT:
+  name: '&c灵魂绑定三叉戟'
+SOULBOUND_HELMET:
+  name: '&c灵魂绑定头盔'
+SOULBOUND_CHESTPLATE:
+  name: '&c灵魂绑定胸甲'
+SOULBOUND_LEGGINGS:
+  name: '&c灵魂绑定护腿'
+SOULBOUND_BOOTS:
+  name: '&c灵魂绑定靴子'
+SOLAR_GENERATOR:
+  name: '&b太阳能发电机'
+SOLAR_GENERATOR_2:
+  name: '&c高级太阳能发电机'
+SOLAR_GENERATOR_3:
+  name: '&4黑金刚石太阳能发电机'
+SOLAR_GENERATOR_4:
+  name: '&e充能太阳能发电机'
+COAL_GENERATOR:
+  name: '&c煤发电机'
+COAL_GENERATOR_2:
+  name: '&c煤发电机 &7(&eII&7)'
+LAVA_GENERATOR:
+  name: '&4岩浆发电机'
+LAVA_GENERATOR_2:
+  name: '&4岩浆发电机 &7(&eII&7)'
+ELECTRIC_FURNACE:
+  name: '&c电炉'
+ELECTRIC_FURNACE_2:
+  name: '&c电炉 &7- &eII'
+ELECTRIC_FURNACE_3:
+  name: '&c电炉 &7- &eIII'
+ELECTRIC_ORE_GRINDER:
+  name: '&c电力碎矿机'
+  lore:
+  - source: '&fWorks as an Ore Crusher and Grind Stone'
+    target: '&r矿物粉碎机与磨石的完美结合'
+ELECTRIC_ORE_GRINDER_2:
+  name: '&c电力碎矿机 &7(&eII&7)'
+  lore:
+  - source: '&fWorks as an Ore Crusher and Grind Stone'
+    target: '&r矿物粉碎机与磨石的完美结合'
+ELECTRIC_ORE_GRINDER_3:
+  name: '&c电力碎矿机 &7(&eIII&7)'
+  lore:
+  - source: '&fWorks as an Ore Crusher and Grind Stone'
+    target: '&f矿物粉碎机与磨石的完美结合'
+ELECTRIC_INGOT_PULVERIZER:
+  name: '&c电力打粉机'
+  lore:
+  - source: '&fPulverizes Ingots into Dust'
+    target: '&r将锭变为粉'
+AUTO_DRIER:
+  name: '&e自动烘干机'
+AUTO_ENCHANTER:
+  name: '&5自动附魔机'
+AUTO_ENCHANTER_2:
+  name: '&5自动附魔机 &7- &eII'
+AUTO_DISENCHANTER:
+  name: '&5自动祛魔机'
+AUTO_DISENCHANTER_2:
+  name: '&5自动祛魔机 &7- &eII'
+AUTO_ANVIL:
+  name: '&7自动铁砧'
+  lore:
+  - source: '&8⇨ &7Repair Factor: 10%'
+    target: '&8⇨ &7可修复百分比: 10%'
+AUTO_ANVIL_2:
+  name: '&7自动铁砧 Mk.II'
+  lore:
+  - source: '&8⇨ &7Repair Factor: 25%'
+    target: '&8⇨ &7可修复百分比: 25%'
+AUTO_BREWER:
+  name: '&e自动酿造机'
+BOOK_BINDER:
+  name: '&6附魔书整合机'
+  lore:
+  - source: '&fBinds multiple enchanted books into one.'
+    target: '&f将多个附魔书全部绑定到一本上.'
+BIO_REACTOR:
+  name: '&2生物发电机'
+MULTIMETER:
+  name: '&e万用表'
+SMALL_CAPACITOR:
+  name: '&a小型储能电容'
+  lore:
+  - source: '&8⇨ &e⚡ &7128 J Capacity'
+    target: '&8⇨ &e⚡ &7128 J 可储存'
+MEDIUM_CAPACITOR:
+  name: '&a中型储能电容'
+BIG_CAPACITOR:
+  name: '&a大型储能电容'
+LARGE_CAPACITOR:
+  name: '&a巨型储能电容'
+CARBONADO_EDGED_CAPACITOR:
+  name: '&a黑金刚石镶边储能电容'
+ENERGIZED_CAPACITOR:
+  name: '&a终极储能电容'
+PROGRAMMABLE_ANDROID:
+  name: '&c可编程式机器人 &7(普通)'
+  lore:
+  - source: '&8⇨ &7Function: None'
+    target: '&8⇨ &7功能: 无'
+  - source: '&8⇨ &7Fuel Efficiency: 1.0x'
+    target: '&8⇨ &7燃料效率: 1.0x'
+PROGRAMMABLE_ANDROID_FARMER:
+  name: '&c可编程式机器人 &7(农夫)'
+  lore:
+  - source: '&8⇨ &7Function: Farming'
+    target: '&8⇨ &7功能: 耕作'
+  - source: '&8⇨ &7Fuel Efficiency: 1.0x'
+    target: '&8⇨ &7燃料效率: 1.0x'
+PROGRAMMABLE_ANDROID_MINER:
+  name: '&c可编程式机器人 &7(矿工)'
+  lore:
+  - source: '&8⇨ &7Function: Mining'
+    target: '&8⇨ &7功能: 挖矿'
+  - source: '&8⇨ &7Fuel Efficiency: 1.0x'
+    target: '&8⇨ &7燃料效率: 1.0x'
+PROGRAMMABLE_ANDROID_WOODCUTTER:
+  name: '&c可编程式机器人 &7(樵夫)'
+  lore:
+  - source: '&8⇨ &7Function: Woodcutting'
+    target: '&8⇨ &7功能: 伐木'
+  - source: '&8⇨ &7Fuel Efficiency: 1.0x'
+    target: '&8⇨ &7燃料效率: 1.0x'
+PROGRAMMABLE_ANDROID_BUTCHER:
+  name: '&c可编程式机器人 &7(屠夫)'
+  lore:
+  - source: '&8⇨ &7Function: Slaughtering'
+    target: '&8⇨ &7功能: 屠宰'
+  - source: '&8⇨ &7Damage: 4'
+    target: '&8⇨ &7伤害: 4'
+  - source: '&8⇨ &7Fuel Efficiency: 1.0x'
+    target: '&8⇨ &7燃料效率: 1.0x'
+PROGRAMMABLE_ANDROID_FISHERMAN:
+  name: '&c可编程式机器人 &7(渔夫)'
+  lore:
+  - source: '&8⇨ &7Function: Fishing'
+    target: '&8⇨ &7功能: 钓鱼'
+  - source: '&8⇨ &7Success Rate: 10%'
+    target: '&8⇨ &7成功几率: 10%'
+  - source: '&8⇨ &7Fuel Efficiency: 1.0x'
+    target: '&8⇨ &7燃料效率: 1.0x'
+PROGRAMMABLE_ANDROID_2:
+  name: '&c高级可编程式机器人 &7(普通)'
+  lore:
+  - source: '&8⇨ &7Function: None'
+    target: '&8⇨ &7功能: 无'
+  - source: '&8⇨ &7Fuel Efficiency: 1.5x'
+    target: '&8⇨ &7燃料效率: 1.5x'
+PROGRAMMABLE_ANDROID_2_FISHERMAN:
+  name: '&c高级可编程式机器人 &7(渔夫)'
+  lore:
+  - source: '&8⇨ &7Function: Fishing'
+    target: '&8⇨ &7功能: 钓鱼'
+  - source: '&8⇨ &7Success Rate: 20%'
+    target: '&8⇨ &7成功几率: 20%'
+  - source: '&8⇨ &7Fuel Efficiency: 1.5x'
+    target: '&8⇨ &7燃料效率: 1.5x'
+PROGRAMMABLE_ANDROID_2_FARMER:
+  name: '&c高级可编程式机器人 &7(农夫)'
+  lore:
+  - source: '&8⇨ &7Function: Farming'
+    target: '&8⇨ &7功能: 耕作'
+  - source: '&8⇨ &7Fuel Efficiency: 1.5x'
+    target: '&8⇨ &7燃料效率: 1.5x'
+  - source: '&8⇨ &7Can also harvest Plants from ExoticGarden'
+    target: '&8⇨ &7可以收割异域花园内的植物'
+PROGRAMMABLE_ANDROID_2_BUTCHER:
+  name: '&c高级可编程式机器人 &7(屠夫)'
+  lore:
+  - source: '&8⇨ &7Function: Slaughtering'
+    target: '&8⇨ &7功能: 屠宰'
+  - source: '&8⇨ &7Damage: 8'
+    target: '&8⇨ &7伤害: 8'
+  - source: '&8⇨ &7Fuel Efficiency: 1.5x'
+    target: '&8⇨ &7燃料效率: 1.5x'
+PROGRAMMABLE_ANDROID_3:
+  name: '&e可授权式可编程式机器人 &7(普通)'
+  lore:
+  - source: '&8⇨ &7Function: None'
+    target: '&8⇨ &7功能: 无'
+  - source: '&8⇨ &7Fuel Efficiency: 3.0x'
+    target: '&8⇨ &7燃料效率: 3.0x'
+PROGRAMMABLE_ANDROID_3_FISHERMAN:
+  name: '&e可授权式可编程式机器人 &7(渔夫)'
+  lore:
+  - source: '&8⇨ &7Function: Fishing'
+    target: '&8⇨ &7功能: 钓鱼'
+  - source: '&8⇨ &7Success Rate: 30%'
+    target: '&8⇨ &7成功几率: 30%'
+  - source: '&8⇨ &7Fuel Efficiency: 8.0x'
+    target: '&8⇨ &7燃料效率: 8.0x'
+PROGRAMMABLE_ANDROID_3_BUTCHER:
+  name: '&e可授权式可编程式机器人 &7(屠夫)'
+  lore:
+  - source: '&8⇨ &7Function: Slaughtering'
+    target: '&8⇨ &7功能: 屠宰'
+  - source: '&8⇨ &7Damage: 20'
+    target: '&8⇨ &7伤害: 20'
+  - source: '&8⇨ &7Fuel Efficiency: 8.0x'
+    target: '&8⇨ &7燃料效率: 8.0x'
+GPS_TRANSMITTER:
+  name: '&bGPS 发射器'
+GPS_TRANSMITTER_2:
+  name: '&c高级 GPS 发射器'
+GPS_TRANSMITTER_3:
+  name: '&4黑金刚石 GPS 发射器'
+GPS_TRANSMITTER_4:
+  name: '&e充能 GPS 发射器'
+GPS_MARKER_TOOL:
+  name: '&bGPS 设置路径点工具'
+  lore:
+  - source: '&fAllows you to set a Waypoint at'
+    target: '&r允许你在放置标记工具的位置'
+  - source: '&fthe Location you place this'
+    target: '&r设置一个传送点并命名'
+GPS_CONTROL_PANEL:
+  name: '&bGPS 控制面板'
+  lore:
+  - source: '&fAllows you to track your Satellites'
+    target: '&r允许你追踪你的 GPS 卫星'
+  - source: '&fand manage your Waypoints'
+    target: '&r并且管理已有的路径点'
+GPS_EMERGENCY_TRANSMITTER:
+  name: '&cGPS 应急发射器'
+  lore:
+  - source: '&fCarrying this in your Inventory'
+    target: '&r当你死亡的时候'
+  - source: '&fautomatically sets a Waypoint'
+    target: '&r如果应急发射器在你的背包内'
+  - source: '&fat your Location when you die.'
+    target: '&r将会自动把你的死亡位置设为路径点'
+ANDROID_INTERFACE_FUEL:
+  name: '&7机器人交互接口 &c(燃料)'
+  lore:
+  - source: '&fItems stored in this Interface'
+    target: '&r当脚本告诉它这样做时'
+  - source: '&fwill be inserted into an Android''s Fuel Slot'
+    target: '&r储存在交互接口的物品'
+  - source: '&fwhen its Script tells them to do so'
+    target: '&r将会被放入机器人的燃料槽'
+ANDROID_INTERFACE_ITEMS:
+  name: '&7机器人交互接口 &9(物品)'
+  lore:
+  - source: '&fItems stored in an Android''s Inventory'
+    target: '&r当脚本告诉它该这样做时'
+  - source: '&fwill be inserted into this Interface'
+    target: '&r储存在机器人物品栏的物品'
+  - source: '&fwhen its Script tells them to do so'
+    target: '&r将会被放入交互界面'
+GPS_GEO_SCANNER:
+  name: '&bGPS 地形扫描器'
+  lore:
+  - source: '&fScans a Chunk for natural Resources'
+    target: '&r扫描一个区块中有多少自然资源'
+  - source: '&fsuch as &8Oil'
+    target: '&r例如 &8原油'
+PORTABLE_GEO_SCANNER:
+  name: '&b便携式资源扫描器'
+  lore:
+  - source: '&fScans a Chunk for natural Resources'
+    target: '&r扫描出区块中的自然资源'
+  - source: '&eRight Click&7 to scan'
+    target: '&e右键&7 扫描'
+GEO_MINER:
+  name: '&6自然资源开采机'
+  lore:
+  - source: '&eMines up resources from the chunk'
+    target: '&e从区块中开采出资源'
+  - source: '&eThese Resources cannot be mined with a pickaxe'
+    target: '&e可以开采出不能被矿镐挖出的资源'
+  - source: '&c&l! &cMake sure to Geo-Scan the Chunk first'
+    target: '&c&l! &c确保你已经进行了 GEO 地形扫描'
+OIL_PUMP:
+  name: '&r原油泵'
+  lore:
+  - source: '&7Pumps up Oil and fills it into Buckets'
+    target: '&7泵出原油并把它装进桶里'
+  - source: '&c&l! &cMake sure to Geo-Scan the Chunk first'
+    target: '&c&l! &c请先对所在区块进行地形扫描'
+BUCKET_OF_OIL:
+  name: '&r原油桶'
+BUCKET_OF_FUEL:
+  name: '&r燃料桶'
+REFINERY:
+  name: '&c炼油机'
+  lore:
+  - source: '&fRefines Oil to create Fuel'
+    target: '&r将原油提炼为燃油'
+COMBUSTION_REACTOR:
+  name: '&c燃烧反应机'
+ANDROID_MEMORY_CORE:
+  name: '&b机器人内存核心'
+GPS_TELEPORTER_PYLON:
+  name: '&5GPS 信号塔'
+  lore:
+  - source: '&7Teleporter Component'
+    target: '&7传送器组件'
+GPS_TELEPORTATION_MATRIX:
+  name: '&bGPS 传送矩阵'
+GPS_ACTIVATION_DEVICE_SHARED:
+  name: '&rGPS 激活设备 &3(公共)'
+  lore:
+  - source: '&fPlace this onto a Teleportation Matrix'
+    target: '&r把它放在传送矩阵上'
+  - source: '&fand step onto this Plate to activate'
+    target: '&r并且踩下这个踏板以选择'
+  - source: '&fthe Teleportation Process'
+    target: '&r要传送的路径点'
+GPS_ACTIVATION_DEVICE_PERSONAL:
+  name: '&rGPS 激活设备 &a(私人)'
+  lore:
+  - source: '&fPlace this onto a Teleportation Matrix'
+    target: '&r把它放在传送矩阵上'
+  - source: '&fand step onto this Plate to activate'
+    target: '&r并且踩下这个踏板以选择'
+  - source: '&fthe Teleportation Process'
+    target: '&r要传送的路径点'
+  - source: '&fThis Version only allows the Person who'
+    target: '&r这种激活装置仅允许'
+  - source: '&fplaced this Device to use it'
+    target: '&r放置它的人使用'
+PORTABLE_TELEPORTER:
+  name: '&b便携式传送器'
+  lore:
+  - source: '&fThis device allows you to teleport'
+    target: '&f可以让你随时随地传送到'
+  - source: '&fto your waypoints from anywhere'
+    target: '&f要传送的传送点'
+  - source: '&eRight Click&7 to use'
+    target: '&e右键&7 使用'
+ELEVATOR_PLATE:
+  name: '&b电梯板'
+  lore:
+  - source: '&fPlace an Elevator Plate on every floor'
+    target: '&r在每一层放置电梯板'
+  - source: '&fand you will be able to teleport between them.'
+    target: '&r你就能够在每一层之间传送.'
+  - source: '&eRight Click this Block &7to name it'
+    target: '&e右键电梯板&7 以为此层命名'
+INFUSED_HOPPER:
+  name: '&5吸入漏斗'
+  lore:
+  - source: '&fAutomatically picks up nearby Items in a 7x7x7'
+    target: '&r自动吸入在漏斗附近'
+  - source: '&fRadius when placed.'
+    target: '&r7x7x7 范围内的所有物品'
+HEATED_PRESSURE_CHAMBER:
+  name: '&c加热压力舱'
+HEATED_PRESSURE_CHAMBER_2:
+  name: '&c加热压力舱 &7- &eII'
+ELECTRIC_SMELTERY:
+  name: '&c电力冶炼炉'
+  lore:
+  - source: '&4Alloys-Only, doesn''t smelt Dust into Ingots'
+    target: '&4仅支持合金, 不能将粉冶炼成锭'
+ELECTRIC_SMELTERY_2:
+  name: '&c电力冶炼炉 &7- &eII'
+  lore:
+  - source: '&4Alloys-Only, doesn''t smelt Dust into Ingots'
+    target: '&4仅支持合金, 不能将粉冶炼成锭'
+ELECTRIC_PRESS:
+  name: '&e压缩机'
+ELECTRIC_PRESS_2:
+  name: '&e压缩机 &7- &eII'
+ELECTRIFIED_CRUCIBLE:
+  name: '&c电动坩埚'
+ELECTRIFIED_CRUCIBLE_2:
+  name: '&c电动坩埚 &7- &eII'
+ELECTRIFIED_CRUCIBLE_3:
+  name: '&c电动坩埚 &7- &eIII'
+CARBON_PRESS:
+  name: '&c碳压机'
+CARBON_PRESS_2:
+  name: '&c碳压机 &7- &eII'
+CARBON_PRESS_3:
+  name: '&c碳压机 &7- &eIII'
+BLISTERING_INGOT:
+  name: '&6起泡锭 &7(33%)'
+BLISTERING_INGOT_2:
+  name: '&6起泡锭 &7(66%)'
+BLISTERING_INGOT_3:
+  name: '&6起泡锭'
+ENERGY_REGULATOR:
+  name: '&6能源调节器'
+  lore:
+  - source: '&fCore Component of an Energy Network'
+    target: '&r能源网络的核心部分'
+ENERGY_CONNECTOR:
+  name: '&c能源连接器'
+DEBUG_FISH:
+  name: '&3这鱼多少钱?'
+  lore:
+  - source: '&eRight Click &fany Block to view it''s BlockData'
+    target: '&e右键 &r任意方块以查看它的方块数据'
+  - source: '&eLeft Click &fto break a Block'
+    target: '&e左键 &r破坏方块'
+  - source: '&eShift + Left Click &fany Block to erase it''s BlockData'
+    target: '&eShift + 左键 &r任意方块以清除它的方块数据'
+  - source: '&eShift + Right Click &fto place a Placeholder Block'
+    target: '&eShift + 右键 &r放置一个占位符方块'
+NETHER_ICE:
+  name: '&e下界冰'
+ENRICHED_NETHER_ICE:
+  name: '&e浓缩下界冰'
+NETHER_ICE_COOLANT_CELL:
+  name: '&6下界冰冷却剂'
+CARGO_MANAGER:
+  name: '&6货运管理器'
+  lore:
+  - source: '&fCore Component of an Item Transport Network'
+    target: '&r物品传输网络的核心组件'
+CARGO_NODE:
+  name: '&7货运节点 &c(连接器)'
+  lore:
+  - source: '&fCargo Connector Pipe'
+    target: '&r货运连接管道'
+CARGO_NODE_INPUT:
+  name: '&7货运节点 &c(输入)'
+  lore:
+  - source: '&fCargo Input Pipe'
+    target: '&r货运输入管道'
+CARGO_NODE_OUTPUT:
+  name: '&7货运节点 &c(输出)'
+  lore:
+  - source: '&fCargo Output Pipe'
+    target: '&r货运输出管道'
+CARGO_NODE_OUTPUT_ADVANCED:
+  name: '&6高级货运节点 &c(输出)'
+  lore:
+  - source: '&fCargo Output Pipe'
+    target: '&r货运输出管道'
+AUTO_BREEDER:
+  name: '&e自动喂食机'
+  lore:
+  - source: '&fRuns on &aOrganic Food'
+    target: '&r需要 &a有机食物'
+  - source: '&8⇨ &e⚡ &760 J/Animal'
+    target: '&8⇨ &e⚡ &760 J/个动物'
+PRODUCE_COLLECTOR:
+  name: '&b全自动收集机'
+  lore:
+  - source: '&fThis machine allows you to'
+    target: '&f此机器可以自动收取'
+  - source: '&fcollect produce from nearby animals.'
+    target: '&f附近动物生产的动物产品.'
+ORGANIC_FOOD:
+  name: '&a有机食物'
+  lore:
+  - source: '&7Content: &9???'
+    target: '&7内含 &9???'
+ORGANIC_FOOD_WHEAT:
+  name: '&7内含 &9小麦'
+ORGANIC_FOOD_CARROT:
+  name: '&7内含 &9胡萝卜'
+ORGANIC_FOOD_POTATO:
+  name: '&7内含 &9土豆'
+ORGANIC_FOOD_SEEDS:
+  name: '&7内含 &9小麦种子'
+ORGANIC_FOOD_BEETROOT:
+  name: '&7内含 &9甜菜'
+ORGANIC_FOOD_MELON:
+  name: '&7内含 &9西瓜'
+ORGANIC_FOOD_APPLE:
+  name: '&7内含 &9苹果'
+ORGANIC_FOOD_SWEET_BERRIES:
+  name: '&7内含 &9浆果'
+ORGANIC_FOOD_KELP:
+  name: '&7内含 &9干海带'
+ORGANIC_FOOD_COCOA:
+  name: '&7内含 &9可可豆'
+ORGANIC_FOOD_SEAGRASS:
+  name: '&7内含: &9海草'
+FERTILIZER:
+  name: '&a有机肥料'
+  lore:
+  - source: '&7Content: &9???'
+    target: '&7内含 &9???'
+FERTILIZER_WHEAT:
+  name: '&7内含 &9小麦'
+FERTILIZER_CARROT:
+  name: '&7内含 &9胡萝卜'
+FERTILIZER_POTATO:
+  name: '&7内含 &9土豆'
+FERTILIZER_SEEDS:
+  name: '&7内含 &9小麦种子'
+FERTILIZER_BEETROOT:
+  name: '&7内含 &9甜菜'
+FERTILIZER_MELON:
+  name: '&7内含 &9西瓜'
+FERTILIZER_APPLE:
+  name: '&7内含 &9苹果'
+FERTILIZER_SWEET_BERRIES:
+  name: '&7内含 &9浆果'
+FERTILIZER_KELP:
+  name: '&7内含 &9干海带'
+FERTILIZER_COCOA:
+  name: '&7内含 &9可可豆'
+FERTILIZER_SEAGRASS:
+  name: '&7内含: &9海草'
+ANIMAL_GROWTH_ACCELERATOR:
+  name: '&b动物生长加速器'
+  lore:
+  - source: '&fRuns on &aOrganic Food'
+    target: '&r需要 &a有机食物'
+CROP_GROWTH_ACCELERATOR:
+  name: '&a作物生长加速器'
+  lore:
+  - source: '&fRuns on &aOrganic Fertilizer'
+    target: '&r需要 &a有机肥料'
+  - source: '&8⇨ &7Radius: 7x7'
+    target: '&8⇨ &7半径: 7x7'
+  - source: '&8⇨ &7Speed: &a3/time'
+    target: '&8⇨ &7速度: &a3/次'
+CROP_GROWTH_ACCELERATOR_2:
+  name: '&a作物生长加速器 &7(&eII&7)'
+  lore:
+  - source: '&fRuns on &aOrganic Fertilizer'
+    target: '&r需要 &a有机肥料'
+  - source: '&8⇨ &7Radius: 9x9'
+    target: '&8⇨ &7半径: 9x9'
+  - source: '&8⇨ &7Speed: &a4/time'
+    target: '&8⇨ &7速度: &a4/次'
+TREE_GROWTH_ACCELERATOR:
+  name: '&a树木生长加速器'
+  lore:
+  - source: '&fRuns on &aOrganic Fertilizer'
+    target: '&r需要 &a有机肥料'
+  - source: '&8⇨ &7Radius: 9x9'
+    target: '&8⇨ &7半径: 9x9'
+  - source: '&8⇨ &7Speed: &a4/time'
+    target: '&8⇨ &7速度: &a4/次'
+FOOD_FABRICATOR:
+  name: '&c食品加工机'
+  lore:
+  - source: '&fProduces &aOrganic Food'
+    target: '&r可制造 &a有机食物'
+FOOD_FABRICATOR_2:
+  name: '&c食品加工机 &7(&eII&7)'
+  lore:
+  - source: '&fProduces &aOrganic Food'
+    target: '&r可制造 &a有机食物'
+FOOD_COMPOSTER:
+  name: '&c食品堆肥器'
+  lore:
+  - source: '&fProduces &aOrganic Fertilizer'
+    target: '&r可制造 &a有机肥料'
+FOOD_COMPOSTER_2:
+  name: '&c食品堆肥器 &7(&eII&7)'
+  lore:
+  - source: '&fProduces &aOrganic Fertilizer'
+    target: '&r可制造 &a有机肥料'
+XP_COLLECTOR:
+  name: '&a经验收集器'
+  lore:
+  - source: '&fCollects nearby Exp and stores it'
+    target: '&r收集附近的经验并储存它们'
+REACTOR_COLLANT_CELL:
+  name: '&b反应堆冷却剂'
+NUCLEAR_REACTOR:
+  name: '&2核反应堆'
+  lore:
+  - source: '&fRequires Cooling!'
+    target: '&r需要冷却剂!'
+  - source: '&8⇨ &bMust be surrounded by Water'
+    target: '&8⇨ &b必须被水包围'
+  - source: '&8⇨ &bMust be supplied with Reactor Coolant Cells'
+    target: '&8⇨ &b必须使用反应堆冷却剂工作'
+NETHERSTAR_REACTOR:
+  name: '&r下界之星反应堆'
+  lore:
+  - source: '&fRuns on Nether Stars'
+    target: '&r需要下界之星'
+  - source: '&8⇨ &bMust be surrounded by Water'
+    target: '&8⇨ &b必须被水包围'
+  - source: '&8⇨ &bMust be supplied with Nether Ice Coolant Cells'
+    target: '&8⇨ &b必须使用下界冰冷却剂工作'
+  - source: '&8⇨ &4Causes nearby Entities to get Withered'
+    target: '&8⇨ &4会导致附近的生物获得凋零效果'
+REACTOR_ACCESS_PORT:
+  name: '&2反应堆访问接口'
+FREEZER:
+  name: '&b冰箱'
+FREEZER_2:
+  name: '&b冰箱 &7(&eII&7)'
+FREEZER_3:
+  name: '&b冰箱 &7(&eIII&7)'
+ELECTRIC_GOLD_PAN:
+  name: '&6电动淘金机'
+ELECTRIC_GOLD_PAN_2:
+  name: '&6电动淘金机 &7(&eII&7)'
+ELECTRIC_GOLD_PAN_3:
+  name: '&6电动淘金机 &7(&eIII&7)'
+ELECTRIC_DUST_WASHER:
+  name: '&3电动洗矿机'
+ELECTRIC_DUST_WASHER_2:
+  name: '&3电动洗矿机 &7(&eII&7)'
+ELECTRIC_DUST_WASHER_3:
+  name: '&3电动洗矿机 &7(&eIII&7)'
+ELECTRIC_INGOT_FACTORY:
+  name: '&c电动铸锭机'
+ELECTRIC_INGOT_FACTORY_2:
+  name: '&c电动铸锭机 &7(&eII&7)'
+ELECTRIC_INGOT_FACTORY_3:
+  name: '&c电动铸锭机 &7(&eIII&7)'
+FLUID_PUMP:
+  name: '&9流体泵'
+  lore:
+  - source: '&8⇨ &e⚡ &732 J/Block'
+    target: '&8⇨ &e⚡ &732 J/个方块'
+CHARGING_BENCH:
+  name: '&6充电台'
+  lore:
+  - source: '&fCharges Items such as Jetpacks'
+    target: '&r能够给物品充电, 比如喷气背包'
+  - source: '&8⇨ &e⚡ &7Energy Loss: &c50%'
+    target: '&8⇨ &e⚡ &7能源损失率: &c50%'
+VANILLA_AUTO_CRAFTER:
+  name: '&2自动合成机 &8(原版)'
+ENHANCED_AUTO_CRAFTER:
+  name: '&2自动合成机 &8(高级)'
+ARMOR_AUTO_CRAFTER:
+  name: '&2自动合成机 &8(盔甲锻造)'
+IRON_GOLEM_ASSEMBLER:
+  name: '&6铁傀儡装配机'
+  lore:
+  - source: '&8⇨ &7Cooldown: &b30 Seconds'
+    target: '&8⇨ &7冷却时间: &b30 秒'
+  - source: '&8⇨ &e⚡ &72048 J/Golem'
+    target: '&8⇨ &e⚡ &72048 J/个铁傀儡'
+WITHER_ASSEMBLER:
+  name: '&5凋灵装配机'
+  lore:
+  - source: '&8⇨ &7Cooldown: &b30 Seconds'
+    target: '&8⇨ &7冷却时间: &b30 秒'
+  - source: '&8⇨ &e⚡ &74096 J/Wither'
+    target: '&8⇨ &e⚡ &74096 J/个凋灵'
+TRASH_CAN_BLOCK:
+  name: '&3垃圾箱'
+  lore:
+  - source: '&fWill destroy all Items put into it'
+    target: '&r可以把不要的物品放进这里'
+ELYTRA_SCALE:
+  name: '&b鞘翅鳞片'
+INFUSED_ELYTRA:
+  name: '&5鞘翅 (经验修补)'
+SOULBOUND_ELYTRA:
+  name: '&c鞘翅 (灵魂绑定)'
+MAGNESIUM_SALT:
+  name: '&c镁盐'
+MAGNESIUM_GENERATOR:
+  name: '&c镁发电机'
+ENDER_ANVIL_TALISMAN:
+  name: '&5末影铁砧护身符'
+ENDER_MINER_TALISMAN:
+  name: '&5末影矿工护身符'
+ENDER_FARMER_TALISMAN:
+  name: '&5末影农夫护身符'
+ENDER_HUNTER_TALISMAN:
+  name: '&5末影猎人护身符'
+ENDER_LAVA_TALISMAN:
+  name: '&5末影岩浆行者护身符'
+ENDER_WATER_TALISMAN:
+  name: '&5末影潜水者护身符'
+ENDER_ANGEL_TALISMAN:
+  name: '&5末影天使护身符'
+ENDER_FIRE_TALISMAN:
+  name: '&5末影消防员护身符'
+ENDER_MAGICIAN_TALISMAN:
+  name: '&5末影魔法师护身符'
+ENDER_TRAVELLER_TALISMAN:
+  name: '&5末影旅行者护身符'
+ENDER_WARRIOR_TALISMAN:
+  name: '&5末影战士护身符'
+ENDER_KNIGHT_TALISMAN:
+  name: '&5末影骑士护身符'
+ENDER_CAVEMAN_TALISMAN:
+  name: '&5末影穴居人护身符'
+ENDER_WISE_TALISMAN:
+  name: '&5末影智者的护身符'
+CHAIN_HELMET:
+  name: 锁链头盔
+CHAIN_CHESTPLATE:
+  name: 锁链胸甲
+CHAIN_LEGGINGS:
+  name: 锁链护腿
+CHAIN_BOOTS:
+  name: 锁链靴子
+ENDER_WHIRLWIND_TALISMAN:
+  name: '&5末影旋风护身符'
+ENDER_WIZARD_TALISMAN:
+  name: '&5末影巫师护身符'
+ENCHANTED_GOLDEN_APPLE:
+  name: 附魔金苹果
+BIRTHDAY_CAKE:
+  name: '&b生日蛋糕'
+CHRISTMAS_COOKIE:
+  name: '&a圣诞曲奇'
+CHRISTMAS_FRUIT_CAKE:
+  name: '&a圣诞水果蛋糕'
+CHRISTMAS_CAKE:
+  name: '&a圣诞蛋糕'
+BLANK_RUNE:
+  name: '&8空白符文'
+ANCIENT_RUNE_AIR:
+  name: '&7古代符文 &8&l[&b&l风&8&l]'
+ANCIENT_RUNE_EARTH:
+  name: '&7古代符文 &8&l[&b&l土&8&l]'
+ANCIENT_RUNE_FIRE:
+  name: '&7古代符文 &8&l[&b&l火&8&l]'
+ANCIENT_RUNE_WATER:
+  name: '&7古代符文 &8&l[&b&l水&8&l]'
+ANCIENT_RUNE_ENDER:
+  name: '&7古代符文 &8&l[&b&l末影&8&l]'
+ANCIENT_RUNE_LIGHTNING:
+  name: '&7古代符文 &8&l[&b&l雷电&8&l]'
+ANCIENT_RUNE_RAINBOW:
+  name: '&7古代符文 &8&l[&b&l彩虹&8&l]'
+ANCIENT_RUNE_SOULBOUND:
+  name: '&7古代符文 &8&l[&b&l灵魂绑定&8&l]'
+ANCIENT_RUNE_ENCHANTMENT:
+  name: '&7古代符文 &8&l[&b&l附魔&8&l]'
+ELYTRA:
+  name: 鞘翅
+TRIDENT:
+  name: 三叉戟
+TOTEM_OF_UNDYING:
+  name: 不死图腾
+ANCIENT_RUNE_VILLAGERS:
+  name: '&7古代符文 &8&l[&b&l村民&8&l]'

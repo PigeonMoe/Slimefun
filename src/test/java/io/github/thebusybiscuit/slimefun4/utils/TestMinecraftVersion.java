@@ -9,6 +9,19 @@ import io.github.thebusybiscuit.slimefun4.api.MinecraftVersion;
 class TestMinecraftVersion {
 
     @Test
+    @DisplayName("Resolve year-based versions without misreading them as 1.2")
+    void testYearBasedVersions() {
+        Assertions.assertEquals(MinecraftVersion.MINECRAFT_1_21_11, MinecraftVersion.fromString("1.21.11"));
+        Assertions.assertEquals(MinecraftVersion.MINECRAFT_26_2, MinecraftVersion.fromString("26.2"));
+        Assertions.assertEquals(MinecraftVersion.MINECRAFT_26_2, MinecraftVersion.fromString("26.2.1"));
+        Assertions.assertEquals(MinecraftVersion.UNKNOWN, MinecraftVersion.fromString("26.3"));
+        Assertions.assertEquals(MinecraftVersion.UNKNOWN, MinecraftVersion.fromString("26.2-pre1"));
+        Assertions.assertEquals(MinecraftVersion.UNKNOWN, MinecraftVersion.fromString("1.26.2"));
+        Assertions.assertTrue(MinecraftVersion.MINECRAFT_26_2.isAtLeast(MinecraftVersion.MINECRAFT_1_21_11));
+        Assertions.assertFalse(MinecraftVersion.MINECRAFT_26_2.isBefore(21, 11));
+    }
+
+    @Test
     @DisplayName("Resolve the supported 1.21.11 API boundary")
     void test12111Boundary() {
         Assertions.assertTrue(MinecraftVersion.MINECRAFT_1_21_11.isMinecraftVersion(21, 11));

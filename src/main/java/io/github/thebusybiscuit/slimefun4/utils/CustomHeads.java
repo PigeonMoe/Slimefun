@@ -47,6 +47,18 @@ public final class CustomHeads {
         skull.update(true, applyPhysics);
     }
 
+    /** Encode a resolved public profile for the existing contributor texture cache. */
+    public static @Nonnull String encodeProfile(@Nonnull PlayerProfile profile) {
+        Validate.notNull(profile.getTextures().getSkin(), "The profile must have a skin");
+        com.google.gson.JsonObject skin = new com.google.gson.JsonObject();
+        skin.addProperty("url", profile.getTextures().getSkin().toExternalForm());
+        com.google.gson.JsonObject textures = new com.google.gson.JsonObject();
+        textures.add("SKIN", skin);
+        com.google.gson.JsonObject root = new com.google.gson.JsonObject();
+        root.add("textures", textures);
+        return Base64.getEncoder().encodeToString(root.toString().getBytes(StandardCharsets.UTF_8));
+    }
+
     /** Creates a deterministic profile without making a network request. */
     public static @Nonnull PlayerProfile getProfile(@Nonnull String texture) {
         Validate.notNull(texture, "The texture must not be null");

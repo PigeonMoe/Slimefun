@@ -235,6 +235,42 @@ public abstract class SlimefunLocalization implements Keyed {
         return list != null ? list : Arrays.asList("! Missing string \"" + path + '"');
     }
 
+    /** Localize a guide copy without changing the stack used by recipes or saved inventories. */
+    public @Nullable ItemStack localizeItem(@Nonnull Player player, @Nullable ItemStack original) {
+        if (original == null) {
+            return null;
+        }
+        ItemStack copy = original.clone();
+        Language language = getLanguage(player);
+        if (language == null || !copy.hasItemMeta()) {
+            return copy;
+        }
+        String id = Slimefun.getItemDataService().getItemData(copy.getItemMeta()).orElse(null);
+        if (id != null) {
+            String name = getStringOrNull(language, LanguageFile.ITEMS, id + ".name");
+            if (name != null) {
+                org.bukkit.inventory.meta.ItemMeta meta = copy.getItemMeta();
+                meta.setDisplayName(ChatColor.translateAlternateColorCodes('&', name));
+                FileConfiguration translations = language.getFile(LanguageFile.ITEMS);
+                // Replace only exact static descriptions. Dynamic values and identity-bearing lore remain intact.
+                if (translations != null && meta.hasLore()) {
+                    java.util.Map<String, String> lines = new java.util.HashMap<>();
+                    for (java.util.Map<?, ?> entry : translations.getMapList(id + ".lore")) {
+                        Object source = entry.get("source");
+                        Object target = entry.get("target");
+                        if (source instanceof String && target instanceof String) {
+                            lines.put(ChatColor.translateAlternateColorCodes('&', (String) source),
+                                ChatColor.translateAlternateColorCodes('&', (String) target));
+                        }
+                    }
+                    meta.setLore(meta.getLore().stream().map(line -> lines.getOrDefault(line, line)).toList());
+                }
+                copy.setItemMeta(meta);
+            }
+        }
+        return copy;
+    }
+
     public @Nonnull String getMessage(@Nonnull String key) {
         Validate.notNull(key, "Message key must not be null!");
 

@@ -7,9 +7,8 @@
     <groupId>com.github.slimefun</groupId>
     <artifactId>Slimefun</artifactId>
 
-    <!-- Our default version will be UNOFFICIAL, this will prevent auto updates -->
-    <!-- from overriding our local test file -->
-    <version>4.9.1-UNOFFICIAL</version>
+    <!-- A community snapshot is not an official Dev/RC build; upstream updates stay disabled. -->
+    <version>5.0.0-SNAPSHOT</version>
     <inceptionYear>2013</inceptionYear>
     <packaging>jar</packaging>
 
@@ -21,15 +20,13 @@
         <!-- UTF-8 is our standard encoding for source files -->
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
-        <!-- Minecraft 1.21.11 requires Java 21 -->
-        <maven.compiler.source>21</maven.compiler.source>
-        <maven.compiler.target>21</maven.compiler.target>
-        <!-- Run tests using java 21 -->
-        <maven.compiler.testSource>21</maven.compiler.testSource>
-        <maven.compiler.testTarget>21</maven.compiler.testTarget>
+        <!-- Minecraft 26.2 requires Java 25 -->
+        <maven.compiler.release>25</maven.compiler.release>
+        <!-- Run tests using Java 25 or newer -->
+        <maven.compiler.testRelease>25</maven.compiler.testRelease>
 
         <!-- Spigot properties -->
-        <paper.version>1.21.11</paper.version>
+        <paper.version>26.2.build.132-stable</paper.version>
         <paper.javadocs>https://hub.spigotmc.org/javadocs/spigot/</paper.javadocs>
 
         <!-- Default settings for sonarcloud.io -->
@@ -174,7 +171,7 @@
                 <!-- Code Coverage Reports -->
                 <groupId>org.jacoco</groupId>
                 <artifactId>jacoco-maven-plugin</artifactId>
-                <version>0.8.14</version>
+                <version>0.8.15</version>
 
                 <executions>
                     <execution>
@@ -200,7 +197,7 @@
                 <!-- Dependency shading -->
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-shade-plugin</artifactId>
-                <version>3.6.0</version>
+                <version>3.6.2</version>
 
                 <configuration>
                     <!-- Relocate these to avoid clashes and conflicts -->
@@ -221,6 +218,14 @@
 
                     <!-- Exclude unneeded metadata files from shaded dependencies -->
                     <filters>
+                        <!-- Vendored public-API ItemUtils replaces the old NMS version detector. -->
+                        <filter>
+                            <artifact>com.github.Slimefun.dough:dough-api</artifact>
+                            <excludes>
+                                <exclude>io/github/bakedlibs/dough/items/ItemUtils.class</exclude>
+                                <exclude>io/github/bakedlibs/dough/items/ItemUtils$*.class</exclude>
+                            </excludes>
+                        </filter>
                         <filter>
                             <artifact>*:*</artifact>
                             <excludes>
@@ -333,6 +338,7 @@
 
                 <includes>
                     <include>LICENSE</include>
+                    <include>LICENSES/**</include>
                 </includes>
             </resource>
         </resources>
@@ -378,7 +384,7 @@
         <dependency>
             <groupId>io.papermc.paper</groupId>
             <artifactId>paper-api</artifactId>
-            <version>${paper.version}-R0.1-SNAPSHOT</version>
+            <version>${paper.version}</version>
             <scope>provided</scope>
         </dependency>
 
@@ -391,7 +397,7 @@
         <dependency>
             <groupId>org.mockito</groupId>
             <artifactId>mockito-core</artifactId>
-            <version>5.15.2</version>
+            <version>5.24.0</version>
             <scope>test</scope>
         </dependency>
         <dependency>
@@ -403,8 +409,8 @@
         <!-- This needs to be before Spigot because MockBukkit will fail otherwise. -->
         <dependency>
             <groupId>org.mockbukkit.mockbukkit</groupId>
-            <artifactId>mockbukkit-v1.21</artifactId>
-            <version>4.116.3</version>
+            <artifactId>mockbukkit-v26.2</artifactId>
+            <version>4.117.0</version>
             <scope>test</scope>
 
             <exclusions>

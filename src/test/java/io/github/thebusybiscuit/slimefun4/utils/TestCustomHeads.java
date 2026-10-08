@@ -30,6 +30,7 @@ class TestCustomHeads {
         String base64 = Base64.getEncoder().encodeToString(json.getBytes(StandardCharsets.UTF_8));
         PlayerProfile profile = CustomHeads.getProfile(hash);
         Assertions.assertNotNull(profile.getTextures().getSkin());
+        Assertions.assertEquals(profile.getTextures().getSkin(), CustomHeads.getProfile(CustomHeads.encodeProfile(profile)).getTextures().getSkin());
         Assertions.assertEquals(CustomHeads.getProfile(base64).getTextures().getSkin(), profile.getTextures().getSkin());
         Assertions.assertEquals(CustomHeads.getProfile(base64).getUniqueId(), CustomHeads.getProfile(hash).getUniqueId());
     }

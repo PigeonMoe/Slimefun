@@ -28,6 +28,7 @@ import org.bukkit.persistence.PersistentDataType;
 
 import io.github.thebusybiscuit.slimefun4.core.services.localization.Language;
 import io.github.thebusybiscuit.slimefun4.core.services.localization.LanguageFile;
+import io.github.thebusybiscuit.slimefun4.core.services.localization.LanguagePreset;
 import io.github.thebusybiscuit.slimefun4.core.services.localization.SlimefunLocalization;
 import io.github.thebusybiscuit.slimefun4.implementation.Slimefun;
 import io.github.thebusybiscuit.slimefun4.utils.NumberUtils;
@@ -64,6 +65,11 @@ public class LocalizationService extends SlimefunLocalization {
         if (serverDefaultLanguage != null) {
             translationsEnabled = Slimefun.getCfg().getBoolean("options.enable-translations");
 
+            serverDefaultLanguage = LanguagePreset.normalize(serverDefaultLanguage);
+            if (!hasLanguage(serverDefaultLanguage)) {
+                plugin.getLogger().warning("Unknown language; falling back to en: " + serverDefaultLanguage);
+                serverDefaultLanguage = "en";
+            }
             defaultLanguage = new Language(serverDefaultLanguage, "11b3188fd44902f72602bd7c2141f5a70673a411adb3d81862c69e536166b");
             defaultLanguage.setFile(LanguageFile.MESSAGES, getConfig().getConfiguration());
 
@@ -114,7 +120,7 @@ public class LocalizationService extends SlimefunLocalization {
     @Nullable
     public Language getLanguage(@Nonnull String id) {
         Validate.notNull(id, "The language id cannot be null");
-        return languages.get(id);
+        return languages.get(LanguagePreset.normalize(id));
     }
 
     @Override
@@ -128,7 +134,7 @@ public class LocalizationService extends SlimefunLocalization {
         Validate.notNull(id, "The language id cannot be null");
 
         // Checks if our jar files contains a messages.yml file for that language
-        String file = LanguageFile.MESSAGES.getFilePath(id);
+        String file = LanguageFile.MESSAGES.getFilePath(LanguagePreset.normalize(id));
         return !getConfigurationFromStream(file, null).getKeys(false).isEmpty();
     }
 
@@ -142,7 +148,7 @@ public class LocalizationService extends SlimefunLocalization {
      */
     public boolean isLanguageLoaded(@Nonnull String id) {
         Validate.notNull(id, "The language cannot be null!");
-        return languages.containsKey(id);
+        return languages.containsKey(LanguagePreset.normalize(id));
     }
 
     @Override
@@ -154,17 +160,26 @@ public class LocalizationService extends SlimefunLocalization {
     public Language getLanguage(@Nonnull Player p) {
         Validate.notNull(p, "Player cannot be null!");
 
+        if (!translationsEnabled) {
+            return getDefaultLanguage();
+        }
         PersistentDataContainer container = p.getPersistentDataContainer();
         String language = container.get(languageKey, PersistentDataType.STRING);
 
         if (language != null) {
-            Language lang = languages.get(language);
+            Language lang = getLanguage(language);
 
             if (lang != null) {
                 return lang;
             }
         }
 
+        if (Slimefun.getCfg().getBoolean("options.auto-detect-language")) {
+            Language clientLanguage = getLanguage(p.locale().toLanguageTag());
+            if (clientLanguage != null) {
+                return clientLanguage;
+            }
+        }
         return getDefaultLanguage();
     }
 

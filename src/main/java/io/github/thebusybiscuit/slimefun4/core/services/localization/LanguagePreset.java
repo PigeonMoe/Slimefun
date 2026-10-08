@@ -60,6 +60,24 @@ public enum LanguagePreset {
     SINHALA("si-LK", false, "4b26572c48344ee1fc4b2d89fd0866989a3e256ce19ee05384bc3ca76f2409c5"),
     LITHUANIAN("lt", false, "de3d829741976d8330d6947d6eea64ee57aed2f26286ff63844e9089367c11");
 
+    /** Normalize client locales and configured aliases to embedded language IDs. */
+    public static @Nonnull String normalize(@Nonnull String locale) {
+        String tag = locale.replace('_', '-');
+        String lower = tag.toLowerCase(java.util.Locale.ROOT);
+        if (lower.equals("zh") || lower.equals("zh-cn") || lower.equals("zh-sg") || lower.startsWith("zh-hans")) {
+            return "zh-CN";
+        }
+        if (lower.equals("zh-tw") || lower.equals("zh-hk") || lower.equals("zh-mo") || lower.startsWith("zh-hant")) {
+            return "zh-TW";
+        }
+        for (LanguagePreset language : values()) {
+            if (language.id.equalsIgnoreCase(tag)) {
+                return language.id;
+            }
+        }
+        return lower.split("-", 2)[0];
+    }
+
     private final String id;
     private final boolean releaseReady;
     private final String textureHash;
