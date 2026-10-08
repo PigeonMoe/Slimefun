@@ -1,152 +1,52 @@
-name: Bug Report
-description: Report a Bug or an Issue with Slimefun 4.
-labels: ['🎯 Needs testing', '🐞 Bug Report']
-
+name: 问题反馈
+description: 反馈 PigeonMoe 社区分支的问题或兼容性故障。
 body:
-- type: markdown
-  attributes:
-    value: |
-      ## 👋 Welcome to the Slimefun Bug Tracker
-      If you need any help to identify the problem, visit our [Discord server](https://discord.gg/slimefun) and see if others experience a similar issue.
-      Also take a look at our [Troubleshooting Guide](https://github.com/Slimefun/Slimefun4/wiki/How-to-report-bugs) and the list of [existing Issues](https://github.com/Slimefun/Slimefun4/issues).
-      <br /><strong><i>Fields marked with an asterisk (*) are required.</i></strong>
-      <br />
-
-- id: checklist
-  type: checkboxes
-  attributes:
-    label: '❗ Checklist'
-    description: Please go through this checklist before creating the issue.
-    options:
-    - label: I am using the official english version of Slimefun and did not modify the jar.
+  - type: markdown
+    attributes:
+      value: |
+        这里是 PigeonMoe/Slimefun 社区 Fork 的反馈入口。请先搜索本仓库已有问题，并提供复现步骤及 `/sf versions` 的完整输出。
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: 提交前检查
+      options:
+        - label: 我使用的是 PigeonMoe/Slimefun 对应 Minecraft 分支的构建。
+          required: true
+        - label: 我已搜索本仓库的已有问题。
+          required: true
+  - type: dropdown
+    id: minecraft-version
+    attributes:
+      label: Minecraft 版本分支
+      options:
+        - '1.21.11'
+        - '26.2'
+        - 其他（请在版本输出中说明）
+    validations:
       required: true
-    - label: I downloaded the official version from the new build site [Blob Builds](https://blob.build/).
+  - type: textarea
+    id: versions
+    attributes:
+      label: 完整版本信息
+      description: 粘贴 /sf versions 输出，注明 Paper 构建、Java、Slimefun 提交或构建来源，以及附属插件版本。
+      render: text
+    validations:
       required: true
-    - label: I am using an up to date "DEV" (not "RC") version of Slimefun.
+  - type: textarea
+    id: description
+    attributes:
+      label: 问题描述及预期行为
+    validations:
       required: true
-    - label: I am aware that issues related to Slimefun addons need to be reported on their bug trackers and not here.
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: 复现步骤
+      description: 说明是否使用已有存档，能否在独立测试服复现，以及相关机器、物品或配方。
+    validations:
       required: true
-    - label: I searched for similar open issues and could not find an existing bug report on this.
-      required: true
-
-- id: description
-  type: textarea
-  validations:
-    required: true
-  attributes:
-    label: '📍 Description'
-    description: |
-      A clear and detailed description of what went wrong.
-      The more information you can provide, the easier we can handle this problem.
-    placeholder: |
-      When doing [...] I experienced [...], I am pretty sure this is not intended and should be fixed.
-
-- id: reproduction-steps
-  type: textarea
-  validations:
-    required: true
-  attributes:
-    label: '📑 Reproduction Steps'
-    description: |
-      Tell us the exact steps to reproduce this issue, the more detailed the easier we can reproduce it.
-    placeholder: |
-      1. Do [...]
-      2. Then do [...]
-      3. Now [...] happens
-
-- id: expected-behaviour
-  type: textarea
-  validations:
-    required: true
-  attributes:
-    label: '💡 Expected Behavior'
-    description: |
-      What were you expecting to happen?
-      What do you think would have been the correct behaviour?
-    placeholder: |
-      I expected [...] to happen.
-
-- id: media
-  type: textarea
-  attributes:
-    label: '📷 Screenshots / Videos'
-    description: |
-      The best way to illustrate in an issue is by recording a Video or taking a Screenshot.
-      If you can capture any footage of the bug happening, it would help us out a lot!
-    placeholder: |
-      Drag and drop an image or video onto this field to upload it.
-
-- id: server-log
-  type: input
-  attributes:
-    label: '📜 Server Log'
-    description: |
-      Take a look at your Server Log and upload any error messages from Slimefun to a pasting site (e.g. https://pastebin.com/).
-      If you are unsure about it, post your full log, you can find it under /logs/latest.log
-    placeholder: https://pastebin.com/...
-
-- id: error-reports
-  type: input
-  attributes:
-    label: '📂 `/error-reports/` folder'
-    description: |
-      Check the folder `/plugins/Slimefun/error-reports/` and upload any files inside that folder to a pasting site (e.g. https://pastebin.com/).
-    placeholder: https://pastebin.com/...
-
-- id: server-software
-  type: dropdown
-  validations:
-    required: true
-  attributes:
-    label: '💻 Server Software'
-    description: 'Please select the software your Server is running on'
-    options:
-      - Spigot
-      - Paper
-      - Purpur
-      - Airplane
-      - Other (please specify in your description)
-
-- id: minecraft-version
-  type: dropdown
-  validations:
-    required: true
-  attributes:
-    label: '🎮 Minecraft Version'
-    description: 'Please select the Minecraft version of the server'
-    options:
-      - 1.20.x
-      - 1.19.x
-      - 1.18.x
-      - 1.17.x
-      - 1.16.x
-      - (Older versions are not supported)
-
-- id: slimefun-version
-  type: textarea
-  validations:
-    required: true
-  attributes:
-    label: '⭐ Slimefun version'
-    description: |
-      **"latest" is not a version number, we need the exact version.**
-      We recommend running "/sf versions" and uploading a screenshot of that.
-      Make sure that the screenshot covers the entire output of that command.
-    placeholder: Slimefun version [...]
-
-- id: other-versions
-  type: textarea
-  attributes:
-    label: '🧭 Other plugins'
-    description: |
-      If your issue is related to another plugin, make sure to include this here!
-    placeholder: The issue is related to plugin [...], version [...]
-
-- type: markdown
-  attributes:
-    value: |
-      ## ❤️ Thank you for submitting your bug report!
-      If you find any additional info that can help to identify this problem, don't hesitate to comment on your issue!
-      Any additional info can help us fix this bug faster.
-      In the meantime, try visiting our [Discord server](https://discord.gg/slimefun).
-      Perhaps someone else has experienced a similar issue.
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志与截图
+      description: 提供相关错误、plugins/Slimefun/error-reports 中的报告或截图；请隐藏令牌和个人信息。
