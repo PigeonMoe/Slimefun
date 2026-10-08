@@ -11,6 +11,8 @@ class TestMinecraftVersion {
     @Test
     @DisplayName("Resolve the supported 1.21.11 API boundary")
     void test12111Boundary() {
+        Assertions.assertEquals(MinecraftVersion.MINECRAFT_1_21_11, MinecraftVersion.fromString("1.21.11"));
+        Assertions.assertEquals(MinecraftVersion.UNKNOWN, MinecraftVersion.fromString("1.21.11-pre1"));
         Assertions.assertTrue(MinecraftVersion.MINECRAFT_1_21_11.isMinecraftVersion(21, 11));
         Assertions.assertFalse(MinecraftVersion.MINECRAFT_1_21.isMinecraftVersion(21, 11));
         Assertions.assertFalse(MinecraftVersion.MINECRAFT_1_21_11.isMinecraftVersion(21, 10));

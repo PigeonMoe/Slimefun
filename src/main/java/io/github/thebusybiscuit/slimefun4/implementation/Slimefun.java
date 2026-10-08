@@ -523,37 +523,13 @@ public class Slimefun extends JavaPlugin implements SlimefunAddon {
                 return true;
             }
 
-            // Now check the actual Version of Minecraft
-            int version = PaperLib.getMinecraftVersion();
-            int patchVersion = PaperLib.getMinecraftPatchVersion();
-
-            if (version > 0) {
-                // Check all supported versions of Minecraft
-                for (MinecraftVersion supportedVersion : MinecraftVersion.values()) {
-                    if (supportedVersion.isMinecraftVersion(version, patchVersion)) {
-                        minecraftVersion = supportedVersion;
-                        if (supportedVersion.isBefore(MinecraftVersion.MINECRAFT_1_21_11)) {
-                            StartupWarnings.invalidMinecraftVersion(getLogger(), version, getDescription().getVersion());
-                            return true;
-                        }
-                        return false;
-                    }
-                }
-
-                // Looks like you are using an unsupported Minecraft Version
-                StartupWarnings.invalidMinecraftVersion(getLogger(), version, getDescription().getVersion());
-                return true;
-            } else {
-                getLogger().log(Level.WARNING, "We could not determine the version of Minecraft you were using? ({0})", Bukkit.getVersion());
-
-                /*
-                 * If we are unsure about it, we will assume "supported".
-                 * They could be using a non-Bukkit based Software which still
-                 * might support Bukkit-based plugins.
-                 * Use at your own risk in this case.
-                 */
+            String release = Bukkit.getMinecraftVersion();
+            minecraftVersion = MinecraftVersion.fromString(release);
+            if (minecraftVersion == MinecraftVersion.MINECRAFT_1_21_11) {
                 return false;
             }
+            StartupWarnings.invalidMinecraftVersion(getLogger(), release, getDescription().getVersion());
+            return true;
         } catch (Exception | LinkageError x) {
             getLogger().log(Level.SEVERE, x, () -> "Error: Could not determine Environment or version of Minecraft for Slimefun v" + getDescription().getVersion());
 

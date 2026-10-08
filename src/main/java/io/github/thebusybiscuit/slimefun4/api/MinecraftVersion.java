@@ -64,10 +64,7 @@ public enum MinecraftVersion {
     /** Minecraft Java Edition 1.21.11. */
     MINECRAFT_1_21_11(21, 11, 11, "1.21.11"),
 
-    /**
-     * This constant represents an exceptional state in which we were unable
-     * to identify the Minecraft Version we are using
-     */
+    /** The running release could not be identified. */
     UNKNOWN("Unknown", true),
 
     /**
@@ -222,6 +219,42 @@ public enum MinecraftVersion {
             && this.majorVersion == minecraftVersion
             && (this.minorVersion == -1 || this.minorVersion <= patchVersion)
                 && (this.maxMinorVersion == -1 || patchVersion <= this.maxMinorVersion);
+    }
+
+    /**
+     * Resolves both legacy 1.x.y and year-based 26.x.y release identifiers.
+     * Unknown releases and prereleases are never silently treated as supported.
+     *
+     * @param version Minecraft's release identifier (without Bukkit's build suffix)
+     * @return The matching API group, or UNKNOWN
+     */
+    public static @Nonnull MinecraftVersion fromString(@Nonnull String version) {
+        Validate.notNull(version, "The version must not be null");
+        if (!version.matches("[0-9]{1,2}\\.[0-9]{1,2}(?:\\.[0-9]{1,2})?")) {
+            return UNKNOWN;
+        }
+        String[] parts = version.split("\\.");
+        int major;
+        int minor;
+        if (parts[0].equals("1")) {
+            major = Integer.parseInt(parts[1]);
+            minor = parts.length == 3 ? Integer.parseInt(parts[2]) : 0;
+            if (major > 21) {
+                return UNKNOWN;
+            }
+        } else {
+            major = Integer.parseInt(parts[0]);
+            minor = Integer.parseInt(parts[1]);
+            if (major < 26) {
+                return UNKNOWN;
+            }
+        }
+        for (MinecraftVersion candidate : values()) {
+            if (candidate.isMinecraftVersion(major, minor)) {
+                return candidate;
+            }
+        }
+        return UNKNOWN;
     }
 
     /**
