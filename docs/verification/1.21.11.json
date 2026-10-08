@@ -1,0 +1,24 @@
+{
+  "date": "2026-10-08",
+  "minecraft": "1.21.11",
+  "paper_build": 132,
+  "java": 21,
+  "unit_tests": {
+    "tests": 1789,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "runtime": {
+    "minecraft": "1.21.11",
+    "paper_sha256": "5ffef465eeeb5f2a3c23a24419d97c51afd7dbb4923ff42df9a3f58bba1ccfba",
+    "plugin_sha256": "3fc5ca44882cfb5b17c354005245bb1d6d173dedeb4398df897258ab431180a2",
+    "success": true,
+    "log": "target/runtime-smoke/1.21.11/console.log",
+    "errors": [],
+    "probes": [
+      "[17:52:15 INFO]: [SlimefunRuntimeSmoke] SLIMEFUN_SMOKE_OK minecraft=1.21.11 items=555"
+    ]
+  },
+  "scope": "Isolated Paper probes only. No client login, complete gameplay, addon or old-world migration acceptance."
+}
