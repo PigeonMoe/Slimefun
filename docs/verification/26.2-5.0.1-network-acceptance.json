@@ -1,0 +1,66 @@
+{
+  "date": "2026-10-09",
+  "version": "5.0.1",
+  "source_ref": "v5.0.1-mc26.2",
+  "plugin_sha256": "a755bfeb3f32a9e23d385e099151dc1dd486d95fc6dddedcb4928c87637825e1",
+  "evidence_source": "Server-maintenance chat report; plugin maintainer did not independently access or re-run the remote server.",
+  "deployment": {
+    "backends": [
+      "hub",
+      "survival"
+    ],
+    "pm_sync": "0.1.2",
+    "husk_sync": "4.0.0",
+    "minecraft": "26.2"
+  },
+  "reported_checks": [
+    {
+      "check": "Research unlock survived survival to hub transfer",
+      "research": "slimefun:backpacks",
+      "result": "passed"
+    },
+    {
+      "check": "Open SMALL_BACKPACK transferred with complete container encoding unchanged",
+      "backpack_id": 0,
+      "size": 9,
+      "nonempty_slots": 1,
+      "contents": {
+        "material": "DIAMOND",
+        "amount": 17,
+        "custom_data": "pm_network_probe:1b"
+      },
+      "container_sha_equal_reported": true,
+      "result": "passed"
+    },
+    {
+      "check": "SQL snapshot checksum validated and decoded Slimefun external profile",
+      "research_present": "slimefun:backpacks",
+      "backpack_id": 0,
+      "size": 9,
+      "nonempty_slots": 1,
+      "guideIssued": true,
+      "result": "passed"
+    },
+    {
+      "check": "Guide not duplicated across backends",
+      "result": "passed"
+    },
+    {
+      "check": "Both backends restarted and public reconnect retained the backpack contents",
+      "amount": 17,
+      "material": "DIAMOND",
+      "result": "passed"
+    }
+  ],
+  "context_checks_reported_by_coordinator": [
+    "30 health and existing equipment retained after restart/reconnect; these belong to the shared player snapshot rather than a separate Slimefun health subsystem."
+  ],
+  "not_established_by_this_report": [
+    "GPS waypoint creation/transfer/server-local persistence was not exercised.",
+    "World machines were not modified; no complete machine/energy/cargo gameplay acceptance.",
+    "No claim that every item component, addon, race/timeout or rollback scenario was exercised.",
+    "Hidden state retained was reported without identifying its owner/schema; not classified as a Slimefun setting check.",
+    "Exact container digest values and remote log/SQL artifacts were not included in the notification."
+  ],
+  "artifact_policy": "Formal plugin and corresponding source JARs remain frozen. This report supplements the original offline verification.json and does not replace its historical scope."
+}
