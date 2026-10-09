@@ -234,6 +234,7 @@ public class Research implements Keyed {
      */
     @ParametersAreNonnullByDefault
     public void unlockFromGuide(SlimefunGuideImplementation guide, Player player, PlayerProfile profile, SlimefunItem sfItem, ItemGroup itemGroup, int page) {
+        if (!profile.isAccessible()) return;
         if (!Slimefun.getRegistry().getCurrentlyResearchingPlayers().contains(player.getUniqueId())) {
             if (profile.hasUnlocked(this)) {
                 guide.openItemGroup(profile, itemGroup, page);

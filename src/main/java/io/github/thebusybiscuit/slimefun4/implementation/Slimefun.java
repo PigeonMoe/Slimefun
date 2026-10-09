@@ -203,6 +203,7 @@ public class Slimefun extends JavaPlugin implements SlimefunAddon {
 
     // Data storage
     private Storage playerStorage;
+    private io.github.thebusybiscuit.slimefun4.core.services.sync.PlayerSyncService playerSync;
 
     // Listeners that need to be accessed elsewhere
     private final GrapplingHookListener grapplingHookListener = new GrapplingHookListener();
@@ -342,6 +343,11 @@ public class Slimefun extends JavaPlugin implements SlimefunAddon {
         PostSetup.setupWiki();
 
         logger.log(Level.INFO, "Registering listeners...");
+        if (config.getBoolean("player-sync.enabled")) {
+            playerSync = new io.github.thebusybiscuit.slimefun4.core.services.sync.PlayerSyncService(this,
+                java.nio.file.Path.of("data-storage/Slimefun"), config.getString("player-sync.server-id"));
+            playerSync.register();
+        }
         registerListeners();
 
         // Initiating various Stuff and all items with a slight delay (0ms after the Server finished loading)
@@ -733,6 +739,10 @@ public class Slimefun extends JavaPlugin implements SlimefunAddon {
     public static @Nonnull String getVersion() {
         validateInstance();
         return instance.getDescription().getVersion();
+    }
+
+    public static @Nullable io.github.thebusybiscuit.slimefun4.core.services.sync.PlayerSyncService getPlayerSyncService() {
+        return instance().playerSync;
     }
 
     public static @Nonnull Config getCfg() {

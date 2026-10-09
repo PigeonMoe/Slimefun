@@ -69,6 +69,20 @@ abstract class AbstractCraftingTable extends MultiBlockMachine {
         return fakeInv;
     }
 
+    protected boolean canUpgradeBackpack(Player player, Inventory inventory) {
+        var sync = Slimefun.getPlayerSyncService();
+        if (sync == null) return true;
+        if (sync.blocked(player)) return false;
+        for (ItemStack item : inventory.getContents()) {
+            if (SlimefunItem.getByItem(item) instanceof SlimefunBackpack
+                && !io.github.thebusybiscuit.slimefun4.implementation.listeners.BackpackListener.isOwner(player, item)) {
+                player.sendMessage("§c网络模式下只能升级本人背包。");
+                return false;
+            }
+        }
+        return true;
+    }
+
     @ParametersAreNonnullByDefault
     protected void upgradeBackpack(Player p, Inventory inv, SlimefunBackpack backpack, ItemStack output) {
         ItemStack input = null;

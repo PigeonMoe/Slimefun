@@ -1,0 +1,35 @@
+{
+  "date": "2026-10-09",
+  "version": "5.0.1",
+  "source_ref": "v5.0.1-mc26.2",
+  "branch": "26.2",
+  "minecraft": "26.2",
+  "paper_api": "26.2.build.132-stable",
+  "java": "25.0.4.1",
+  "compile_release": 25,
+  "unit_tests": {
+    "tests": 1911,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "new_sync_tests": 23,
+  "build": "mvn -o -B -ntp verify (initial clean verify plus subsequent regression runs)",
+  "plugin_sha256": "a755bfeb3f32a9e23d385e099151dc1dd486d95fc6dddedcb4928c87637825e1",
+  "source_sha256": "c634271fc83bd0771da2ad74d789e3cfd9b62264be10c2a939864d38adfedc22",
+  "participant": {
+    "api": 1,
+    "service": "moe.pigeon.slimefun.api.PlayerSyncBridge",
+    "section": "slimefun",
+    "schema": "SFP1",
+    "default_enabled": false
+  },
+  "validation": {
+    "local_server_started": false,
+    "remote_accessed": false,
+    "worlds_modified": false,
+    "real_paper_5_0_1_verified": false,
+    "real_sql_two_backend_acceptance": "delegated to server chat, pending its evidence"
+  },
+  "scope": "Offline unit tests and shaded artifacts only. MockBukkit item serialization does not establish Paper full-component or live SQL/network behavior. Historical 5.0.0 runtime probe is not evidence for this build."
+}

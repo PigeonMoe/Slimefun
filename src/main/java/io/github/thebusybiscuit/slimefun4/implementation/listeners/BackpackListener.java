@@ -127,6 +127,16 @@ public class BackpackListener implements Listener {
         }
     }
 
+    public static boolean isOwner(Player player, ItemStack item) {
+        if (item == null || !item.hasItemMeta() || !item.getItemMeta().hasLore()) return false;
+        String prefix = ChatColor.GRAY + "ID: ";
+        for (String line : item.getItemMeta().getLore()) {
+            if (line.equals(prefix + "<ID>")) return true;
+            if (line.startsWith(prefix)) return line.startsWith(prefix + player.getUniqueId() + "#");
+        }
+        return false;
+    }
+
     private boolean isAllowed(@Nonnull SlimefunBackpack backpack, @Nullable ItemStack item) {
         if (item == null || item.getType() == Material.AIR) {
             return true;
@@ -137,6 +147,10 @@ public class BackpackListener implements Listener {
 
     @ParametersAreNonnullByDefault
     public void openBackpack(Player p, ItemStack item, SlimefunBackpack backpack) {
+        if (Slimefun.getPlayerSyncService() != null && (Slimefun.getPlayerSyncService().blocked(p) || !isOwner(p, item))) {
+            p.sendMessage("§c网络模式下只能使用已加载的本人背包。");
+            return;
+        }
         if (item.getAmount() == 1) {
             if (backpack.canUse(p, true) && !PlayerProfile.get(p, profile -> openBackpack(p, item, profile, backpack.getSize()))) {
                 Slimefun.getLocalization().sendMessage(p, "messages.opening-backpack");

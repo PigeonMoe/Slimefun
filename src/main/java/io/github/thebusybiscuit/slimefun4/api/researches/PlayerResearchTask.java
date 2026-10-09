@@ -55,6 +55,7 @@ public class PlayerResearchTask implements Consumer<PlayerProfile> {
 
     @Override
     public void accept(PlayerProfile profile) {
+        if (!profile.isAccessible()) return;
         if (!profile.hasUnlocked(research)) {
             Player p = profile.getPlayer();
 
@@ -63,7 +64,8 @@ public class PlayerResearchTask implements Consumer<PlayerProfile> {
             }
 
             if (!isInstant) {
-                Slimefun.runSync(() -> {
+                schedule(() -> {
+                    if (Slimefun.getPlayerSyncService() != null && !p.isOnline()) return;
                     SoundEffect.PLAYER_RESEARCHING_SOUND.playFor(p);
                     Slimefun.getLocalization().sendMessage(p, "messages.research.progress", true, msg -> msg.replace(PLACEHOLDER, research.getName(p)).replace("%progress%", "0%"));
                 }, 5L);
@@ -74,25 +76,38 @@ public class PlayerResearchTask implements Consumer<PlayerProfile> {
 
             if (!event.isCancelled()) {
                 if (isInstant) {
-                    Slimefun.runSync(() -> unlockResearch(p, profile));
+                    if (Slimefun.getPlayerSyncService() != null) unlockResearch(p, profile);
+                    else Slimefun.runSync(() -> unlockResearch(p, profile));
                 } else if (Slimefun.getRegistry().getCurrentlyResearchingPlayers().add(p.getUniqueId())) {
                     Slimefun.getLocalization().sendMessage(p, "messages.research.start", true, msg -> msg.replace(PLACEHOLDER, research.getName(p)));
                     sendUpdateMessage(p);
 
-                    Slimefun.runSync(() -> {
-                        unlockResearch(p, profile);
-                        Slimefun.getRegistry().getCurrentlyResearchingPlayers().remove(p.getUniqueId());
+                    schedule(() -> {
+                        if (profile.isAccessible()) {
+                            try {
+                                unlockResearch(p, profile);
+                            } finally {
+                                if (profile.isAccessible()) Slimefun.getRegistry().getCurrentlyResearchingPlayers().remove(p.getUniqueId());
+                            }
+                        }
                     }, (RESEARCH_PROGRESS.length + 1) * 20L);
                 }
             }
         }
     }
 
+    private static void schedule(Runnable task, long delay) {
+        // Use actual scheduler semantics for network draining, including MockBukkit timer tests.
+        if (Slimefun.getPlayerSyncService() != null) Bukkit.getScheduler().runTaskLater(Slimefun.instance(), task, delay);
+        else Slimefun.runSync(task, delay);
+    }
+
     private void sendUpdateMessage(@Nonnull Player p) {
         for (int i = 1; i < RESEARCH_PROGRESS.length + 1; i++) {
             int index = i;
 
-            Slimefun.runSync(() -> {
+            schedule(() -> {
+                if (Slimefun.getPlayerSyncService() != null && !p.isOnline()) return;
                 SoundEffect.PLAYER_RESEARCHING_SOUND.playFor(p);
 
                 Slimefun.getLocalization().sendMessage(p, "messages.research.progress", true, msg -> {
@@ -104,7 +119,9 @@ public class PlayerResearchTask implements Consumer<PlayerProfile> {
     }
 
     private void unlockResearch(@Nonnull Player p, @Nonnull PlayerProfile profile) {
+        if (!profile.isAccessible()) return;
         profile.setResearched(research, true);
+        if (Slimefun.getPlayerSyncService() != null && !p.isOnline()) return;
         Slimefun.getLocalization().sendMessage(p, "messages.unlocked", true, msg -> msg.replace(PLACEHOLDER, research.getName(p)));
         onFinish(p);
 

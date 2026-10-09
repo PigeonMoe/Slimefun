@@ -1,3 +1,11 @@
+# 5.0.1 / Paper 26.2 — PigeonMoe（2026-10-09）
+
+- 可选 PM-Sync API v1：研究、全部背包原生物品字节与首次全网指南标记纳入同一权威快照；玩家 PDC 设置沿 HuskSync 一同同步。
+- 目标加载成功仍锁定，等待协调方确认；源服研究/GUI 排空后捕获，SQL 成功后清缓存。网络模式不把旧 playerfiles/空档写回。
+- 严格首次迁移、旧会话隔离、损坏/超限/缺失 section 拒绝，保留未知附属研究、旧重复研究 ID 与稀疏背包 ID。
+- GPS 继续按本服和世界保存，未挂载世界记录保留；网络模式暂禁借用他人的背包，单服默认关闭同步。
+- 详见 `docs/PLAYER-SYNC.md`，包含覆盖、协议、升级和回退；保留 GPLv3 来源与许可证。完整 Slimefun5 功能、第三方附属插件兼容、真实双服事务验收不能由本次离线测试推定。
+
 # Table of contents
 - [Release Candidate 38 (TBD)](#release-candidate-38-tbd)
 - [Release Candidate 37 (25 Feb 2024)](#release-candidate-37-25-feb-2024)

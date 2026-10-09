@@ -31,6 +31,7 @@ public class SlimefunGuideListener implements Listener {
 
     @EventHandler
     public void onJoin(PlayerJoinEvent e) {
+        if (Slimefun.getPlayerSyncService() != null) return;
         if (giveOnFirstJoin && !e.getPlayer().hasPlayedBefore()) {
             Player p = e.getPlayer();
 
@@ -47,6 +48,7 @@ public class SlimefunGuideListener implements Listener {
     public void onInteract(PlayerRightClickEvent e) {
         Player p = e.getPlayer();
 
+        if (Slimefun.getPlayerSyncService() != null && Slimefun.getPlayerSyncService().blocked(p)) { e.cancel(); return; }
         if (tryOpenGuide(p, e, SlimefunGuideMode.SURVIVAL_MODE) == Result.ALLOW) {
             if (p.isSneaking()) {
                 SlimefunGuideSettings.openSettings(p, e.getItem());

@@ -50,6 +50,7 @@ public class AutoSavingService {
      * that were marked for deletion.
      */
     private void saveAllPlayers() {
+        if (Slimefun.getPlayerSyncService() != null) return;
         Iterator<PlayerProfile> iterator = PlayerProfile.iterator();
         int players = 0;
 

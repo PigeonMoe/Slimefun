@@ -91,3 +91,10 @@ research-ranks:
 - Great Master
 - Proficient Master
 - The Chosen One
+
+# Opt-in for a PM-Sync network. Both backends must enable this together.
+# A missing coordinator/failed load keeps profiles locked; never falls back to legacy files.
+player-sync:
+  enabled: false
+  # Must equal PM-Sync's server-id; set hub or survival before enabling.
+  server-id: ''

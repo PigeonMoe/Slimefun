@@ -261,6 +261,8 @@ public class ChestMenu {
     public void open(Player... players) {
         setup();
         for (Player p : players) {
+            var sync = io.github.thebusybiscuit.slimefun4.implementation.Slimefun.getPlayerSyncService();
+            if (sync != null && sync.blocked(p)) continue;
             p.openInventory(this.inv);
             MenuListener.menus.put(p.getUniqueId(), this);
             if (open != null)

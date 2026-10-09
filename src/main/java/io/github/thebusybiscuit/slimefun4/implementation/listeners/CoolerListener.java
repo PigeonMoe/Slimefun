@@ -90,6 +90,7 @@ public class CoolerListener implements Listener {
      *            The {@link Cooler} {@link ItemStack} to take the {@link Juice} from
      */
     private void takeJuiceFromCooler(@Nonnull Player p, @Nonnull ItemStack cooler) {
+        if (Slimefun.getPlayerSyncService() != null && (Slimefun.getPlayerSyncService().blocked(p) || !BackpackListener.isOwner(p, cooler))) return;
         PlayerProfile.getBackpack(cooler, backpack -> {
             if (backpack != null) {
                 Slimefun.runSync(() -> consumeJuice(p, cooler, backpack));
@@ -98,6 +99,7 @@ public class CoolerListener implements Listener {
     }
 
     private boolean consumeJuice(@Nonnull Player p, @Nonnull ItemStack coolerItem, @Nonnull PlayerBackpack backpack) {
+        if (Slimefun.getPlayerSyncService() != null && (Slimefun.getPlayerSyncService().blocked(p) || !backpack.getOwnerId().equals(p.getUniqueId()))) return false;
         Inventory inv = backpack.getInventory();
         int slot = -1;
 

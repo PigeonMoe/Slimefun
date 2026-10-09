@@ -7,8 +7,8 @@
     <groupId>com.github.slimefun</groupId>
     <artifactId>Slimefun</artifactId>
 
-    <!-- A community snapshot is not an official Dev/RC build; upstream updates stay disabled. -->
-    <version>5.0.0-SNAPSHOT</version>
+    <!-- Community releases are independent of upstream Dev/RC builds; upstream updates stay disabled. -->
+    <version>5.0.1</version>
     <inceptionYear>2013</inceptionYear>
     <packaging>jar</packaging>
 

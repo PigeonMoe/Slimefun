@@ -28,6 +28,8 @@ public class MenuListener implements Listener {
         plugin.getServer().getPluginManager().registerEvents(this, plugin);
     }
 
+    public static boolean hasOpenMenu(Player player) { return menus.containsKey(player.getUniqueId()); }
+
     @EventHandler
     public void onClose(InventoryCloseEvent e) {
         ChestMenu menu = menus.remove(e.getPlayer().getUniqueId());
@@ -39,6 +41,11 @@ public class MenuListener implements Listener {
 
     @EventHandler
     public void onClick(InventoryClickEvent e) {
+        if (io.github.thebusybiscuit.slimefun4.implementation.Slimefun.getPlayerSyncService() != null
+            && io.github.thebusybiscuit.slimefun4.implementation.Slimefun.getPlayerSyncService().blocked((Player) e.getWhoClicked())) {
+            e.setCancelled(true);
+            return;
+        }
         ChestMenu menu = menus.get(e.getWhoClicked().getUniqueId());
 
         if (menu != null) {

@@ -157,7 +157,8 @@ public class PlayerBackpack {
     public void open(Player... players) {
         Slimefun.runSync(() -> {
             for (Player p : players) {
-                p.openInventory(inventory);
+                var sync = Slimefun.getPlayerSyncService();
+                if (sync == null || (!sync.blocked(p) && p.getUniqueId().equals(ownerId))) p.openInventory(inventory);
             }
         });
     }
@@ -173,7 +174,7 @@ public class PlayerBackpack {
     public CompletableFuture<Void> closeForAll() {
         CompletableFuture<Void> future = new CompletableFuture<>();
 
-        Slimefun.runSync(() -> {
+        Runnable close = () -> {
             Iterator<HumanEntity> iterator = new ArrayList<>(inventory.getViewers()).iterator();
 
             while (iterator.hasNext()) {
@@ -181,7 +182,9 @@ public class PlayerBackpack {
             }
 
             future.complete(null);
-        });
+        };
+        if (Bukkit.isPrimaryThread()) close.run();
+        else Slimefun.runSync(close);
 
         return future;
     }

@@ -8,9 +8,13 @@
 | --- | --- | --- | --- |
 | `experimental` | 上游基线 | 保留上游原始内容 | 见上游 |
 | `1.21.11` | Slimefun4 4.9.1 | Paper 1.21.11 | 21+ |
-| `26.2` | Slimefun5 5.0.0-SNAPSHOT | Paper 26.2 | 25+ |
+| `26.2` | Slimefun5 5.0.1 | Paper 26.2 | 25+ |
 
 每个 Minecraft 版本独立维护。不要把新版本的世界降级，也不要在现有生产存档上直接测试开发构建。支持范围与验收记录见 [兼容性记录](docs/COMPATIBILITY.md)。
+
+## 玩家档案同步
+
+`26.2` 分支的 5.0.1 提供可选 PM-Sync 生命周期桥，将研究、完整背包和首次指南状态纳入同一 SQL 权威快照。网络配置、准确覆盖与升级/回退约束见 [玩家档案同步](docs/PLAYER-SYNC.md)。SQL 和双后端实际验收由部署端执行，离线测试不代表已验收跨服运行。
 
 ## 构建
 
@@ -24,7 +28,7 @@ mvn -B -ntp clean verify
 
 ```sh
 python3 scripts/runtime-smoke.py --minecraft-version 26.2 \
-  --jar 'target/Slimefun v5.0.0-SNAPSHOT.jar' \
+  --jar 'target/Slimefun v5.0.1.jar' \
   --paper-jar /path/to/your/paper-26.2.jar --accept-eula
 ```
 

@@ -74,11 +74,15 @@ public class PlayerProfile {
     private final PlayerData data;
 
     protected PlayerProfile(@Nonnull OfflinePlayer p, PlayerData data) {
+        this(p, data, false);
+    }
+
+    private PlayerProfile(OfflinePlayer p, PlayerData data, boolean network) {
         this.ownerId = p.getUniqueId();
         this.name = p.getName();
         this.data = data;
 
-        configFile = new Config("data-storage/Slimefun/Players/" + ownerId.toString() + ".yml");
+        configFile = network ? null : new Config("data-storage/Slimefun/Players/" + ownerId.toString() + ".yml");
     }
 
     /**
@@ -101,6 +105,7 @@ public class PlayerProfile {
      */
     @Deprecated
     public @Nonnull Config getConfig() {
+        if (configFile == null) throw new UnsupportedOperationException("Network profiles use PM-Sync; deprecated raw playerfile access is disabled");
         return configFile;
     }
 
@@ -136,6 +141,9 @@ public class PlayerProfile {
      * This method will save the Player's Researches and Backpacks to the hard drive
      */
     public void save() {
+        // The coordinator commits the complete profile with inventory/PDC in one fenced SQL transaction.
+        // Never clear dirty or overwrite a legacy file before that commit is acknowledged.
+        if (Slimefun.getPlayerSyncService() != null) return;
         Slimefun.getPlayerStorage().savePlayerData(this.ownerId, this.data);
         dirty = false;
     }
@@ -151,6 +159,7 @@ public class PlayerProfile {
      */
     public void setResearched(@Nonnull Research research, boolean unlock) {
         Validate.notNull(research, "Research must not be null!");
+        requireWritable();
         dirty = true;
 
         if (unlock) {
@@ -221,6 +230,7 @@ public class PlayerProfile {
      *            The {@link Waypoint} to add
      */
     public void addWaypoint(@Nonnull Waypoint waypoint) {
+        requireWritable();
         this.data.addWaypoint(waypoint);
         markDirty();
     }
@@ -233,6 +243,7 @@ public class PlayerProfile {
      *            The {@link Waypoint} to remove
      */
     public void removeWaypoint(@Nonnull Waypoint waypoint) {
+        requireWritable();
         this.data.removeWaypoint(waypoint);
         markDirty();
     }
@@ -250,12 +261,15 @@ public class PlayerProfile {
      * Call this method if this Profile has unsaved changes.
      */
     public final void markDirty() {
+        requireWritable();
         Debug.log(TestCase.PLAYER_PROFILE_DATA, "Marking {} ({}) profile as dirty", name, ownerId);
         dirty = true;
     }
 
     public @Nonnull PlayerBackpack createBackpack(int size) {
-        int nextId = this.data.getBackpacks().size(); // Size is not 0 indexed so next ID can just be the current size
+        requireWritable();
+        int nextId = this.data.getBackpacks().keySet().stream().mapToInt(Integer::intValue).max().orElse(-1) + 1;
+        if (nextId < 0) throw new IllegalStateException("Backpack IDs exhausted");
 
         PlayerBackpack backpack = PlayerBackpack.newBackpack(this.ownerId, nextId, size);
         this.data.addBackpack(backpack);
@@ -336,6 +350,7 @@ public class PlayerProfile {
      * @return The {@link Player} of this {@link PlayerProfile} or null
      */
     public @Nullable Player getPlayer() {
+        if (!isAccessible()) return null;
         return Bukkit.getPlayer(getUUID());
     }
 
@@ -366,6 +381,12 @@ public class PlayerProfile {
     public static boolean get(@Nonnull OfflinePlayer p, @Nonnull Consumer<PlayerProfile> callback) {
         Validate.notNull(p, "Cannot get a PlayerProfile for: null!");
         UUID uuid = p.getUniqueId();
+        if (Slimefun.getPlayerSyncService() != null) {
+            if (p instanceof Player player && Slimefun.getPlayerSyncService().blocked(player)) return false;
+            var profile = Slimefun.getPlayerSyncService().find(uuid);
+            profile.ifPresent(callback);
+            return profile.isPresent();
+        }
 
         Debug.log(TestCase.PLAYER_PROFILE_DATA, "Getting PlayerProfile for {}", uuid);
 
@@ -423,6 +444,7 @@ public class PlayerProfile {
      */
     public static boolean request(@Nonnull OfflinePlayer p) {
         Validate.notNull(p, "Cannot request a Profile for null");
+        if (Slimefun.getPlayerSyncService() != null) return Slimefun.getPlayerSyncService().find(p.getUniqueId()).isPresent();
         Debug.log(TestCase.PLAYER_PROFILE_DATA, "Requesting PlayerProfile for {}", p.getName());
 
         UUID uuid = p.getUniqueId();
@@ -468,6 +490,10 @@ public class PlayerProfile {
      * @return An {@link Optional} describing the result
      */
     public static @Nonnull Optional<PlayerProfile> find(@Nonnull OfflinePlayer p) {
+        if (Slimefun.getPlayerSyncService() != null) {
+            if (p instanceof Player player && Slimefun.getPlayerSyncService().blocked(player)) return Optional.empty();
+            return Slimefun.getPlayerSyncService().find(p.getUniqueId());
+        }
         return Optional.ofNullable(Slimefun.getRegistry().getPlayerProfiles().get(p.getUniqueId()));
     }
 
@@ -527,6 +553,23 @@ public class PlayerProfile {
         }
 
         return armorCount == 4;
+    }
+
+    /** Installs fully validated network data without reading a legacy playerfile. */
+    public static PlayerProfile fromSync(Player player, PlayerData data) {
+        return new PlayerProfile(player, data, true);
+    }
+
+    public boolean isAccessible() {
+        var sync = Slimefun.getPlayerSyncService();
+        return sync == null || sync.usable(this);
+    }
+
+    private void requireWritable() {
+        if (!isAccessible()) throw new IllegalStateException("Slimefun profile is frozen or belongs to an old session");
+        if (Slimefun.getPlayerSyncService() != null && !Bukkit.isPrimaryThread()) {
+            throw new IllegalStateException("Network Slimefun profiles must be changed on the server thread");
+        }
     }
 
     public PlayerData getPlayerData() {
