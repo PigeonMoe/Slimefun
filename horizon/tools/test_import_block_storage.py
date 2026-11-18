@@ -222,6 +222,7 @@ class BlockStorageTest(unittest.TestCase):
             (global_dir / "TEST_SHARED.sfi").write_text(yaml.safe_dump({
                 "preset": "TEST_SHARED",
                 "8": stack,
+                "17": None,
             }))
             profiles = root / "Players"
             profiles.mkdir()
@@ -241,6 +242,7 @@ class BlockStorageTest(unittest.TestCase):
             global_row = tomllib.loads((destination / "universal" /
                                        ("TEST_SHARED".encode().hex() + ".toml")).read_text())
             self.assertEqual(global_row["preset"], "TEST_SHARED")
+            self.assertEqual(global_row["paper_slots"], [8, 17])
             self.assertEqual(global_row["paper_items"][0]["slot"], 8)
             profile = tomllib.loads((destination / "backpacks" /
                                      (owner.replace("-", "") + ".toml")).read_text())

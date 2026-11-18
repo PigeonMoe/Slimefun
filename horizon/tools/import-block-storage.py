@@ -184,10 +184,20 @@ def collect_universal(source):
     for file in sorted((source / "universal-inventories").glob("*.sfi")):
         try:
             raw = file.read_bytes().decode("utf-8")
-            row = inventory_record(mapping(raw, file))
+            data = mapping(raw, file)
+            row = inventory_record(data)
+            paper_slots = set()
+            for key in data:
+                if key == "preset":
+                    continue
+                number = str(key)
+                if re.fullmatch(r"0|[1-9]|[1-4][0-9]|5[0-3]", number) is None:
+                    row["paper_item_issues"].append(f"Unknown universal inventory slot {key!r}")
+                else:
+                    paper_slots.add(int(number))
             if row["inventory_preset"] != file.stem:
                 row["paper_item_issues"].append("The menu preset differs from its file name")
-            records[file.stem] = {"inventory": raw, **row}
+            records[file.stem] = {"inventory": raw, "paper_slots": sorted(paper_slots), **row}
         except (ValueError, TypeError, yaml.YAMLError) as error:
             raise ValueError(f"{file.relative_to(source)}: {error}") from error
     return records
@@ -349,7 +359,8 @@ def render(records, universal=None, players=None, oil=None):
         ))
     for preset, row in sorted((universal or {}).items()):
         yield f"universal/{preset.encode().hex()}.toml", "\n".join((
-            "format = 1", f"preset = {string(preset)}", *item_fields(row), "",
+            "format = 1", f"preset = {string(preset)}", f"paper_slots = {row['paper_slots']}",
+            *item_fields(row), "",
         ))
     for uuid, profile in sorted((players or {}).items()):
         lines = ["format = 1", f"player = {string(uuid)}",

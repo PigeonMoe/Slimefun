@@ -37,6 +37,7 @@ mod recipes;
 mod research;
 mod storage;
 mod thermal_machines;
+mod universal_storage;
 
 use compressor::DelayedCrafts;
 use machine::{Machine, Settings};
@@ -54,6 +55,7 @@ struct Slimefun {
     chest: Mutex<Option<ItemKey>>,
     networks: Arc<Mutex<network_runtime::Networks>>,
     backpacks: backpacks::BackpackMenus,
+    universal: universal_storage::UniversalStorage,
 }
 
 impl Default for Slimefun {
@@ -66,6 +68,7 @@ impl Default for Slimefun {
             chest: Mutex::new(None),
             networks: Arc::default(),
             backpacks: backpacks::BackpackMenus::default(),
+            universal: universal_storage::UniversalStorage::default(),
         }
     }
 }
@@ -198,6 +201,7 @@ impl Hooks for Slimefun {
         crucible::register(registrar);
         factory::register(registrar);
         backpacks::register(registrar);
+        self.universal.register(registrar);
     }
 
     fn register_configs(&self, _: HostSide<'_>, event: &mut RegisterConfigsEvent<'_>) {
@@ -293,6 +297,10 @@ impl Hooks for Slimefun {
             Command::new("sf restore-backpack"),
             Command::op("slimefun storage", 2),
             Command::op("sf storage", 2),
+            Command::op("slimefun storage restore-universal <preset:text>", 2),
+            Command::op("sf storage restore-universal <preset:text>", 2),
+            Command::op("slimefun storage open-universal <preset:text>", 2),
+            Command::op("sf storage open-universal <preset:text>", 2),
             Command::op(
                 "slimefun storage inspect <dimension:dimension> <pos:block_pos>",
                 2,
@@ -355,7 +363,7 @@ impl Hooks for Slimefun {
             return Flow::Continue;
         }
         let lines = match path.next() {
-            Some("storage") => storage::command(host, event, path.next(), &self.networks),
+            Some("storage") => storage::command(host, event, path.next(), &self.networks, &self.universal),
             Some("restore-backpack") => {
                 let message = match *event.source {
                     CommandSource::Player { player, .. } => match backpacks::restore_held(
@@ -579,6 +587,7 @@ impl Hooks for Slimefun {
 
     fn menu_closed(&self, _: &mut dyn ServerHost, event: &mut mod_api::MenuClosedEvent) {
         self.backpacks.closed(event);
+        self.universal.closed(event);
         factory::VIEWERS.closed(event);
         network_runtime::menu_closed(&self.networks, event);
     }
@@ -627,6 +636,7 @@ impl Hooks for Slimefun {
 
     fn server_stopping(&self, _: &mut dyn ServerHost, _: &mut ServerStoppingEvent) {
         self.backpacks.clear();
+        self.universal.clear();
         factory::VIEWERS.clear();
         self.networks.lock().unwrap().clear();
         self.delayed_crafts.clear();

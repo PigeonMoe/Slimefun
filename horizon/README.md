@@ -111,7 +111,18 @@ python3 horizon/tools/import-block-storage.py \
 
 旧式库存可先用 [Paper 存档导出工具](tools/paper-storage-export/build.sh) 转换。用 JDK 25 在临时目录执行 `java -Dpaperclip.patchonly=true -jar /path/to/paper-26.2.jar`，解包 Paper 26.2 及其依赖。将 `versions/26.2/paper-26.2.jar` 与 `libraries/` 内每个 JAR 的绝对路径用冒号连接，填入 `PAPER_EXPORT_CLASSPATH`。执行 `build.sh /path/to/exporter.jar` 构建，或执行 `build.sh --test` 核验历史 ItemMeta 和失败回滚。解包和测试只加载 Paper 的注册表与物品编码器。
 
-将生成的 JAR 装到 Paper 26.2，在本地控制台执行 `sf-export-inventories paper-snapshot normalized-snapshot`。工具保留旧头颅的所有者 UUID 和旧刷怪蛋中的插件 NBT。遇到无法保留的字段会报告文件与槽位，原快照可用于重试。将 `normalized-snapshot` 作为 Horizon 导入脚本的输入。脚本同时归档 `universal-inventories` 和 `Players/*.yml` 中的背包，保留菜单名、背包所有者 UUID、编号和容量。共享库存目前可归档。
+将生成的 JAR 装到 Paper 26.2，在本地控制台执行 `sf-export-inventories paper-snapshot normalized-snapshot`。工具保留旧头颅的所有者 UUID 和旧刷怪蛋中的插件 NBT。遇到无法保留的字段会报告文件与槽位，原快照可用于重试。将 `normalized-snapshot` 作为 Horizon 导入脚本的输入。脚本同时归档 `universal-inventories` 和 `Players/*.yml` 中的背包，保留菜单名、背包所有者 UUID、编号和容量。
+
+二级及以上 OP 可执行 `/sf storage restore-universal TEST_SHARED` 恢复精确名称的共享库存，再执行 `/sf storage open-universal TEST_SHARED` 打开。相同预设的多个菜单会直接访问同一份存档，支持跨维度和重启，重复恢复不会补回已经取走的物品。扩展模组的物理方块权限、无线终端和装饰交互需由对应扩展定义。
+
+旧 `.sfi` 只记录预设和有效槽位，默认用 54 格界面显示确有记录的槽位。若已知原预设的标题、尺寸和库存槽，在恢复前可把布局放在世界内 `horizon-mod-data/slimefun/universal-layout/544553545f534841524544.toml`。文件用预设名的 UTF-8 十六进制命名。布局必须覆盖所有已归档物品，空档案需要原布局。
+
+```toml
+preset = "TEST_SHARED"
+title = "Shared Inventory"
+size = 18
+slots = [0, 8, 17]
+```
 
 已有 Paper 编号的六档普通背包（9–54 格）可在原物品上恢复。先迁移持有该背包的玩家物品，再由原 UUID 所有者或二级及以上 OP 将背包拿在主手执行 `/sf restore-backpack`。解锁对应研究后，持有者可在任意维度右键访问同一份库存，转交物品后 UUID 与背包编号保持原样。重复恢复会保留当前库存。背包不能装入其他背包或潜影盒。
 

@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use mod_api::{
-    CommandArgumentValue, ConfigPath, HostTransaction, ItemStack, LevelRef, RunModCommandEvent,
-    ServerHost,
+    CommandArgumentValue, CommandSource, ConfigPath, HostTransaction, ItemStack, LevelRef,
+    RunModCommandEvent, ServerHost,
 };
 use std::{collections::BTreeMap, fmt::Write, sync::Mutex};
 
-use crate::{geology, network_runtime::Networks, networks::Component, output_chest};
+use crate::{
+    geology, network_runtime::Networks, networks::Component, output_chest, universal_storage,
+};
 
 fn read(host: &dyn ServerHost, path: &str) -> Result<toml::Table, String> {
     let path = ConfigPath::new(path).map_err(|_| "Invalid Slimefun import file path.")?;
@@ -172,11 +174,31 @@ pub(crate) fn command(
     event: &RunModCommandEvent<'_>,
     action: Option<&str>,
     networks: &Mutex<Networks>,
+    universal: &universal_storage::UniversalStorage,
 ) -> Vec<String> {
     if event.source.permission().level() < 2 {
         return vec!["Slimefun storage commands require operator level 2.".into()];
     }
     let result = match action {
+        Some(action @ ("restore-universal" | "open-universal")) => {
+            let Some(CommandArgumentValue::String(preset)) = event.command.argument("preset")
+            else {
+                return vec!["Specify the exact Paper universal inventory preset.".into()];
+            };
+            if action == "restore-universal" {
+                universal_storage::restore(host, preset).map(|installed| {
+                    vec![if installed {
+                        "Restored the Paper universal inventory.".into()
+                    } else {
+                        "This universal inventory was already restored.".into()
+                    }]
+                })
+            } else if let CommandSource::Player { player, .. } = *event.source {
+                universal.open(host, player, preset).map(|()| Vec::new())
+            } else {
+                Err("Open the universal inventory as an online player.".into())
+            }
+        }
         None => read(host, "storage-import/index.toml").and_then(|index| {
             let count = |field| {
                 index
