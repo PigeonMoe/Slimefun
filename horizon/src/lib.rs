@@ -33,6 +33,8 @@ mod fuel_generators;
 mod geo_deposits;
 mod geology;
 mod gold_pan;
+mod gps_controls;
+mod gps_waypoints;
 mod hand_machine;
 mod heated_pressure;
 mod ignition_chamber;
@@ -66,6 +68,7 @@ struct Slimefun {
     rolls: Rolls,
     chest: Mutex<Option<ItemKey>>,
     networks: Arc<Mutex<network_runtime::Networks>>,
+    gps: gps_controls::Controls,
     backpacks: backpacks::BackpackMenus,
     bee_wings: bee_wings::BeeWings,
     universal: universal_storage::UniversalStorage,
@@ -81,6 +84,7 @@ impl Default for Slimefun {
             rolls: Rolls::default(),
             chest: Mutex::new(None),
             networks: Arc::default(),
+            gps: gps_controls::Controls::default(),
             backpacks: backpacks::BackpackMenus::default(),
             bee_wings: bee_wings::BeeWings::default(),
             universal: universal_storage::UniversalStorage::default(),
@@ -609,6 +613,9 @@ impl Hooks for Slimefun {
                     true,
                     &self.rolls,
                 );
+            } else {
+                self.gps
+                    .start_waypoint(host, player, level, event.click.pos, event.click.hit.face);
             }
             *event.cancellation_result = InteractionResult::Consume;
             return Flow::Cancel;
@@ -641,6 +648,13 @@ impl Hooks for Slimefun {
             false,
             &self.rolls,
         ) {
+            *event.cancellation_result = InteractionResult::Consume;
+            return Flow::Cancel;
+        }
+        if self
+            .gps
+            .use_panel(&self.networks, host, player, level, event.click.pos)
+        {
             *event.cancellation_result = InteractionResult::Consume;
             return Flow::Cancel;
         }
@@ -727,11 +741,32 @@ impl Hooks for Slimefun {
     fn player_logged_in(&self, host: &mut dyn ServerHost, event: &mut PlayerLoggedInEvent<'_>) {
         if let Some(player) = host.player(event.player) {
             research::import_legacy(host, player);
+            if let Err(error) = gps_waypoints::import(host, event.player) {
+                let _ = player.tell(host, Text::literal(error));
+            }
         }
     }
 
-    fn player_logged_out(&self, _: &mut dyn ServerHost, event: &mut mod_api::PlayerLoggedOutEvent<'_>) {
+    fn player_logged_out(
+        &self,
+        _: &mut dyn ServerHost,
+        event: &mut mod_api::PlayerLoggedOutEvent<'_>,
+    ) {
         self.bee_wings.stop(event.player);
+        self.gps.logout(event.player);
+    }
+
+    #[listener(priority = -100)]
+    fn server_chat(
+        &self,
+        host: &mut dyn ServerHost,
+        event: &mut mod_api::ServerChatEvent<'_>,
+    ) -> Flow {
+        if let Some(reply) = self.gps.take_chat(host, event.player, event.raw_text) {
+            event.replies.push(reply);
+            return Flow::Cancel;
+        }
+        Flow::Continue
     }
 
     fn entity_toggle_glide(
@@ -749,6 +784,7 @@ impl Hooks for Slimefun {
     fn menu_clicked(&self, host: &mut dyn ServerHost, event: &mut mod_api::MenuClickedEvent) {
         auto_crafter::clicked(host, event);
         factory::VIEWERS.clicked(host, event);
+        self.gps.click(&self.networks, host, event);
         network_runtime::menu_click(&self.networks, host, event);
     }
 
@@ -757,6 +793,7 @@ impl Hooks for Slimefun {
         self.backpacks.closed(event);
         self.universal.closed(event);
         factory::VIEWERS.closed(event);
+        self.gps.close(event);
         network_runtime::menu_closed(&self.networks, event);
     }
 
@@ -826,6 +863,7 @@ impl Hooks for Slimefun {
         self.backpacks.clear();
         self.bee_wings.clear();
         self.universal.clear();
+        self.gps.clear();
         factory::VIEWERS.clear();
         self.networks.lock().unwrap().clear();
         self.delayed_crafts.clear();

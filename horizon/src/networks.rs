@@ -8,6 +8,7 @@ pub(crate) enum Component {
         capacity: u32,
     },
     GeoScanner,
+    GpsControlPanel,
     ManualCrucible,
     ManualComposter,
     IgnitionChamber,
@@ -90,6 +91,7 @@ impl Component {
             "DUCT_TAPE" => Self::DuctTape,
             "TRASH_CAN_BLOCK" => Self::TrashCan,
             "GPS_GEO_SCANNER" => Self::GeoScanner,
+            "GPS_CONTROL_PANEL" => Self::GpsControlPanel,
             "CRUCIBLE" => Self::ManualCrucible,
             "COMPOSTER" => Self::ManualComposter,
             "IGNITION_CHAMBER" => Self::IgnitionChamber,
@@ -192,6 +194,7 @@ impl Component {
                 "Enhanced furnace | Native input, fuel and output slots".into()
             }
             Self::GeoScanner => "GPS Geo-Scanner | Requires 600 GPS complexity".into(),
+            Self::GpsControlPanel => "GPS Control Panel".into(),
             Self::EnergyRegulator => "Energy regulator | Paper connection range 6".into(),
             Self::EnergyConnector => "Energy connector | Paper connection range 6".into(),
             Self::Capacitor(capacity) => {

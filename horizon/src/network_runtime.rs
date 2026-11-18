@@ -350,6 +350,7 @@ impl Node {
             | Component::FuelGenerator { .. }
             | Component::SolarGenerator { .. } => Network::Energy,
             Component::GeoScanner
+            | Component::GpsControlPanel
             | Component::TrashCan
             | Component::ManualCrucible
             | Component::ManualComposter
@@ -432,6 +433,17 @@ impl Networks {
         }
         *elapsed = 0;
         true
+    }
+
+    pub(crate) fn gps_network(&self, player: u128) -> Vec<(String, Position, u32)> {
+        self.gps_signals
+            .iter()
+            .flat_map(|(dimension, signals)| {
+                signals.iter().filter_map(move |(&pos, &(owner, signal))| {
+                    (owner == player).then(|| (dimension.clone(), pos, signal))
+                })
+            })
+            .collect()
     }
 
     fn gps_complexity(&self, player: u128) -> u32 {
@@ -775,6 +787,13 @@ pub(crate) fn observe_gps_change(
     if let Some(signals) = networks.lock().unwrap().gps_signals.get_mut(dimension) {
         signals.remove(&[event.pos.x, event.pos.y, event.pos.z]);
     }
+}
+
+pub(crate) fn gps_panel_at(host: &mut dyn ServerHost, level: LevelRef, pos: Position) -> bool {
+    block_data(host, level, pos).is_some_and(|data| data.id == "GPS_CONTROL_PANEL")
+        && level
+            .block(host, pos)
+            .is_some_and(|block| accepts_carrier(Component::GpsControlPanel, &block.id(host)))
 }
 
 pub(crate) fn open_scanner(

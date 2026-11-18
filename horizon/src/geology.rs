@@ -222,6 +222,7 @@ pub(crate) fn transmitter(id: &str) -> Option<&'static Transmitter> {
 pub(crate) fn network_item(id: &str) -> Option<Kind> {
     match id {
         "GPS_GEO_SCANNER" => Some(GPS_GEO_SCANNER),
+        "GPS_CONTROL_PANEL" => Some(crate::gps_controls::GPS_CONTROL_PANEL),
         "OIL_PUMP" => Some(OIL_PUMP),
         "GEO_MINER" => Some(GEO_MINER),
         "PORTABLE_GEO_SCANNER" => Some(PORTABLE_GEO_SCANNER),
