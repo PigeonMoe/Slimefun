@@ -11,7 +11,7 @@ use mod_api::{
 use super::{
     Component, FILTER_SLOTS, NETWORK_STATE, Networks, Node, Position, block_data,
     cargo_topology::{CargoSettings, item_key},
-    network_item, read_stack,
+    network_item, network_visuals, read_stack,
 };
 
 #[derive(Clone, Copy)]
@@ -42,8 +42,18 @@ pub(crate) fn use_node(
         | Component::EnergyRegulator
         | Component::EnergyConnector
         | Component::Capacitor(_)
-        | Component::CargoManager
         | Component::CargoConnector => return false,
+        Component::CargoManager => {
+            data.cargo_visualizer_disabled = !data.cargo_visualizer_disabled;
+            let disabled = data.cargo_visualizer_disabled;
+            if NETWORK_STATE
+                .set(host, Holder::BlockEntity(pos), data)
+                .is_ok()
+            {
+                network_visuals::toggled(host, player, disabled);
+            }
+            return true;
+        }
         _ => {}
     }
     let (Some(block), Some(dimension)) =
@@ -185,6 +195,7 @@ pub(crate) fn menu_closed(networks: &Mutex<Networks>, event: &MenuClosedEvent) {
 }
 
 pub(crate) fn register(registrar: &mut dyn mod_api::Registrar) {
+    network_visuals::register(registrar);
     let head = registrar.block_key("minecraft:player_wall_head");
     registrar.block_capability_before_game(&ITEMS, &head, |host, at, _, entity| {
         let entity = entity?;

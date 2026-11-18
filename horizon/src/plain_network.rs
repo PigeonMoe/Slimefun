@@ -120,8 +120,7 @@ pub(super) fn read(host: &mut dyn ServerHost, level: LevelRef, pos: Position) ->
     Some(BlockData {
         id: saved_id(data)?,
         charge: u32::try_from(*charge).ok()?,
-        cargo: None,
-        gps_owner: None,
+        ..BlockData::default()
     })
 }
 

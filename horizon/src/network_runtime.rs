@@ -25,11 +25,14 @@ use crate::{
 mod cargo_menu;
 #[path = "cargo_topology.rs"]
 mod cargo_topology;
+#[path = "network_visuals.rs"]
+mod network_visuals;
 #[path = "plain_network.rs"]
 mod plain_network;
 
 pub(crate) use cargo_menu::{menu_click, menu_closed, register as register_cargo, use_node};
 use cargo_topology::{CargoSettings, FILTER_SLOTS};
+use network_visuals::Status;
 pub(crate) use plain_network::{
     CARRIERS as PLAIN_CARRIERS, is_carrier as is_plain_carrier, observe_plain_change,
 };
@@ -42,6 +45,7 @@ struct BlockData {
     id: String,
     charge: u32,
     cargo: Option<CargoSettings>,
+    cargo_visualizer_disabled: bool,
     gps_owner: Option<u128>,
 }
 
@@ -60,6 +64,9 @@ static NETWORK_STATE: AttachmentType<BlockData> = AttachmentType {
             ]);
             if let Some(cargo) = &value.cargo {
                 data.insert("cargo".into(), Tag::Compound(cargo.save()));
+            }
+            if value.cargo_visualizer_disabled {
+                data.insert("visualizer_disabled".into(), Tag::Byte(1));
             }
             if let Some(owner) = value.gps_owner {
                 data.insert(
@@ -82,6 +89,10 @@ static NETWORK_STATE: AttachmentType<BlockData> = AttachmentType {
                     Some(Tag::Compound(cargo)) => Some(CargoSettings::load(cargo)?),
                     _ => return Err(AttachmentError::Decode),
                 },
+                cargo_visualizer_disabled: matches!(
+                    data.get(&"visualizer_disabled".into()),
+                    Some(Tag::Byte(1))
+                ),
                 gps_owner: match data.get(&"owner".into()) {
                     None => None,
                     Some(Tag::String(owner)) => Some(
@@ -505,6 +516,9 @@ fn imported(id: &str, metadata: &toml::Table) -> Result<(Node, BlockData), &'sta
         Component::CargoInput | Component::CargoOutput { .. } => {
             data.cargo = Some(CargoSettings::from_paper(metadata, node.filters_items())?);
         }
+        Component::CargoManager => {
+            data.cargo_visualizer_disabled = field("visualizer").is_some();
+        }
         _ => {}
     }
     Ok((node, data))
@@ -752,6 +766,7 @@ pub(crate) fn tick(
         })
         .collect();
     let mut claimed = BTreeSet::new();
+    let mut labels = BTreeMap::new();
     for (&start, &(node, _)) in &active {
         if !node.regulator() || claimed.contains(&start) {
             continue;
@@ -760,11 +775,45 @@ pub(crate) fn tick(
             .into_iter()
             .filter(|pos| claimed.insert(*pos))
             .collect();
-        match node.family() {
-            Network::Energy => tick_energy(host, level, &dimension, &active, &group),
-            Network::Cargo => cargo_topology::tick(networks, host, level, &active, &group),
-            Network::Independent => (),
+        let (status, conflict) = match node.family() {
+            Network::Energy => {
+                let status = if group.iter().all(|pos| active[pos].0.regulator()) {
+                    Some(Status::EnergyEmpty)
+                } else {
+                    tick_energy(host, level, &dimension, &active, &group)
+                };
+                (status, Status::EnergyConflict)
+            }
+            Network::Cargo => {
+                let terminals = group
+                    .iter()
+                    .copied()
+                    .filter(|pos| !active[pos].0.regulator());
+                let status = if terminals.clone().next().is_some() {
+                    if block_data(host, level, start)
+                        .is_some_and(|data| !data.cargo_visualizer_disabled)
+                    {
+                        network_visuals::cargo_particles(host, level, terminals);
+                    }
+                    cargo_topology::tick(networks, host, level, &active, &group);
+                    Status::CargoOnline
+                } else {
+                    Status::CargoEmpty
+                };
+                (Some(status), Status::CargoConflict)
+            }
+            Network::Independent => continue,
+        };
+        labels.insert(start, status);
+        for pos in group
+            .into_iter()
+            .filter(|&pos| pos != start && active[&pos].0.regulator())
+        {
+            labels.insert(pos, Some(conflict));
         }
+    }
+    if nodes.values().any(Node::regulator) {
+        network_visuals::reconcile(host, level, &dimension, labels);
     }
     let mut gps_signals = BTreeMap::new();
     for (&pos, &(node, _)) in &active {
@@ -840,16 +889,22 @@ fn tick_energy(
     dimension: &str,
     active: &BTreeMap<Position, (&Node, u32)>,
     group: &[Position],
-) {
+) -> Option<Status> {
     let time = level.day_time(host).map(|time| time.rem_euclid(24_000));
     let day = time.is_some_and(|time| !(12_300..=23_850).contains(&time))
         && level.is_raining(host) == Some(false)
         && level.is_thundering(host) == Some(false);
-    let _ = host.transaction(|host, tx| {
+    host.transaction(|host, tx| {
         let mut available = 0u64;
+        let mut demand = 0u64;
         for &pos in group {
             let (node, charge) = active[&pos];
             let energy = match node.component {
+                Component::ElectricMachine { capacity, .. }
+                | Component::GpsTransmitter { capacity } => {
+                    demand += u64::from(capacity.saturating_sub(charge));
+                    0
+                }
                 Component::Capacitor(capacity) => charge.min(capacity),
                 Component::FuelGenerator { capacity, .. } => {
                     charge.min(capacity)
@@ -884,8 +939,12 @@ fn tick_energy(
             data.charge = stored;
             write_data(host, pos, data).map_err(|_| ())?;
         }
-        Ok::<(), ()>(())
-    });
+        Ok::<_, ()>(Status::Energy {
+            supply: available,
+            demand,
+        })
+    })
+    .ok()
 }
 
 fn capacitor_tier(charge: u32, capacity: u32) -> usize {
