@@ -38,6 +38,7 @@ pub(crate) struct Dispenser {
 
 #[derive(Clone, Copy)]
 pub(crate) struct Settings {
+    pub book_binder: crate::book_binder::Rules,
     pub double_ores: bool,
     pub legacy_ore_washer: bool,
     pub legacy_dust_washer: bool,
@@ -54,6 +55,7 @@ pub(crate) struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            book_binder: crate::book_binder::Rules::default(),
             double_ores: true,
             legacy_ore_washer: false,
             legacy_dust_washer: false,

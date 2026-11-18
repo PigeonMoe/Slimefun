@@ -14,6 +14,7 @@ mod advanced_processing;
 mod auto_anvil;
 mod auto_brewer;
 mod backpacks;
+mod book_binder;
 mod circuits;
 mod compressor;
 mod crucible;
@@ -88,6 +89,7 @@ impl Slimefun {
         let Ok(table) = config.text.parse::<toml::Table>() else {
             return;
         };
+        settings.book_binder = book_binder::Rules::read_config(&table);
         if let Some(value) = table
             .get("crucible-allow-water-in-nether")
             .and_then(toml::Value::as_bool)
@@ -209,7 +211,7 @@ impl Hooks for Slimefun {
         event.configs.push(Config::new(
             "slimefun",
             ConfigKind::Server,
-            "double-ores = true\ncrucible-allow-water-in-nether = false\nlegacy-ore-washer = false\nlegacy-dust-washer = false\nlegacy-ore-grinder = true\nelectric-gold-pan-override-output-limit = [false, false, false]\nfreezer-use-vanilla-ratios = [false, false, false]\nfire-breaking-chance = 34\noutput-chest-enabled = true\ndrop-from-golems = true\ngolem-drop-chance = 75\n\n[networks]\nenable-visualizer = true\ncargo-ticker-delay = 0\n",
+            "double-ores = true\ncrucible-allow-water-in-nether = false\nlegacy-ore-washer = false\nlegacy-dust-washer = false\nlegacy-ore-grinder = true\nelectric-gold-pan-override-output-limit = [false, false, false]\nfreezer-use-vanilla-ratios = [false, false, false]\nfire-breaking-chance = 34\noutput-chest-enabled = true\ndrop-from-golems = true\ngolem-drop-chance = 75\n\n[networks]\nenable-visualizer = true\ncargo-ticker-delay = 0\n\n[book-binder]\nbypass-vanilla-max-level = false\nhas-custom-max-level = false\ncustom-max-level = 15\n",
         ));
     }
 

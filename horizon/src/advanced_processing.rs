@@ -83,6 +83,7 @@ pub(crate) enum Family {
     ChargingBench,
     AutoEnchanter,
     AutoDisenchanter,
+    BookBinder,
 }
 
 pub(crate) struct Machine {
@@ -161,6 +162,7 @@ pub(crate) fn machine(id: &str) -> Option<&'static Machine> {
         .chain(crate::auto_anvil::MACHINES)
         .chain([
             &crate::auto_brewer::MACHINE,
+            &crate::book_binder::MACHINE,
             &crate::factory::charging_bench::MACHINE,
         ])
         .find(|machine| machine.item.id() == id)
@@ -534,7 +536,7 @@ pub(crate) fn next(
     host: &dyn Host,
     machine: &Machine,
     inputs: &[Option<ItemStack>],
-    freezer_ratios: [bool; 3],
+    settings: crate::machine::Settings,
 ) -> Option<Plan> {
     match machine.family {
         Family::Smeltery => smeltery_recipes().iter().find_map(|recipe| {
@@ -563,10 +565,11 @@ pub(crate) fn next(
         Family::AutoEnchanter | Family::AutoDisenchanter => {
             crate::enchantment_machines::next(host, machine, inputs)
         }
+        Family::BookBinder => crate::book_binder::next(host, inputs, settings.book_binder),
         Family::CarbonPress | Family::Freezer | Family::AutoDrier => {
             use crate::thermal_machines as thermal;
-            let ratios =
-                machine.family == Family::Freezer && freezer_ratios[(machine.speed - 1) as usize];
+            let ratios = machine.family == Family::Freezer
+                && settings.freezer_use_vanilla_ratios[(machine.speed - 1) as usize];
             thermal::recipes(machine.family, ratios)
                 .find_map(|recipe| {
                     plan(

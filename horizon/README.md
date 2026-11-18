@@ -140,4 +140,6 @@ Auto Enchanter 和 Auto Disenchanter 各有 I、II 两档。分别消耗附魔�
 
 Auto Anvil 和 Auto Anvil Mk.II 用一份 Duct Tape 修理一件有损耗的物品，分别恢复该物品原型最大耐久的 10% 和 25%，向下取整。修理保留附魔、铁砧惩罚和其他物品组件，两档均用 60 个处理刻，沿用 Paper 四个输入输出槽。增强工作台每次生产两份 Duct Tape，机器通过 Slimefun ID 识别胶带。
 
+Book Binder 以书架为载体，将两本附魔书合成一本。相同附魔等阶时提升一级，等级与冲突检查读取服务器当前的附魔注册表。默认沿用 Paper 上限。可在 `slimefun-server.toml` 的 `[book-binder]` 表调整 `bypass-vanilla-max-level`、`has-custom-max-level` 与 `custom-max-level`。
+
 将货运输入或输出节点挂到库存方块侧面，再右键配置频道。输入和高级输出节点可放置白名单或黑名单物品。输入节点另可启用轮询和智能填充。空白名单不转移物品。货运支持普通库存和已移植的电动机器，每次按实际源、目标库存位置检查 Horizon 的库存转移许可。目标只能接收部分物品时，源端保留余量。

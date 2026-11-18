@@ -610,6 +610,7 @@ mod tests {
             "AUTO_DISENCHANTER_2",
             "AUTO_ANVIL",
             "AUTO_ANVIL_2",
+            "BOOK_BINDER",
             "LAVA_GENERATOR_2",
             "BIO_REACTOR",
             "CARGO_NODE_INPUT",

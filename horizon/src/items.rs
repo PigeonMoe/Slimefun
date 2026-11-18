@@ -125,6 +125,9 @@ impl SlimefunItem {
         if let Some(lore) = crate::auto_anvil::lore(self.id) {
             components.insert("minecraft:lore".into(), lore);
         }
+        if let Some(lore) = crate::book_binder::lore(self.id) {
+            components.insert("minecraft:lore".into(), lore);
+        }
         crate::enchantment_machines::decorate(self.id, &mut components);
         if let Some(texture) = &self.texture {
             components.insert(

@@ -272,14 +272,14 @@ pub(crate) const CRAFTING: &[CraftingRecipe] = &[
 ];
 
 const DIRECT: &str = "minecraft:enchantments";
-const STORED: &str = "minecraft:stored_enchantments";
+pub(crate) const STORED: &str = "minecraft:stored_enchantments";
 const REPAIR_COST: &str = "minecraft:repair_cost";
 
 fn component(host: &dyn Host, stack: &ItemStack, id: &str) -> Option<Tag> {
     ItemResource::of(stack).value(host, &ComponentId::new(id)?)
 }
 
-fn levels(host: &dyn Host, stack: &ItemStack, component_id: &str) -> Option<Compound> {
+pub(crate) fn levels(host: &dyn Host, stack: &ItemStack, component_id: &str) -> Option<Compound> {
     match component(host, stack, component_id) {
         Some(Tag::Compound(levels)) => Some(levels),
         None => Some(Compound::new()),
@@ -287,7 +287,7 @@ fn levels(host: &dyn Host, stack: &ItemStack, component_id: &str) -> Option<Comp
     }
 }
 
-fn level(tag: &Tag) -> Option<i32> {
+pub(crate) fn level(tag: &Tag) -> Option<i32> {
     let number = match tag {
         Tag::Byte(value) => i32::from(*value),
         Tag::Short(value) => i32::from(*value),

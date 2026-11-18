@@ -760,6 +760,7 @@ fn menu_items(
                     advanced_processing::Family::AutoDisenchanter => {
                         ("minecraft:diamond_chestplate", 528)
                     }
+                    advanced_processing::Family::BookBinder => ("minecraft:iron_chestplate", 240),
                     _ => ("minecraft:flint_and_steel", 63),
                 },
                 RecipeFamily::OilPump | RecipeFamily::FluidPump => {
@@ -1301,8 +1302,7 @@ fn find_recipe(
             .iter()
             .map(|&index| stack_in(host, data, index))
             .collect();
-        let plan =
-            advanced_processing::next(host, spec, &stored, settings.freezer_use_vanilla_ratios)?;
+        let plan = advanced_processing::next(host, spec, &stored, settings)?;
         if !fits_all(host, data, &plan.outputs) {
             return None;
         }
