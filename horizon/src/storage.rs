@@ -7,7 +7,8 @@ use mod_api::{
 use std::{collections::BTreeMap, fmt::Write, sync::Mutex};
 
 use crate::{
-    geology, network_runtime::Networks, networks::Component, output_chest, universal_storage,
+    ancient_altar, geology, network_runtime::Networks, networks::Component, output_chest,
+    universal_storage,
 };
 
 fn read(host: &dyn ServerHost, path: &str) -> Result<toml::Table, String> {
@@ -331,6 +332,10 @@ fn at(
         if action == "restore-inventory" && !row.contains_key("paper_inventory") {
             return Err("There is no archived Paper inventory at that position.".into());
         }
+        if let Some(kind) = ancient_altar::paper_device(id) {
+            return ancient_altar::restore_paper(host, level, pos, kind, row)
+                .map(|restored| vec![restored]);
+        }
         if action == "restore-inventory" && !has_restorable_menu(component) {
             return Err(format!(
                 "Restoring the Paper menu for {id} is not supported yet."
@@ -481,7 +486,10 @@ fn restore_chunk(
         .into_iter()
         .filter_map(|(pos, row)| {
             let id = record_id(row)?;
-            (id == "OUTPUT_CHEST" || Component::for_item(id).is_some()).then_some((pos, row, id))
+            (id == "OUTPUT_CHEST"
+                || Component::for_item(id).is_some()
+                || ancient_altar::paper_device(id).is_some())
+            .then_some((pos, row, id))
         })
         .collect();
     let total = targets.len();
@@ -501,7 +509,9 @@ fn restore_chunk(
                 .get("inventory_slots")
                 .and_then(toml::Value::as_integer)
                 .is_some_and(|count| count != 0);
-        let result = if unsupported_menu {
+        let result = if let Some(kind) = ancient_altar::paper_device(id) {
+            ancient_altar::restore_paper(host, level, pos, kind, row)
+        } else if unsupported_menu {
             Err("This block has archived items without a supported menu.".into())
         } else if id == "OUTPUT_CHEST" {
             restore_output(host, level, pos)

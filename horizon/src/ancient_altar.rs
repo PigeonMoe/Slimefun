@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::{
+    OnceLock,
+    atomic::{AtomicI32, Ordering},
+};
 
 use mod_api::{
     AttachmentCodec, AttachmentType, BlockDropsEvent, Compound, EntityUuid, GameMode, Hand, Holder,
-    Host, HostSide, HostTransaction, InteractionResult, ItemDrop, ItemPart, ItemPlace,
-    ItemResource, ItemStack, LevelHost, LevelRef, OnBlockPlacedByEvent, PlayerRef, Registrar,
-    ServerHost, SoundSource, Tag, Text, UseOnEvent,
+    Host, HostSide, HostTransaction, ITEMS, InteractionResult, ItemDrop, ItemPart, ItemPlace,
+    ItemResource, ItemStack, LevelHost, LevelRef, OnBlockPlacedByEvent, ParticleKey,
+    ParticleOptions, PlayerRef, Registrar, ServerHost, SoundSource, Tag, Text, UseOnEvent,
 };
 
 use crate::{
@@ -286,6 +289,7 @@ const START_DELAY: i64 = 10;
 const DEFAULT_STEP_DELAY: i32 = 8;
 const FINISH_STAGE: i32 = 36;
 static STEP_DELAY: AtomicI32 = AtomicI32::new(DEFAULT_STEP_DELAY);
+static RITUAL_PARTICLES: OnceLock<[ParticleKey; 4]> = OnceLock::new();
 
 pub(crate) fn configure(delay: Option<i32>) {
     STEP_DELAY.store(delay.unwrap_or(DEFAULT_STEP_DELAY), Ordering::Relaxed);
@@ -304,9 +308,184 @@ fn id(data: &Compound) -> Option<Kind> {
         return None;
     };
     let id = id.to_string().ok()?;
+    paper_device(&id)
+}
+
+pub(crate) fn paper_device(id: &str) -> Option<Kind> {
     [ANCIENT_ALTAR, ANCIENT_PEDESTAL]
         .into_iter()
         .find(|kind| kind.id() == id)
+}
+
+fn legacy_probe_text(text: &str) -> bool {
+    let mut characters = text.chars();
+    let mut plain = String::new();
+    while let Some(character) = characters.next() {
+        if character == '§' {
+            characters.next();
+        } else {
+            plain.push(character);
+        }
+        if plain.len() > 64 {
+            break;
+        }
+    }
+    plain.starts_with("ALTAR Probe - ")
+}
+
+fn probe_name(name: &Tag, prefix: &mut String, depth: u8) {
+    if depth == 16 || prefix.len() >= 64 {
+        return;
+    }
+    match name {
+        Tag::String(text) => {
+            for character in text.to_string_lossy().chars().take(64) {
+                prefix.push(character);
+            }
+        }
+        Tag::Compound(text) => {
+            if let Some(text) = text.get(&"text".into()) {
+                probe_name(text, prefix, depth + 1);
+            }
+            if let Some(extra) = text.get(&"extra".into()) {
+                probe_name(extra, prefix, depth + 1);
+            }
+        }
+        Tag::List(parts) => {
+            for part in parts {
+                if prefix.len() >= 64 {
+                    break;
+                }
+                probe_name(part, prefix, depth + 1);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn has_paper_display(host: &dyn Host, level: LevelRef, pos: Pos) -> Option<bool> {
+    let [x, y, z] = pos.map(f64::from);
+    let candidates = level.entities_in(host, [x, y + 0.7, z], [x + 1.0, y + 1.7, z + 1.0])?;
+    Some(candidates.into_iter().any(|entity| {
+        if entity
+            .name(host)
+            .is_some_and(|name| legacy_probe_text(&name))
+        {
+            return true;
+        }
+        let Some(item) = host.item_entity(entity) else {
+            return false;
+        };
+        if item.pickup_delay(host) == Some(i32::from(i16::MAX)) {
+            return true;
+        }
+        let Some(stack) = item.stack(host) else {
+            return false;
+        };
+        let Some(name) = stack
+            .components()
+            .and_then(|data| data.as_nbt().get(&"minecraft:custom_name".into()))
+        else {
+            return false;
+        };
+        let mut prefix = String::new();
+        probe_name(name, &mut prefix, 0);
+        legacy_probe_text(&prefix)
+    }))
+}
+
+fn paper_ingredient(
+    host: &dyn ServerHost,
+    kind: Kind,
+    row: &toml::Table,
+) -> Result<Option<ItemStack>, String> {
+    if row
+        .get("metadata")
+        .and_then(toml::Value::as_table)
+        .is_some_and(|metadata| metadata.contains_key("item"))
+    {
+        return Err("Paper does not specify an ItemStack encoding for the altar metadata item field. The original metadata remains archived.".into());
+    }
+    if !row.contains_key("paper_inventory") {
+        return Ok(None);
+    }
+    crate::storage::validate_inventory_preset(row, kind.id())?;
+    let items = crate::storage::decode_archived_slots(host, row, 1)?;
+    match items.into_values().next() {
+        Some(item) if kind == ANCIENT_PEDESTAL && item.count() == 1 => Ok(Some(item)),
+        Some(_) => Err("An Ancient Pedestal archive can contain only one item. The original inventory remains archived.".into()),
+        None => Ok(None),
+    }
+}
+
+pub(crate) fn restore_paper(
+    host: &mut dyn ServerHost,
+    level: LevelRef,
+    pos: Pos,
+    kind: Kind,
+    row: &toml::Table,
+) -> Result<String, String> {
+    if !level.in_place(host)
+        || !level
+            .block_state(host, pos)
+            .is_some_and(|state| host.block_key(kind.material()) == Some(state.block()))
+    {
+        return Err(format!(
+            "Load the original {} carrier in the active dimension first.",
+            kind.id()
+        ));
+    }
+    let entity = host
+        .block_entity(level, pos)
+        .ok_or("The Paper altar carrier has no loaded block entity.")?;
+    let holder = Holder::BlockEntity(pos);
+    if let Some(saved) = DEVICE
+        .get_existing(host, holder)
+        .map_err(|_| "Could not read the loaded altar marker.")?
+    {
+        return match id(&saved) {
+            Some(saved_kind) if saved_kind == kind => {
+                Ok(format!("{} is already restored.", kind.id()))
+            }
+            _ => Err("This carrier already has a different or damaged altar marker.".into()),
+        };
+    }
+    if host
+        .block_entity_saved_attachment(entity, "slimefun", "network_state")
+        .is_some()
+    {
+        return Err("This carrier already belongs to a different Slimefun device.".into());
+    }
+    let item = paper_ingredient(host, kind, row)?;
+    if kind == ANCIENT_PEDESTAL {
+        if has_paper_display(host, level, pos) != Some(false) {
+            return Err("A Paper pedestal display may still be in the world. Recover its item in Paper before restoring this marker. The original archive and entities remain in place.".into());
+        }
+        let storage = level
+            .capability(host, &ITEMS, pos, None)
+            .ok_or("The Paper pedestal has no loaded dispenser inventory.")?;
+        if (0..storage.size(host)).any(|slot| storage.amount(host, slot) != 0) {
+            return Err("The pedestal carrier's vanilla dispenser still contains items.".into());
+        }
+    }
+    let mut marker = Compound::from([("id".into(), Tag::String(kind.id().into()))]);
+    let has_item = item.is_some();
+    if let Some(item) = item {
+        let saved = item
+            .to_nbt(host)
+            .ok_or("Could not encode the original pedestal item.")?;
+        marker.insert("item".into(), Tag::Compound(saved));
+    }
+    host.transaction(|host, _| {
+        DEVICE
+            .set(host, holder, marker)
+            .map_err(|_| "Could not save the Paper altar marker.")?;
+        if has_item {
+            watch_display(host, pos)?;
+        }
+        Ok::<_, &'static str>(())
+    })?;
+    Ok(format!("Restored the Paper {}.", kind.id()))
 }
 
 fn device(host: &mut dyn ServerHost, level: LevelRef, pos: Pos) -> Option<(Kind, Compound)> {
@@ -347,6 +526,15 @@ pub(crate) fn denies_placement(host: &dyn Host, level: LevelRef, pos: mod_api::B
 }
 
 pub(crate) fn register(registrar: &mut dyn Registrar) {
+    let _ = RITUAL_PARTICLES.set(
+        [
+            "minecraft:witch",
+            "minecraft:firework",
+            "minecraft:enchant",
+            "minecraft:enchanted_hit",
+        ]
+        .map(|id| registrar.particle_key(id)),
+    );
     for kind in [ANCIENT_ALTAR, ANCIENT_PEDESTAL] {
         let item = registrar.item_key(kind.material());
         registrar.item_part(item, Placement(kind));
@@ -883,8 +1071,8 @@ pub(crate) fn tick(host: &mut dyn ServerHost, level: LevelRef) {
 }
 
 enum Effect {
-    Stage(Pos),
-    Consume(Pos, Pos),
+    Stage(Pos, i32),
+    Consume(Pos, Pos, i32),
     Abort(Pos),
     Finish(Pos),
 }
@@ -892,11 +1080,9 @@ enum Effect {
 impl Effect {
     fn play(self, host: &mut dyn ServerHost, level: LevelRef) {
         match self {
-            Self::Stage(pos) => {
-                let _ = level.level_event(host, 2003, pos, 0);
-            }
-            Self::Consume(altar, pedestal) => {
-                let _ = level.level_event(host, 2003, altar, 0);
+            Self::Stage(pos, stage) => ritual_particles(host, level, pos, stage),
+            Self::Consume(altar, pedestal, stage) => {
+                ritual_particles(host, level, altar, stage);
                 sound(
                     host,
                     level,
@@ -914,15 +1100,65 @@ impl Effect {
                 1.0,
                 1.0,
             ),
-            Self::Finish(pos) => sound(
-                host,
-                level,
-                pos,
-                "minecraft:entity.zombie_villager.cure",
-                1.0,
-                1.0,
-            ),
+            Self::Finish(pos) => {
+                ritual_particles(host, level, pos, FINISH_STAGE);
+                sound(
+                    host,
+                    level,
+                    pos,
+                    "minecraft:entity.zombie_villager.cure",
+                    1.0,
+                    1.0,
+                );
+            }
         }
+    }
+}
+
+fn ritual_particles(host: &mut dyn ServerHost, level: LevelRef, altar: Pos, stage: i32) {
+    let Some([witch, firework, enchant, hit]) = RITUAL_PARTICLES.get().copied() else {
+        return;
+    };
+    let [x, y, z] = altar.map(|value| f64::from(value) + 0.5);
+    level.send_particles(
+        host,
+        &ParticleOptions::simple(witch),
+        None,
+        [x, y + 0.8, z],
+        [1.2, 0.0, 1.2],
+        0.0,
+        16,
+    );
+    level.send_particles(
+        host,
+        &ParticleOptions::simple(firework),
+        None,
+        [x, y + 0.8, z],
+        [0.2, 0.0, 0.2],
+        0.0,
+        8,
+    );
+    let Some(ring) = pedestals(altar) else { return };
+    for [x, y, z] in ring.into_iter().take((stage / 4).min(8) as usize) {
+        let at = [f64::from(x) + 0.5, f64::from(y) + 1.5, f64::from(z) + 0.5];
+        level.send_particles(
+            host,
+            &ParticleOptions::simple(enchant),
+            None,
+            at,
+            [0.3, 0.2, 0.3],
+            0.0,
+            16,
+        );
+        level.send_particles(
+            host,
+            &ParticleOptions::simple(hit),
+            None,
+            at,
+            [0.3, 0.2, 0.3],
+            0.0,
+            8,
+        );
     }
 }
 
@@ -956,9 +1192,9 @@ fn advance(
         DEVICE
             .set(host, Holder::BlockEntity(pedestal), marker)
             .map_err(|_| ())?;
-        Effect::Consume(altar, pedestal)
+        Effect::Consume(altar, pedestal, ritual.stage)
     } else {
-        Effect::Stage(altar)
+        Effect::Stage(altar, ritual.stage)
     };
     ritual.stage += 1;
     ritual.due = now.saturating_add(i64::from(ritual.step_delay));
@@ -1045,6 +1281,53 @@ pub(crate) fn decorate(id: &str, components: &mut Compound) {
 mod tests {
     use super::*;
     use mod_api::{Identifier, testing::FakeHost};
+
+    #[test]
+    fn paper_marker_archives_distinguish_absent_and_untyped_item_data() {
+        let host = FakeHost::new();
+        let empty: toml::Table = "[metadata]\nid = 'ANCIENT_PEDESTAL'".parse().unwrap();
+        assert!(
+            paper_ingredient(&host, ANCIENT_PEDESTAL, &empty)
+                .unwrap()
+                .is_none()
+        );
+        let untyped: toml::Table = "[metadata]\nid = 'ANCIENT_PEDESTAL'\nitem = 'opaque'"
+            .parse()
+            .unwrap();
+        assert!(
+            paper_ingredient(&host, ANCIENT_PEDESTAL, &untyped)
+                .unwrap_err()
+                .contains("remains archived")
+        );
+        let null: toml::Table =
+            "null_metadata_keys = ['item']\n[metadata]\nid = 'ANCIENT_PEDESTAL'"
+                .parse()
+                .unwrap();
+        assert!(
+            paper_ingredient(&host, ANCIENT_PEDESTAL, &null)
+                .unwrap()
+                .is_none()
+        );
+        let wrong: toml::Table = "paper_inventory = ''\ninventory_preset = 'ANCIENT_ALTAR'"
+            .parse()
+            .unwrap();
+        assert!(paper_ingredient(&host, ANCIENT_PEDESTAL, &wrong).is_err());
+        let mut prefix = String::new();
+        probe_name(
+            &Tag::compound([
+                ("text", Tag::String("ALTAR ".into())),
+                (
+                    "extra",
+                    Tag::List(vec![Tag::String("Probe - 178899".into())]),
+                ),
+            ]),
+            &mut prefix,
+            0,
+        );
+        assert!(legacy_probe_text(&prefix));
+        assert!(legacy_probe_text("§dALTAR §3Probe - §e79387"));
+        assert!(!legacy_probe_text("My ALTAR Probe - 178899"));
+    }
 
     #[test]
     fn the_paper_ring_accepts_rotations_but_not_mirrors_or_a_different_catalyst() {
