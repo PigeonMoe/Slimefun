@@ -3,9 +3,9 @@
 use crate::items::{
     CARBON, CARBON_CHUNK, COMPRESSED_CARBON, COPPER_DUST, CRUSHED_ORE, ENDER_LUMP_1, ENDER_LUMP_2,
     ENDER_LUMP_3, GOLD_4K, GOLD_6K, GOLD_8K, GOLD_10K, GOLD_12K, GOLD_14K, GOLD_16K, GOLD_18K,
-    GOLD_20K, GOLD_22K, GOLD_24K, GOLD_DUST, IRON_DUST, KELP_COOKIE, Kind, MAGIC_LUMP_1,
-    MAGIC_LUMP_2, MAGIC_LUMP_3, PULVERIZED_ORE, REINFORCED_ALLOY_INGOT, REINFORCED_PLATE,
-    SIFTED_ORE, STEEL_INGOT, STEEL_PLATE, STONE_CHUNK, SULFATE, WHEAT_FLOUR,
+    GOLD_20K, GOLD_22K, GOLD_24K, GOLD_DUST, IRON_DUST, KELP_COOKIE, Kind, LEAD_INGOT,
+    MAGIC_LUMP_1, MAGIC_LUMP_2, MAGIC_LUMP_3, OUTPUT_CHEST, PULVERIZED_ORE, REINFORCED_ALLOY_INGOT,
+    REINFORCED_PLATE, SIFTED_ORE, STEEL_INGOT, STEEL_PLATE, STONE_CHUNK, SULFATE, WHEAT_FLOUR,
 };
 
 #[derive(Clone, Copy)]
@@ -101,6 +101,7 @@ pub(crate) const RESEARCHES: &[Research] = &[
     SYNTHETIC_DIAMONDS,
     POWER_ITEMS,
     ORE_PURIFICATION,
+    CHEST_RESEARCH,
 ];
 
 const fn lump_upgrade(input: Kind, output: Kind) -> CraftingRecipe {
@@ -124,6 +125,21 @@ const fn lump_upgrade(input: Kind, output: Kind) -> CraftingRecipe {
 const KELP: Option<Kind> = Some(vanilla!("dried_kelp"));
 
 pub(crate) const CRAFTING: &[CraftingRecipe] = &[
+    CraftingRecipe {
+        inputs: [
+            Some(LEAD_INGOT),
+            Some(vanilla!("hopper")),
+            Some(LEAD_INGOT),
+            Some(LEAD_INGOT),
+            Some(vanilla!("chest")),
+            Some(LEAD_INGOT),
+            None,
+            Some(LEAD_INGOT),
+            None,
+        ],
+        output: stack(OUTPUT_CHEST, 1),
+        research: &CHEST_RESEARCH,
+    },
     lump_upgrade(MAGIC_LUMP_1, MAGIC_LUMP_2),
     lump_upgrade(MAGIC_LUMP_2, MAGIC_LUMP_3),
     lump_upgrade(ENDER_LUMP_1, ENDER_LUMP_2),
@@ -258,3 +274,9 @@ pub(crate) fn output_research(kind: Kind) -> Option<&'static Research> {
         _ => None,
     }
 }
+
+pub(crate) const CHEST_RESEARCH: Research = Research {
+    id: "output_chest",
+    name: "Basic machinery output chest",
+    cost: 20,
+};

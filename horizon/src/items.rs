@@ -408,3 +408,13 @@ item!(
     None,
     None
 );
+
+item!(LEAD_INGOT, "iron_ingot", "Lead Ingot", "aqua", None, None);
+item!(
+    OUTPUT_CHEST,
+    "chest",
+    "Output Chest",
+    "dark_red",
+    None,
+    None
+);

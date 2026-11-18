@@ -9,6 +9,7 @@ use mod_api::{
 };
 
 use crate::machine::{Dispenser, Refusal, deposit_stack};
+use crate::output_chest;
 
 const STEPS: &[(u32, &str)] = &[
     (0, "minecraft:block.piston.extend"),
@@ -98,6 +99,14 @@ impl Output {
         let same_unlocked_dispenser =
             loaded.is_some_and(|holder| holder == self.holder && holder.lock(host).is_none());
         let result: Result<(), ()> = host.transaction(|host, tx| {
+            if output_chest::try_deposit(
+                host,
+                self.dispenser.level,
+                self.dispenser.position,
+                &self.stack,
+            ) {
+                return Ok(());
+            }
             let remaining = if same_unlocked_dispenser {
                 deposit_stack(host, tx, self.dispenser, &self.stack, self.stack.count())
             } else {

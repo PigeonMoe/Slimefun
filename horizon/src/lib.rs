@@ -13,6 +13,7 @@ use mod_api::{
 mod compressor;
 mod items;
 mod machine;
+mod output_chest;
 mod recipes;
 mod research;
 
@@ -48,6 +49,11 @@ impl Slimefun {
 
 #[mod_api::horizon_mod]
 impl Hooks for Slimefun {
+    fn register(&self, registrar: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
+        let chest = registrar.item_key("minecraft:chest");
+        registrar.item_part(chest, output_chest::ChestPlacement);
+    }
+
     fn register_configs(&self, _: HostSide<'_>, event: &mut RegisterConfigsEvent<'_>) {
         event.configs.push(Config::new(
             "slimefun",

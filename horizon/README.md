@@ -50,7 +50,9 @@ Java 版源码和原有构建指令位于仓库根目录。
 
 ## 本地开发增量
 
-`0.1.0-dev.2` 加入了 Ore Crusher、Compressor、碳块配方和三项研究。Ore Crusher 默认启用原版的矿物翻倍。可在 `slimefun-server.toml` 将 `double-ores` 设置为 `false`，服务端会在读取该文件时应用设置。Compressor 按原版在第 0、20 和 40 个刻播放活塞声音，并在第 60 个刻交付产物。它当前向发射器交付，发射器无空间时尝试在机器位置掉落余量。
+`0.1.0-dev.2` 加入了 Ore Crusher、Compressor、碳块配方和四项研究。Ore Crusher 默认启用原版的矿物翻倍。可在 `slimefun-server.toml` 将 `double-ores` 设置为 `false`，服务端会在读取该文件时应用设置。Compressor 按原版在第 0、20 和 40 个刻播放活塞声音，并在第 60 个刻交付产物。四种机器优先将产物写入上、北、东、南、西方向中第一个容量足够的已标记输出箱，其次尝试发射器。压缩机交付时库存满会尝试在机器位置掉落余量。
+
+输出箱沿用原版 3×3 配方和 20 级研究。它当前需要已导入的 Slimefun 铅锭。标记随放置后的容器保存。拆除时恢复输出箱物品、原版的逐世界停用设置和新世界获取铅锭路径仍待补齐。
 
 使用 `scripts/runtime-smoke.py` 的 `--export-horizon-catalog` 可在独立 Paper 测试服导出 `probe-horizon-catalog.json`。输出记录该 Paper 实例中已注册的物品、配方、研究、原始物品 NBT，以及多方块机器的配方顺序。它用作对照样本。
 

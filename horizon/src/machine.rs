@@ -6,6 +6,7 @@ use mod_api::{
 };
 
 use crate::compressor::Compressor;
+use crate::output_chest;
 use crate::recipes::{COMPRESSING, CRAFTING, CRUSHING, DOUBLING, GRINDING, Stack, output_research};
 use crate::research;
 
@@ -263,7 +264,9 @@ fn deposit(
         .kind
         .stack(host, output.count)
         .ok_or(Refusal::Unavailable)?;
-    if deposit_stack(host, tx, dispenser, &stack, output.count) == 0 {
+    if output_chest::try_deposit(host, dispenser.level, dispenser.position, &stack)
+        || deposit_stack(host, tx, dispenser, &stack, output.count) == 0
+    {
         Ok(())
     } else {
         Err(Refusal::NoOutputSpace)
@@ -275,10 +278,38 @@ pub(crate) fn deposit_stack(
     tx: &Transaction,
     dispenser: Dispenser,
     stack: &ItemStack,
+    count: u32,
+) -> u32 {
+    deposit_into(
+        host,
+        tx,
+        dispenser.level,
+        dispenser.position,
+        9,
+        stack,
+        count,
+    )
+}
+
+pub(crate) fn deposit_into(
+    host: &mut dyn ServerHost,
+    tx: &Transaction,
+    level: LevelRef,
+    pos: [i32; 3],
+    slot_count: usize,
+    stack: &ItemStack,
     mut count: u32,
 ) -> u32 {
     let resource = ItemResource::of(stack);
-    let slots = dispenser.slots(host);
+    let place_at = |slot| ItemPlace::BlockEntity {
+        level,
+        pos,
+        side: None,
+        slot,
+    };
+    let slots: Vec<_> = (0..slot_count)
+        .map(|slot| place_at(slot).stack(host))
+        .collect();
     let occupied = slots.iter().enumerate().filter_map(|(index, current)| {
         current
             .as_ref()
@@ -291,7 +322,7 @@ pub(crate) fn deposit_stack(
         .filter_map(|(index, stack)| stack.is_none().then_some(index));
 
     for index in occupied.chain(empty) {
-        let place = ItemPlace::Strict(Box::new(dispenser.place(index)));
+        let place = ItemPlace::Strict(Box::new(place_at(index)));
         count -= place.insert(host, tx, &resource, count);
         if count == 0 {
             break;
@@ -317,16 +348,11 @@ mod tests {
         let powder = BLAZE_POWDER.stack(&host, 62).unwrap();
         set_slot(&mut host, 4, powder);
 
+        let output = BLAZE_POWDER.stack(&host, 4).unwrap();
         let result = (&mut host as &mut dyn ServerHost).transaction(|host, tx| {
-            deposit(
-                host,
-                tx,
-                dispenser,
-                Stack {
-                    kind: BLAZE_POWDER,
-                    count: 4,
-                },
-            )
+            (deposit_stack(host, tx, dispenser, &output, 4) == 0)
+                .then_some(())
+                .ok_or(Refusal::NoOutputSpace)
         });
 
         assert!(result.is_ok());
@@ -345,16 +371,11 @@ mod tests {
         let powder = BLAZE_POWDER.stack(&host, 63).unwrap();
         set_slot(&mut host, 4, powder);
 
+        let output = BLAZE_POWDER.stack(&host, 4).unwrap();
         let result = (&mut host as &mut dyn ServerHost).transaction(|host, tx| {
-            deposit(
-                host,
-                tx,
-                dispenser,
-                Stack {
-                    kind: BLAZE_POWDER,
-                    count: 4,
-                },
-            )
+            (deposit_stack(host, tx, dispenser, &output, 4) == 0)
+                .then_some(())
+                .ok_or(Refusal::NoOutputSpace)
         });
 
         assert!(matches!(result, Err(Refusal::NoOutputSpace)));
