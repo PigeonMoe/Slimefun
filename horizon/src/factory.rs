@@ -35,6 +35,8 @@ pub(crate) mod charging_bench;
 pub(crate) mod experience_collector;
 #[path = "fluid_pump.rs"]
 pub(crate) mod fluid_pump;
+#[path = "produce_collector.rs"]
+pub(crate) mod produce_collector;
 #[path = "reactors.rs"]
 pub(crate) mod reactors;
 
@@ -121,6 +123,7 @@ enum RecipeFamily {
     OilPump,
     FluidPump,
     ExperienceCollector,
+    ProduceCollector,
     Reactor(&'static reactors::Reactor),
     ReactorPort,
 }
@@ -298,6 +301,18 @@ impl FactoryViewers {
 impl ElectricMachine {
     pub fn for_item(id: &str) -> Option<Self> {
         use RecipeFamily::{Furnace, HeatedPressure, IngotPulverizer, OreGrinder};
+        if id == produce_collector::PRODUCE_COLLECTOR.id() {
+            return Some(Self {
+                id: produce_collector::PRODUCE_COLLECTOR.id(),
+                carrier: produce_collector::PRODUCE_COLLECTOR.material(),
+                title: "Produce Collector",
+                cost: produce_collector::COST,
+                work_ticks: produce_collector::WORK_TICKS,
+                research: &produce_collector::RESEARCH,
+                family: RecipeFamily::ProduceCollector,
+                speed: 1,
+            });
+        }
         if id == experience_collector::XP_COLLECTOR.id() {
             return Some(Self {
                 id: experience_collector::XP_COLLECTOR.id(),
@@ -746,6 +761,7 @@ fn menu_items(
                     Family::IngotFactory => ("minecraft:flint_and_steel", 63),
                 },
                 RecipeFamily::Fuel(spec) => spec.progress_icon(),
+                RecipeFamily::ProduceCollector => ("minecraft:shears", 237),
                 RecipeFamily::Advanced(spec) => match spec.family {
                     advanced_processing::Family::CarbonPress => ("minecraft:diamond_pickaxe", 1560),
                     advanced_processing::Family::Freezer => ("minecraft:golden_pickaxe", 31),
@@ -1360,6 +1376,7 @@ fn find_recipe(
         | RecipeFamily::Advanced(_)
         | RecipeFamily::FluidPump
         | RecipeFamily::ExperienceCollector
+        | RecipeFamily::ProduceCollector
         | RecipeFamily::Reactor(_)
         | RecipeFamily::ReactorPort => None,
     }?;
@@ -1442,13 +1459,20 @@ pub(crate) fn tick(
             .ok();
     }
 
+    let run = if matches!(furnace.family, RecipeFamily::ProduceCollector) {
+        find_produce(host, &data, |recipe| {
+            recipe.has_animal(host, level, pos, settings.produce_collector_range)
+        })
+    } else {
+        find_recipe(host, &data, furnace, settings, |bound| {
+            rolls.next(host, level, bound)
+        })
+    }?;
     let RecipeRun {
         inputs,
         outputs,
         work_override,
-    } = find_recipe(host, &data, furnace, settings, |bound| {
-        rolls.next(host, level, bound)
-    })?;
+    } = run;
     let pumping_oil = matches!(furnace.family, RecipeFamily::OilPump);
     if pumping_oil && geology::supply(host, level, pos).ok()?.unwrap_or(0) == 0 {
         let (index, (bucket, _)) = inputs
@@ -1478,6 +1502,28 @@ pub(crate) fn tick(
         save(host, storage, next).then_some(charge).ok_or(())
     })
     .ok()
+}
+
+fn find_produce(
+    host: &dyn Host,
+    data: &Compound,
+    has_animal: impl Fn(produce_collector::Produce) -> bool,
+) -> Option<RecipeRun> {
+    for index in INPUT {
+        let Some(input) = stack_in(host, data, index) else {
+            continue;
+        };
+        for &recipe in produce_collector::RECIPES {
+            if recipe.input.matches(host, &input)
+                && let Some(output) = recipe.output.stack(host, 1)
+                && fits(host, data, &output)
+                && has_animal(recipe)
+            {
+                return Some(RecipeRun::single(index, input, 1, output));
+            }
+        }
+    }
+    None
 }
 
 fn charge_items(
@@ -1721,6 +1767,47 @@ pub(crate) fn restore_paper_inventory(
 mod tests {
     use super::*;
     use mod_api::testing::FakeHost;
+
+    #[test]
+    fn produce_collector_checks_for_animals_and_output_space_before_starting() {
+        let mut host = FakeHost::new();
+        host.registries
+            .resolve_items(
+                ["bucket", "bowl", "milk_bucket", "mushroom_stew", "stone"]
+                    .map(|id| Identifier::parse(&format!("minecraft:{id}")).unwrap()),
+            )
+            .unwrap();
+        let mut data = Compound::new();
+        for (slot, recipe) in INPUT.into_iter().zip(produce_collector::RECIPES) {
+            assert!(write_stack(
+                &host,
+                &mut data,
+                slot,
+                recipe.input.stack(&host, 1)
+            ));
+        }
+        let machine = ElectricMachine::for_item("PRODUCE_COLLECTOR").unwrap();
+        assert_eq!(machine.menu_slots(), [19, 20, 24, 25]);
+        assert_eq!((machine.cost, machine.work_ticks), (16, 10));
+        let milk = Kind::Vanilla("minecraft:milk_bucket");
+        let stew = Kind::Vanilla("minecraft:mushroom_stew");
+        assert!(find_produce(&host, &data, |_| false).is_none());
+        let run = find_produce(&host, &data, |_| true).unwrap();
+        assert!(milk.matches(&host, &run.outputs[0]));
+        let run = find_produce(&host, &data, |recipe| recipe.output == stew).unwrap();
+        assert!(stew.matches(&host, &run.outputs[0]));
+        assert!(run.inputs[0].is_none() && run.inputs[1].is_some());
+
+        for slot in OUTPUT {
+            assert!(write_stack(
+                &host,
+                &mut data,
+                slot,
+                Kind::Vanilla("minecraft:stone").stack(&host, 64),
+            ));
+        }
+        assert!(find_produce(&host, &data, |_| true).is_none());
+    }
 
     #[test]
     fn freezer_checks_both_outputs_and_reads_the_legacy_single_product_format() {

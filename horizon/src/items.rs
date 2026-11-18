@@ -131,6 +131,9 @@ impl SlimefunItem {
         if self.id == IGNITION_CHAMBER.id() {
             components.insert("minecraft:lore".into(), crate::ignition_chamber::lore());
         }
+        if self.id == crate::factory::produce_collector::PRODUCE_COLLECTOR.id() {
+            components.insert("minecraft:lore".into(), crate::factory::produce_collector::lore());
+        }
         crate::enchantment_machines::decorate(self.id, &mut components);
         if let Some(texture) = &self.texture {
             components.insert(
@@ -860,6 +863,7 @@ pub(crate) fn network_item(id: &str) -> Option<Kind> {
         SMALL_CAPACITOR,
         SOLAR_GENERATOR,
         IGNITION_CHAMBER,
+        crate::factory::produce_collector::PRODUCE_COLLECTOR,
         crate::advanced_processing::CRUCIBLE,
         crate::auto_anvil::DUCT_TAPE,
         crate::enchantment_machines::WITHER_PROOF_OBSIDIAN,

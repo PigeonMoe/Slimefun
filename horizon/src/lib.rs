@@ -91,6 +91,14 @@ impl Slimefun {
             return;
         };
         settings.book_binder = book_binder::Rules::read_config(&table);
+        if let Some(range) = table
+            .get("produce-collector")
+            .and_then(|section| section.get("range"))
+            .and_then(toml::Value::as_integer)
+            .filter(|range| (1..=32).contains(range))
+        {
+            settings.produce_collector_range = range as u8;
+        }
         if let Some(value) = table
             .get("crucible-allow-water-in-nether")
             .and_then(toml::Value::as_bool)
@@ -213,7 +221,7 @@ impl Hooks for Slimefun {
         event.configs.push(Config::new(
             "slimefun",
             ConfigKind::Server,
-            "double-ores = true\ncrucible-allow-water-in-nether = false\nlegacy-ore-washer = false\nlegacy-dust-washer = false\nlegacy-ore-grinder = true\nelectric-gold-pan-override-output-limit = [false, false, false]\nfreezer-use-vanilla-ratios = [false, false, false]\nfire-breaking-chance = 34\noutput-chest-enabled = true\ndrop-from-golems = true\ngolem-drop-chance = 75\n\n[networks]\nenable-visualizer = true\ncargo-ticker-delay = 0\n\n[book-binder]\nbypass-vanilla-max-level = false\nhas-custom-max-level = false\ncustom-max-level = 15\n",
+            "double-ores = true\ncrucible-allow-water-in-nether = false\nlegacy-ore-washer = false\nlegacy-dust-washer = false\nlegacy-ore-grinder = true\nelectric-gold-pan-override-output-limit = [false, false, false]\nfreezer-use-vanilla-ratios = [false, false, false]\nfire-breaking-chance = 34\noutput-chest-enabled = true\ndrop-from-golems = true\ngolem-drop-chance = 75\n\n[networks]\nenable-visualizer = true\ncargo-ticker-delay = 0\n\n[book-binder]\nbypass-vanilla-max-level = false\nhas-custom-max-level = false\ncustom-max-level = 15\n\n[produce-collector]\nrange = 2\n",
         ));
     }
 
@@ -439,6 +447,7 @@ impl Hooks for Slimefun {
                 "An Electric Food Fabricator cans crops using Tin Cans. A Food Composter turns the canned food into fertilizer.".into(),
                 "The Charging Bench recharges individual Slimefun gadgets. Cargo can collect them from the output once they are fully charged.".into(),
                 "Load the Auto Brewer with a potion and one brewing ingredient. It accepts regular, splash and lingering bottles.".into(),
+                "Supply a powered Produce Collector with buckets near adult cows or goats, or bowls near adult mooshrooms.".into(),
                 "Use /sf recipe <item> to read a supported recipe, /sf research <key> to unlock research, and /sf status to view coverage.".into(),
             ],
             _ => return Flow::Continue,

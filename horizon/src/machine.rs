@@ -50,6 +50,7 @@ pub(crate) struct Settings {
     pub golem_drop_chance: u32,
     pub cargo_visualizer: bool,
     pub cargo_tick_delay: u32,
+    pub produce_collector_range: u8,
 }
 
 impl Default for Settings {
@@ -67,6 +68,7 @@ impl Default for Settings {
             golem_drop_chance: 75,
             cargo_visualizer: true,
             cargo_tick_delay: 0,
+            produce_collector_range: crate::factory::produce_collector::DEFAULT_RANGE,
         }
     }
 }
