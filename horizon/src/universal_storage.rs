@@ -226,24 +226,48 @@ impl Inventory {
     }
 }
 
-fn live(host: &mut dyn ServerHost, preset: &str) -> Result<Option<Inventory>, String> {
-    let lookup = |data: &Compound| data.get(&preset.into()).cloned();
-    let value = match INVENTORIES
+fn read_live<R>(
+    host: &mut dyn ServerHost,
+    preset: &str,
+    read: impl Fn(&Compound) -> R,
+) -> Result<Option<R>, String> {
+    let lookup = |data: &Compound| match data.get(&preset.into()) {
+        Some(Tag::Compound(record)) => Ok(Some(read(record))),
+        Some(_) => Err("The saved universal inventory is corrupt.".into()),
+        None => Ok(None),
+    };
+    match INVENTORIES
         .with_decoded(host, Holder::Server, |data| data.map(lookup))
         .map_err(|_| "The global universal inventory store is unavailable.")?
     {
-        Some(value) => value,
+        Some(result) => result,
         None => INVENTORIES
             .get_existing(host, Holder::Server)
             .map_err(|_| "The global universal inventory store is unavailable.")?
             .as_ref()
-            .and_then(lookup),
-    };
-    match value {
-        Some(Tag::Compound(value)) => Inventory::decode(host, &value).map(Some),
-        Some(_) => Err("The saved universal inventory is corrupt.".into()),
-        None => Ok(None),
+            .map_or(Ok(None), lookup),
     }
+}
+
+fn live(host: &mut dyn ServerHost, preset: &str) -> Result<Option<Inventory>, String> {
+    read_live(host, preset, Compound::clone)?
+        .map(|record| Inventory::decode(host, &record))
+        .transpose()
+}
+
+fn live_stack(host: &mut dyn ServerHost, preset: &str, slot: u32) -> Option<ItemStack> {
+    let key = slot.to_string();
+    let stack = read_live(host, preset, |record| {
+        let Tag::Compound(items) = record.get(&"items".into())? else {
+            return None;
+        };
+        let Tag::Compound(stack) = items.get(&key.as_str().into())? else {
+            return None;
+        };
+        Some(stack.clone())
+    })
+    .ok()??;
+    ItemStack::from_nbt(host, &stack?)
 }
 
 fn save(host: &mut dyn ServerHost, preset: &str, inventory: &Inventory) -> Result<(), String> {
@@ -301,6 +325,7 @@ struct View {
     player: PlayerRef,
     window: i32,
     preset: String,
+    slots: u64,
 }
 
 #[derive(Default)]
@@ -364,6 +389,7 @@ impl UniversalStorage {
             player,
             window,
             preset: preset.to_owned(),
+            slots: inventory.layout.slots,
         };
         {
             let mut viewers = self.0.lock().unwrap();
@@ -392,23 +418,20 @@ impl UniversalStorage {
         Ok(())
     }
 
-    fn target(&self, host: &mut dyn ServerHost, key: u64) -> Option<(View, Inventory, u32)> {
+    fn target(&self, host: &mut dyn ServerHost, key: u64) -> Option<(View, u32)> {
         let id = key >> SLOT_BITS;
         let slot = (key & ((1 << SLOT_BITS) - 1)) as u32;
         let view = self.0.lock().unwrap().open.get(&id)?.clone();
-        if view
-            .player
-            .permission_level(host)
-            .is_none_or(|level| level < 2)
+        if view.slots & (1 << slot) == 0
+            || view
+                .player
+                .permission_level(host)
+                .is_none_or(|level| level < 2)
             || host.menu(view.player.uuid(), view.window).is_none()
         {
             return None;
         }
-        let inventory = live(host, &view.preset).ok()??;
-        inventory
-            .layout
-            .has(slot)
-            .then_some((view, inventory, slot))
+        Some((view, slot))
     }
 }
 
@@ -483,8 +506,8 @@ impl PlaceProvider for UniversalStorage {
     }
 
     fn stack(&self, host: &mut dyn ServerHost, key: u64) -> Option<ItemStack> {
-        let (_, mut inventory, slot) = self.target(host, key)?;
-        inventory.items.remove(&slot)
+        let (view, slot) = self.target(host, key)?;
+        live_stack(host, &view.preset, slot)
     }
 
     fn insert(
@@ -495,7 +518,10 @@ impl PlaceProvider for UniversalStorage {
         resource: &ItemResource,
         amount: u32,
     ) -> u32 {
-        let Some((view, mut inventory, slot)) = self.target(host, key) else {
+        let Some((view, slot)) = self.target(host, key) else {
+            return 0;
+        };
+        let Ok(Some(mut inventory)) = live(host, &view.preset) else {
             return 0;
         };
         let moved = insert_slot(host, &mut inventory.items, slot, resource, amount);
@@ -514,7 +540,10 @@ impl PlaceProvider for UniversalStorage {
         resource: &ItemResource,
         amount: u32,
     ) -> u32 {
-        let Some((view, mut inventory, slot)) = self.target(host, key) else {
+        let Some((view, slot)) = self.target(host, key) else {
+            return 0;
+        };
+        let Ok(Some(mut inventory)) = live(host, &view.preset) else {
             return 0;
         };
         let moved = extract_slot(&mut inventory.items, slot, resource, amount);
@@ -580,6 +609,8 @@ mod tests {
         assert!(live(&mut host, "SHARED").unwrap().is_none());
         assert!(restore_once(&mut host, "SHARED", |_| original()).unwrap());
         assert!(live(&mut host, "shared").unwrap().is_none());
+        assert_eq!(live_stack(&mut host, "SHARED", 17), Some(item.clone()));
+        assert!(live_stack(&mut host, "SHARED", 8).is_none());
         let before = host.attachments.to_nbt();
         let aborted = host.transaction(|host, _| {
             let mut inventory = live(host, "SHARED").unwrap().unwrap();
@@ -600,7 +631,20 @@ mod tests {
         let active = live(&mut host, "SHARED").unwrap().unwrap();
         assert!(active.layout.has(17));
         assert!(active.items.is_empty());
+        assert!(live_stack(&mut host, "SHARED", 17).is_none());
         assert!(!restore_once(&mut host, "SHARED", |_| original()).unwrap());
         assert!(live(&mut host, "SHARED").unwrap().unwrap().items.is_empty());
+
+        let mut records = INVENTORIES
+            .get_existing(&mut host as &mut dyn ServerHost, Holder::Server)
+            .unwrap()
+            .unwrap();
+        records.insert("Damaged".into(), Tag::String("saved data".into()));
+        INVENTORIES
+            .set(&mut host as &mut dyn ServerHost, Holder::Server, records)
+            .unwrap();
+        let damaged = host.attachments.to_nbt();
+        assert!(restore_once(&mut host, "Damaged", |_| original()).is_err());
+        assert_eq!(host.attachments.to_nbt(), damaged);
     }
 }
