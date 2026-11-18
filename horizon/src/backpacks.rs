@@ -18,6 +18,10 @@ use crate::{
     storage::decode_archived_slots,
 };
 
+#[path = "special_backpacks.rs"]
+mod special;
+pub(crate) use special::keep_on_death;
+
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub(crate) struct BackpackId {
     pub owner: u128,
@@ -96,6 +100,8 @@ pub(crate) const RESEARCHES: &[Research] = &[
     WOVEN_RESEARCH,
     GILDED_RESEARCH,
     RADIANT_RESEARCH,
+    special::SOULBOUND_STORAGE,
+    special::ENDER_STORAGE,
 ];
 
 const BACKPACK_TEXTURE: HeadTexture = HeadTexture {
@@ -259,6 +265,7 @@ fn tier(id: &str) -> Option<(u32, &'static Research)> {
         "WOVEN_BACKPACK" => (36, &WOVEN_RESEARCH),
         "GILDED_BACKPACK" => (45, &GILDED_RESEARCH),
         "RADIANT_BACKPACK" => (54, &RADIANT_RESEARCH),
+        "BOUND_BACKPACK" => (36, &special::SOULBOUND_STORAGE),
         _ => return None,
     })
 }
@@ -310,7 +317,7 @@ fn allowed_contents(host: &dyn Host, stack: &ItemStack) -> bool {
         tier(&id).is_none()
             && !matches!(
                 id.as_str(),
-                "BOUND_BACKPACK" | "RESTORED_BACKPACK" | "COOLER" | "ENDER_BACKPACK"
+                "RESTORED_BACKPACK" | "COOLER" | "ENDER_BACKPACK"
             )
     })
 }
@@ -383,13 +390,13 @@ fn binding(stack: &ItemStack) -> Result<Binding, &'static str> {
 
 fn backpack_item(host: &dyn Host, stack: &ItemStack) -> Result<(Binding, u32), &'static str> {
     if stack.item().id(host) != "minecraft:player_head" {
-        return Err("Hold an ordinary Slimefun backpack.");
+        return Err("Hold a numbered Slimefun backpack.");
     }
     let capacity = item_id(stack)
         .as_deref()
         .and_then(tier)
         .map(|(size, _)| size)
-        .ok_or("Hold an ordinary Slimefun backpack.")?;
+        .ok_or("Hold a numbered Slimefun backpack.")?;
     if stack.count() != 1 {
         return Err("Backpacks must be held one at a time.");
     }
@@ -804,17 +811,20 @@ pub(crate) fn prepare_craft(
     Ok(())
 }
 
-fn carry_soulbound(source: &ItemStack, output: &mut ItemStack) -> Result<(), &'static str> {
-    const KEY: &str = "slimefun:soulbound";
-    let Some(components) = source.components() else {
-        return Ok(());
-    };
+const SOULBOUND_KEY: &str = "slimefun:soulbound";
+
+fn soulbound_marker(source: &ItemStack) -> Option<Tag> {
+    let components = source.components()?;
     let flag = components
         .as_nbt()
         .get(&"minecraft:custom_data".into())
         .and_then(|data| data.get("PublicBukkitValues"))
-        .and_then(|data| data.get(KEY))
-        .filter(|tag| matches!(tag, Tag::Byte(_)));
+        .and_then(|data| data.get(SOULBOUND_KEY))
+        .filter(|tag| matches!(tag, Tag::Byte(_)))
+        .cloned();
+    if flag.is_some() {
+        return flag;
+    }
     let has_lore = components
         .as_nbt()
         .get(&"minecraft:lore".into())
@@ -826,9 +836,13 @@ fn carry_soulbound(source: &ItemStack, output: &mut ItemStack) -> Result<(), &'s
                     && matches!(literal.as_str(), "Soulbound" | "§7Soulbound")
             })
         });
-    if flag.is_none() && !has_lore {
+    has_lore.then_some(Tag::Byte(1))
+}
+
+fn carry_soulbound(source: &ItemStack, output: &mut ItemStack) -> Result<(), &'static str> {
+    let Some(flag) = soulbound_marker(source) else {
         return Ok(());
-    }
+    };
     let mut components = output
         .components()
         .ok_or("The upgraded backpack has no components.")?
@@ -844,7 +858,7 @@ fn carry_soulbound(source: &ItemStack, output: &mut ItemStack) -> Result<(), &'s
     let Some(Tag::Compound(values)) = data.get_mut(&"PublicBukkitValues".into()) else {
         return Err("The upgraded backpack has no Slimefun item data.");
     };
-    values.insert(KEY.into(), flag.cloned().unwrap_or(Tag::Byte(1)));
+    values.insert(SOULBOUND_KEY.into(), flag);
     output
         .set_components(components)
         .map_err(|_| "Could not preserve the Soulbound marker.")
@@ -1099,6 +1113,9 @@ impl BackpackMenus {
         let Some(stack) = place.stack(host) else {
             return false;
         };
+        if special::open_ender(host, player, &stack) {
+            return true;
+        }
         let Some((_, required)) = item_id(&stack).as_deref().and_then(tier) else {
             return false;
         };
@@ -1382,7 +1399,10 @@ mod tests {
         );
         current.set_count(2).unwrap();
         assert!(held_id(&host, &current).is_err());
-        assert!(held_id(&host, &bag(&host, "BOUND_BACKPACK", tagged_lines())).is_err());
+        assert_eq!(
+            held_id(&host, &bag(&host, "BOUND_BACKPACK", tagged_lines())),
+            Ok((ID, 36))
+        );
         assert!(
             held_id(
                 &host,
@@ -1400,6 +1420,41 @@ mod tests {
         assert!(may_restore(ID, OWNER, PermissionLevel::All));
         assert!(may_restore(ID, RECIPIENT, PermissionLevel::Gamemasters));
         assert!(!may_restore(ID, RECIPIENT, PermissionLevel::Moderators));
+    }
+
+    #[test]
+    fn paper_bound_backpacks_keep_the_original_identity_and_recognize_legacy_runes() {
+        let mut host = fixture();
+        let bound = bag(&host, "BOUND_BACKPACK", tagged_lines());
+        assert!(keep_on_death(&host, &bound));
+        assert_eq!(held_id(&host, &bound), Ok((ID, 36)));
+        assert!(!keep_on_death(
+            &host,
+            &bag(&host, "SMALL_BACKPACK", tagged_lines())
+        ));
+
+        let mut marked = tagged_lines();
+        marked.push(string("§7Soulbound"));
+        assert!(keep_on_death(
+            &host,
+            &bag(&host, "SMALL_BACKPACK", marked.clone())
+        ));
+        assert!(!keep_on_death(&host, &bag(&host, "UNKNOWN_HEAD", marked)));
+
+        let item = material(&host, "minecraft:diamond", 2);
+        let record = Backpack {
+            size: 36,
+            slots: BTreeMap::from([(35, item.clone())]),
+            paper: true,
+        };
+        host.transaction(|host, tx| {
+            bind_paper(host, tx, &GlobalBackpacks, ID, 36, |_, _, _| Ok(record))
+        })
+        .unwrap();
+        assert_eq!(
+            live_bag(&mut host, ID, 36).unwrap().unwrap().slots[&35],
+            item
+        );
     }
 
     #[test]

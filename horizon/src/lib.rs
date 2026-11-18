@@ -510,6 +510,18 @@ impl Hooks for Slimefun {
         Flow::Continue
     }
 
+    fn player_keep_death_item(
+        &self,
+        host: &dyn mod_api::Host,
+        event: &mut mod_api::PlayerKeepDeathItemEvent<'_>,
+    ) -> Flow {
+        if backpacks::keep_on_death(host, event.stack) {
+            Flow::Cancel
+        } else {
+            Flow::Continue
+        }
+    }
+
     fn player_logged_in(&self, host: &mut dyn ServerHost, event: &mut PlayerLoggedInEvent<'_>) {
         if let Some(player) = host.player(event.player) {
             research::import_legacy(host, player);
