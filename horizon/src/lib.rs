@@ -17,6 +17,7 @@ mod auto_anvil;
 mod auto_brewer;
 mod auto_crafter;
 mod backpacks;
+mod bee_wings;
 mod book_binder;
 mod circuits;
 mod composter;
@@ -65,6 +66,7 @@ struct Slimefun {
     chest: Mutex<Option<ItemKey>>,
     networks: Arc<Mutex<network_runtime::Networks>>,
     backpacks: backpacks::BackpackMenus,
+    bee_wings: bee_wings::BeeWings,
     universal: universal_storage::UniversalStorage,
 }
 
@@ -79,6 +81,7 @@ impl Default for Slimefun {
             chest: Mutex::new(None),
             networks: Arc::default(),
             backpacks: backpacks::BackpackMenus::default(),
+            bee_wings: bee_wings::BeeWings::default(),
             universal: universal_storage::UniversalStorage::default(),
         }
     }
@@ -726,6 +729,22 @@ impl Hooks for Slimefun {
         }
     }
 
+    fn player_logged_out(&self, _: &mut dyn ServerHost, event: &mut mod_api::PlayerLoggedOutEvent<'_>) {
+        self.bee_wings.stop(event.player);
+    }
+
+    fn entity_toggle_glide(
+        &self,
+        host: &mut dyn ServerHost,
+        event: &mut mod_api::EntityToggleGlideEvent<'_>,
+    ) {
+        if event.gliding {
+            self.bee_wings.start(host, event.player);
+        } else {
+            self.bee_wings.stop(event.player);
+        }
+    }
+
     fn menu_clicked(&self, host: &mut dyn ServerHost, event: &mut mod_api::MenuClickedEvent) {
         auto_crafter::clicked(host, event);
         factory::VIEWERS.clicked(host, event);
@@ -785,6 +804,7 @@ impl Hooks for Slimefun {
             ancient_altar::tick(host, event.level);
             auto_crafter::refresh(host, event.level);
             armor_forge::tick_equipment(host, event.level);
+            self.bee_wings.tick(host, event.level);
         }
     }
 
@@ -803,6 +823,7 @@ impl Hooks for Slimefun {
     fn server_stopping(&self, _: &mut dyn ServerHost, _: &mut ServerStoppingEvent) {
         auto_crafter::clear();
         self.backpacks.clear();
+        self.bee_wings.clear();
         self.universal.clear();
         factory::VIEWERS.clear();
         self.networks.lock().unwrap().clear();

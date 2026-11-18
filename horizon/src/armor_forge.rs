@@ -148,7 +148,11 @@ research!(
     "Boots of the Stomper",
     19
 );
-research!(BEE_ARMOR, "bee_armor", "Bee Armor", 24);
+pub(crate) const BEE_ARMOR: Research = Research {
+    id: "bee_armor",
+    name: "Bee Armor",
+    cost: 24,
+};
 research!(ELYTRA_CAP_RESEARCH, "elytra_cap", "Crash Gear", 20);
 research!(LEAD_CLOTHING, "lead_clothing", "Lead Clothing", 14);
 research!(SPECIAL_RUNES, "special_runes", "Purple Runes", 18);
