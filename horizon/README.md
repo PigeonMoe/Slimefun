@@ -1,6 +1,6 @@
 # Slimefun for Horizon 26.3
 
-本分支从 PigeonMoe Slimefun 5.0.1 的 `26.2` 分支（`f6d16b6`）移植，保留原有 GPLv3 许可证。当前版本为服务端 WebAssembly 预览，提供部分多方块机器。全量 1:1 移植仍在开发。
+本分支从 PigeonMoe Slimefun 5.0.1 的 `26.2` 分支（`f6d16b6`）移植，保留原有 GPLv3 许可证。已发布版本为服务端 WebAssembly 预览，提供部分多方块机器。全量 1:1 移植仍在开发。
 
 ## 安装
 
@@ -47,3 +47,21 @@ target/debug/cargo-horizon-mod wasm-std target/horizon-wasm-std.wasm
 ```
 
 Java 版源码和原有构建指令位于仓库根目录。
+
+## 本地开发增量
+
+`0.1.0-dev.2` 加入了 Ore Crusher、Compressor、碳块配方和三项研究。Ore Crusher 默认启用原版的矿物翻倍。可在 `slimefun-server.toml` 将 `double-ores` 设置为 `false`，服务端会在读取该文件时应用设置。Compressor 按原版在第 0、20 和 40 个刻播放活塞声音，并在第 60 个刻交付产物。它当前向发射器交付，发射器无空间时尝试在机器位置掉落余量。
+
+使用 `scripts/runtime-smoke.py` 的 `--export-horizon-catalog` 可在独立 Paper 测试服导出 `probe-horizon-catalog.json`。输出记录该 Paper 实例中已注册的物品、配方、研究、原始物品 NBT，以及多方块机器的配方顺序。它用作对照样本。
+
+以下命令从 Paper 的 `data-storage/Slimefun/Players` 生成研究导入文件。Python 环境需要 PyYAML。目标目录位于对应 Horizon 世界内。
+
+```sh
+python3 horizon/tools/import-research.py probe-horizon-catalog.json \
+  /path/to/paper/data-storage/Slimefun/Players \
+  /path/to/horizon-world/horizon-mod-data/slimefun/research-import
+```
+
+匹配同一 UUID 的玩家进入 Horizon 后会合并研究记录。导入保留已有研究和其他持久数据，重复导入不会扣除经验。该工具支持旧 YAML 的研究项，背包、航点、世界方块数据及 PM-Sync 数据仍待移植。
+
+开发版在完成真实客户端联合验收后才可发布。本地开发版的功能与上面的已发布预览说明对应不同构建。

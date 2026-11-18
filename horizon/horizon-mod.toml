@@ -1,7 +1,7 @@
 id = "slimefun"
 name = "Slimefun"
-version = "0.1.0-preview.1"
-description = "PigeonMoe's Slimefun server mod for Horizon 26.3. Preview of the basic multiblock port."
+version = "0.1.0-dev.2"
+description = "PigeonMoe's Slimefun server mod for Horizon 26.3. Development build of the basic multiblock port."
 authors = ["Slimefun contributors", "PigeonMoe"]
 api = "0.2"
 side = "server"

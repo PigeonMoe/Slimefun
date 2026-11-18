@@ -1,6 +1,6 @@
 [package]
 name = "slimefun-horizon"
-version = "0.1.0-preview.1"
+version = "0.1.0-dev.2"
 edition = "2024"
 license = "GPL-3.0-only"
 publish = false
@@ -13,6 +13,7 @@ crate-type = ["rlib", "cdylib"]
 
 [dependencies]
 horizon-mod-api = { path = ".horizon/sdk/crates/horizon-mod-api" }
+toml = { version = "1.2", default-features = false, features = ["parse", "serde"] }
 
 [workspace]
 

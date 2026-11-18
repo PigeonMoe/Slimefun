@@ -257,3 +257,154 @@ mod tests {
         assert!(!MAGIC_LUMP_1.matches(&host, &wrong_material));
     }
 }
+
+// Resource items used by the starter production machines.
+item!(
+    COMPRESSED_CARBON,
+    "player_head",
+    "Compressed Carbon",
+    "red",
+    None,
+    Some(HeadTexture {
+        profile: [-1629223925, -1804255912, -1790465149, 1989611940],
+        value: "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHBzOi8vdGV4dHVyZXMubWluZWNyYWZ0Lm5ldC90ZXh0dXJlLzMyMWQ0OTUxNjU3NDhkMzExNmY5OWQ2YjViZDVkNDJlYjhiYTU5MmJjZGZhZDM3ZmQ5NWY5YjZjMDRhM2IifX19",
+    })
+);
+item!(
+    CARBON_CHUNK,
+    "player_head",
+    "Carbon Chunk",
+    "dark_red",
+    None,
+    Some(HeadTexture {
+        profile: [-1629223925, -1804255912, -1790465149, 1989611940],
+        value: "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHBzOi8vdGV4dHVyZXMubWluZWNyYWZ0Lm5ldC90ZXh0dXJlLzMyMWQ0OTUxNjU3NDhkMzExNmY5OWQ2YjViZDVkNDJlYjhiYTU5MmJjZGZhZDM3ZmQ5NWY5YjZjMDRhM2IifX19",
+    })
+);
+item!(STEEL_PLATE, "paper", "Steel Plate", "gray", None, None);
+item!(
+    REINFORCED_PLATE,
+    "paper",
+    "Reinforced Plate",
+    "gray",
+    None,
+    None
+);
+item!(STEEL_INGOT, "iron_ingot", "Steel Ingot", "aqua", None, None);
+item!(
+    REINFORCED_ALLOY_INGOT,
+    "iron_ingot",
+    "Reinforced Alloy Ingot",
+    "aqua",
+    None,
+    None
+);
+item!(IRON_DUST, "gunpowder", "Iron Dust", "gold", None, None);
+item!(GOLD_DUST, "glowstone_dust", "Gold Dust", "gold", None, None);
+item!(
+    COPPER_DUST,
+    "glowstone_dust",
+    "Copper Dust",
+    "gold",
+    None,
+    None
+);
+item!(SULFATE, "glowstone_dust", "Sulfate", "gold", None, None);
+item!(SIFTED_ORE, "gunpowder", "Sifted Ore", "gold", None, None);
+item!(CRUSHED_ORE, "gunpowder", "Crushed Ore", "gold", None, None);
+item!(
+    PULVERIZED_ORE,
+    "gunpowder",
+    "Pulverized Ore",
+    "gold",
+    None,
+    None
+);
+item!(
+    GOLD_4K,
+    "gold_ingot",
+    "Gold Ingot (4-Carat)",
+    "white",
+    None,
+    None
+);
+item!(
+    GOLD_6K,
+    "gold_ingot",
+    "Gold Ingot (6-Carat)",
+    "white",
+    None,
+    None
+);
+item!(
+    GOLD_8K,
+    "gold_ingot",
+    "Gold Ingot (8-Carat)",
+    "white",
+    None,
+    None
+);
+item!(
+    GOLD_10K,
+    "gold_ingot",
+    "Gold Ingot (10-Carat)",
+    "white",
+    None,
+    None
+);
+item!(
+    GOLD_12K,
+    "gold_ingot",
+    "Gold Ingot (12-Carat)",
+    "white",
+    None,
+    None
+);
+item!(
+    GOLD_14K,
+    "gold_ingot",
+    "Gold Ingot (14-Carat)",
+    "white",
+    None,
+    None
+);
+item!(
+    GOLD_16K,
+    "gold_ingot",
+    "Gold Ingot (16-Carat)",
+    "white",
+    None,
+    None
+);
+item!(
+    GOLD_18K,
+    "gold_ingot",
+    "Gold Ingot (18-Carat)",
+    "white",
+    None,
+    None
+);
+item!(
+    GOLD_20K,
+    "gold_ingot",
+    "Gold Ingot (20-Carat)",
+    "white",
+    None,
+    None
+);
+item!(
+    GOLD_22K,
+    "gold_ingot",
+    "Gold Ingot (22-Carat)",
+    "white",
+    None,
+    None
+);
+item!(
+    GOLD_24K,
+    "gold_ingot",
+    "Gold Ingot (24-Carat)",
+    "white",
+    None,
+    None
+);

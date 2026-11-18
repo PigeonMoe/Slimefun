@@ -1,24 +1,72 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use mod_api::{
-    Command, CommandArgumentValue, CommandSource, Flow, GameMode, Hand, Hooks, HostSide,
-    InteractionResult, RegisterCommandsEvent, RightClickBlockEvent, RunModCommandEvent, ServerHost,
+    Command, CommandArgumentValue, CommandSource, Config, ConfigFile, ConfigKind,
+    ConfigLoadingEvent, ConfigReloadingEvent, Flow, GameMode, Hand, Hooks, HostSide,
+    InteractionResult, PlayerLoggedInEvent, RegisterCommandsEvent, RegisterConfigsEvent,
+    RightClickBlockEvent, RunModCommandEvent, ScheduledTaskEvent, ServerHost, ServerStoppingEvent,
     Text, TriState,
 };
 
+mod compressor;
 mod items;
 mod machine;
 mod recipes;
 mod research;
 
+use compressor::Compressor;
 use machine::Machine;
-use recipes::{CRAFTING, GRINDING, RESEARCHES};
+use recipes::{COMPRESSING, CRAFTING, CRUSHING, DOUBLING, GRINDING, RESEARCHES};
 
-#[derive(Default)]
-struct Slimefun;
+struct Slimefun {
+    compressor: Compressor,
+    double_ores: AtomicBool,
+}
+
+impl Default for Slimefun {
+    fn default() -> Self {
+        Self {
+            compressor: Compressor::default(),
+            double_ores: AtomicBool::new(true),
+        }
+    }
+}
+
+impl Slimefun {
+    fn read_config(&self, config: &ConfigFile) {
+        if config.mod_id == "slimefun"
+            && config.file == "slimefun-server.toml"
+            && let Ok(table) = config.text.parse::<toml::Table>()
+            && let Some(value) = table.get("double-ores").and_then(toml::Value::as_bool)
+        {
+            self.double_ores.store(value, Ordering::Relaxed);
+        }
+    }
+}
 
 #[mod_api::horizon_mod]
 impl Hooks for Slimefun {
+    fn register_configs(&self, _: HostSide<'_>, event: &mut RegisterConfigsEvent<'_>) {
+        event.configs.push(Config::new(
+            "slimefun",
+            ConfigKind::Server,
+            "double-ores = true\n",
+        ));
+    }
+
+    fn config_loading(&self, _: HostSide<'_>, event: &mut ConfigLoadingEvent<'_>) {
+        if event.config.mod_id == "slimefun" && event.config.file == "slimefun-server.toml" {
+            self.double_ores.store(true, Ordering::Relaxed);
+            self.read_config(event.config);
+        }
+    }
+
+    fn config_reloading(&self, _: HostSide<'_>, event: &mut ConfigReloadingEvent<'_>) {
+        self.read_config(event.config);
+    }
+
     fn register_commands(&self, _: &mut dyn ServerHost, event: &mut RegisterCommandsEvent<'_>) {
         event.commands.extend([
             Command::new("slimefun"),
@@ -45,13 +93,15 @@ impl Hooks for Slimefun {
         }
         let lines = match path.next() {
             Some("status") => vec![format!(
-                "Slimefun Horizon preview | Grind Stone: {} recipes | Enhanced Crafting Table: {} recipes | Research: {} entries",
+                "Slimefun Horizon development | Grind Stone {} | Enhanced Crafting Table {} | Ore Crusher {} | Compressor {} | Research {}",
                 GRINDING.len(),
                 CRAFTING.len(),
+                CRUSHING.len() + DOUBLING.len(),
+                COMPRESSING.len(),
                 RESEARCHES.len()
             )],
             Some("recipe") => match event.command.argument("item") {
-                Some(CommandArgumentValue::String(item)) => describe_recipe(item),
+                Some(CommandArgumentValue::String(item)) => describe_recipe(item, self.double_ores.load(Ordering::Relaxed)),
                 _ => return Flow::Continue,
             },
             Some("research") => {
@@ -59,7 +109,8 @@ impl Hooks for Slimefun {
                     return Flow::Continue;
                 };
                 let Some(research) = RESEARCHES.iter().find(|research| research.id.eq_ignore_ascii_case(id)) else {
-                    let _ = host.commands().feedback(Text::literal("Supported research: lumps, kelp_cookie."));
+                    let ids = RESEARCHES.iter().map(|research| research.id).collect::<Vec<_>>().join(", ");
+                    let _ = host.commands().feedback(Text::literal(format!("Available research includes {ids}.")));
                     return Flow::Cancel;
                 };
                 match *event.source {
@@ -69,8 +120,9 @@ impl Hooks for Slimefun {
             }
             None | Some("guide") => vec![
                 "Slimefun Horizon preview".into(),
-                "Grind Stone: put an oak fence on an upward-facing dispenser. Load the dispenser and right-click the fence.".into(),
-                "Enhanced Crafting Table: put a crafting table on a dispenser. Load the recipe in its 3×3 grid and right-click the table.".into(),
+                "Build a Grind Stone by putting a wooden fence on an upward-facing dispenser. Load the dispenser and right-click the fence.".into(),
+                "Build an Enhanced Crafting Table by putting a crafting table on a dispenser. Arrange the recipe in its 3×3 grid and right-click the table.".into(),
+                "An Ore Crusher uses a nether brick fence over an upward dispenser, with iron bars on opposite sides below the fence. A Compressor uses pistons instead of bars.".into(),
                 "Use /sf recipe <item> to read a supported recipe, /sf research <key> to unlock research, and /sf status to view coverage.".into(),
             ],
             _ => return Flow::Continue,
@@ -106,32 +158,62 @@ impl Hooks for Slimefun {
         let Some((machine, dispenser)) = Machine::at(host, level, event.click.pos) else {
             return Flow::Continue;
         };
-        machine.activate(host, player, dispenser, event.click.pos);
+        machine.activate(
+            host,
+            player,
+            dispenser,
+            event.click.pos,
+            &self.compressor,
+            self.double_ores.load(Ordering::Relaxed),
+        );
         *event.cancellation_result = InteractionResult::Consume;
         Flow::Cancel
     }
+
+    fn player_logged_in(&self, host: &mut dyn ServerHost, event: &mut PlayerLoggedInEvent<'_>) {
+        if let Some(player) = host.player(event.player) {
+            research::import_legacy(host, player);
+        }
+    }
+
+    fn scheduled_task(&self, host: &mut dyn ServerHost, event: &mut ScheduledTaskEvent<'_>) {
+        self.compressor.scheduled_task(host, event);
+    }
+
+    fn server_stopping(&self, _: &mut dyn ServerHost, _: &mut ServerStoppingEvent) {
+        self.compressor.clear();
+    }
 }
 
-fn describe_recipe(id: &str) -> Vec<String> {
+fn describe_recipe(id: &str, double_ores: bool) -> Vec<String> {
     let outputs = |output: &str| {
         output.eq_ignore_ascii_case(id)
             || output
                 .split_once(':')
                 .is_some_and(|(_, name)| name.eq_ignore_ascii_case(id))
     };
-    let mut lines: Vec<String> = GRINDING
-        .iter()
-        .filter(|recipe| outputs(recipe.output.kind.id()))
-        .map(|recipe| {
-            format!(
-                "Grind Stone | {} × {} -> {} × {}",
-                recipe.input.count,
-                recipe.input.kind.id(),
-                recipe.output.count,
-                recipe.output.kind.id()
-            )
-        })
-        .collect();
+    let mut lines = Vec::new();
+    for (name, recipes, multiplier) in [
+        ("Grind Stone", GRINDING, 1),
+        ("Ore Crusher", CRUSHING, 1),
+        ("Ore Crusher", DOUBLING, 1 + u32::from(double_ores)),
+        ("Compressor", COMPRESSING, 1),
+    ] {
+        lines.extend(
+            recipes
+                .iter()
+                .filter(|recipe| outputs(recipe.output.kind.id()))
+                .map(|recipe| {
+                    format!(
+                        "{name} | {} × {} -> {} × {}",
+                        recipe.input.count,
+                        recipe.input.kind.id(),
+                        recipe.output.count * multiplier,
+                        recipe.output.kind.id()
+                    )
+                }),
+        );
+    }
 
     for recipe in CRAFTING
         .iter()
@@ -155,4 +237,28 @@ fn describe_recipe(id: &str) -> Vec<String> {
         lines.push("No recipe for this item in the Horizon preview.".into());
     }
     lines
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn recipe_lookup_reports_the_configured_ore_yield() {
+        let normal = describe_recipe("diamond", false);
+        assert!(
+            normal
+                .iter()
+                .any(|line| line
+                    == "Ore Crusher | 1 × minecraft:diamond_ore -> 1 × minecraft:diamond")
+        );
+
+        let double = describe_recipe("diamond", true);
+        assert!(
+            double
+                .iter()
+                .any(|line| line
+                    == "Ore Crusher | 1 × minecraft:diamond_ore -> 2 × minecraft:diamond")
+        );
+    }
 }

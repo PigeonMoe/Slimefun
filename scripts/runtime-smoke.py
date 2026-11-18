@@ -22,6 +22,8 @@ def main():
     parser.add_argument('--paper-jar', required=True, type=Path, help='User-provided Paper server core; never downloaded automatically')
     parser.add_argument('--java-home', default=os.environ.get('JAVA_HOME'), required=not os.environ.get('JAVA_HOME'))
     parser.add_argument('--accept-eula', action='store_true')
+    parser.add_argument('--export-horizon-catalog', action='store_true',
+                        help='Export the live item, research and multiblock registries for Horizon comparison')
     args = parser.parse_args()
     if not args.accept_eula:
         parser.error('Pass --accept-eula after accepting https://aka.ms/MinecraftEULA for this test server')
@@ -49,7 +51,7 @@ def main():
     classes.mkdir(exist_ok=True)
     subprocess.run([str(java_bin / 'javac'), '--release', '25', '-proc:none', '-cp',
                     str(jar) + os.pathsep + classpath_file.read_text().strip(), '-d', str(classes),
-                    str(ROOT / 'scripts/runtime-smoke/RuntimeSmoke.java')], check=True)
+                    *[str(source) for source in sorted((ROOT / 'scripts/runtime-smoke').glob('*.java'))]], check=True)
     descriptor = 'name: SlimefunRuntimeSmoke\nversion: 1.0\nmain: dev.pigeonmoe.slimefun.testing.RuntimeSmoke\napi-version: "26.2"\ndepend: [Slimefun]\n'
     with zipfile.ZipFile(plugins / 'RuntimeSmoke.jar', 'w', zipfile.ZIP_DEFLATED) as archive:
         archive.writestr('plugin.yml', descriptor)
@@ -68,7 +70,9 @@ def main():
     log = runtime / 'console.log'
     with log.open('w') as output:
         process = subprocess.Popen([str(java_bin / 'java'), '-Xms256M', '-Xmx1G',
-                                    '-Dpaper.disablePluginRemapping=true', '-jar', str(paper), '--nogui'],
+                                    '-Dpaper.disablePluginRemapping=true',
+                                    f'-Dslimefun.horizon.exportCatalog={str(args.export_horizon_catalog).lower()}',
+                                    '-jar', str(paper), '--nogui'],
                                    cwd=runtime, stdin=subprocess.PIPE, stdout=output, stderr=subprocess.STDOUT)
         try:
             process.wait(timeout=240)

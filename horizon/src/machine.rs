@@ -5,13 +5,16 @@ use mod_api::{
     SoundSource, Text, Transaction,
 };
 
-use crate::recipes::{CRAFTING, GRINDING, Stack};
+use crate::compressor::Compressor;
+use crate::recipes::{COMPRESSING, CRAFTING, CRUSHING, DOUBLING, GRINDING, Stack, output_research};
 use crate::research;
 
 #[derive(Clone, Copy)]
 pub(crate) enum Machine {
     Grinding,
     Crafting,
+    Crushing,
+    Compressing,
 }
 
 #[derive(Clone, Copy)]
@@ -35,7 +38,7 @@ impl Dispenser {
     }
 }
 
-enum Refusal {
+pub(crate) enum Refusal {
     Locked,
     MissingRecipe,
     MissingResearch(&'static str),
@@ -53,13 +56,25 @@ impl Machine {
         }
 
         let block = level.block_state(host, clicked)?;
-        let machine = match block.block().id(host).as_str() {
+        let clicked_block = block.block().id(host);
+        let facing_up = || level.block_property(host, position, "facing").as_deref() == Some("up");
+        let machine = match clicked_block.as_str() {
             "minecraft:crafting_table" => Self::Crafting,
-            "minecraft:oak_fence"
-                if level.block_property(host, position, "facing").as_deref() == Some("up") =>
-            {
-                Self::Grinding
+            "minecraft:nether_brick_fence" if facing_up() => {
+                if opposite_blocks(host, level, position, &["minecraft:iron_bars"]) {
+                    Self::Crushing
+                } else if opposite_blocks(
+                    host,
+                    level,
+                    position,
+                    &["minecraft:piston", "minecraft:moving_piston"],
+                ) {
+                    Self::Compressing
+                } else {
+                    return None;
+                }
             }
+            block if facing_up() && is_wooden_fence(host, block) => Self::Grinding,
             _ => return None,
         };
         Some((machine, Dispenser { level, position }))
@@ -71,9 +86,12 @@ impl Machine {
         player: PlayerRef,
         dispenser: Dispenser,
         clicked: [i32; 3],
+        compressor: &Compressor,
+        double_ores: bool,
     ) {
-        let outcome = self.process(host, player, dispenser);
+        let outcome = self.process(host, player, dispenser, compressor, double_ores);
         let message = match outcome {
+            Ok(()) if matches!(self, Self::Compressing) => return,
             Ok(()) => {
                 dispenser.level.play_sound(
                     host,
@@ -103,6 +121,8 @@ impl Machine {
         host: &mut dyn ServerHost,
         player: PlayerRef,
         dispenser: Dispenser,
+        compressor: &Compressor,
+        double_ores: bool,
     ) -> Result<(), Refusal> {
         let holder = host
             .block_entity(dispenser.level, dispenser.position)
@@ -114,18 +134,61 @@ impl Machine {
         host.transaction(|host, tx| {
             let slots = dispenser.slots(host);
             match self {
-                Self::Grinding => {
+                Self::Grinding | Self::Crushing | Self::Compressing => {
+                    let no_bonus: &[_] = &[];
+                    let (base, bonus) = match self {
+                        Self::Grinding => (GRINDING, no_bonus),
+                        Self::Crushing => (CRUSHING, DOUBLING),
+                        Self::Compressing => (COMPRESSING, no_bonus),
+                        Self::Crafting => unreachable!(),
+                    };
                     for (slot, input) in slots.iter().enumerate() {
                         let Some(input) = input else { continue };
-                        let Some(recipe) = GRINDING.iter().find(|recipe| {
-                            input.count() >= recipe.input.count
-                                && recipe.input.kind.matches(host, input)
-                        }) else {
+                        let candidates = base.iter().map(|recipe| (recipe, 1)).chain(
+                            bonus
+                                .iter()
+                                .map(|recipe| (recipe, 1 + u32::from(double_ores))),
+                        );
+                        let Some((recipe, multiplier)) =
+                            candidates.into_iter().find(|(recipe, _)| {
+                                input.count() >= recipe.input.count
+                                    && recipe.input.kind.matches(host, input)
+                            })
+                        else {
                             continue;
                         };
-                        // Like the Paper grind stone, check space before removing the input.
-                        deposit(host, tx, dispenser, recipe.output)?;
-                        return consume(host, tx, &dispenser.place(slot), input, 1);
+                        let output = Stack {
+                            count: recipe.output.count * multiplier,
+                            ..recipe.output
+                        };
+                        if matches!(self, Self::Crushing)
+                            && let Some(research) = output_research(output.kind)
+                            && !research::can_use(host, player, research)
+                        {
+                            return Err(Refusal::MissingResearch(research.id));
+                        }
+                        let consumption = if matches!(self, Self::Grinding) {
+                            1
+                        } else {
+                            recipe.input.count
+                        };
+                        if matches!(self, Self::Compressing) {
+                            let stack = output
+                                .kind
+                                .stack(host, output.count)
+                                .ok_or(Refusal::Unavailable)?;
+                            // Check available space before consuming, as the Paper machine does.
+                            host.transaction(|host, tx| {
+                                let result = deposit(host, tx, dispenser, output);
+                                Err::<(), _>(result)
+                            })
+                            .expect_err("space check always rolls back")?;
+                            consume(host, tx, &dispenser.place(slot), input, consumption)?;
+                            return compressor.queue(host, player, holder, dispenser, stack);
+                        }
+
+                        deposit(host, tx, dispenser, output)?;
+                        return consume(host, tx, &dispenser.place(slot), input, consumption);
                     }
                     Err(Refusal::MissingRecipe)
                 }
@@ -157,6 +220,27 @@ impl Machine {
     }
 }
 
+fn is_wooden_fence(host: &dyn Host, block: &str) -> bool {
+    host.registry_entry("minecraft:block", block)
+        .and_then(|entry| host.registry_entry_in_tag(&entry, "minecraft:wooden_fences"))
+        .unwrap_or(block == "minecraft:oak_fence")
+}
+
+fn opposite_blocks(host: &dyn Host, level: LevelRef, center: [i32; 3], supported: &[&str]) -> bool {
+    [0, 2].into_iter().any(|axis| {
+        [-1, 1].into_iter().all(|delta| {
+            let mut pos = center;
+            let Some(offset) = pos[axis].checked_add(delta) else {
+                return false;
+            };
+            pos[axis] = offset;
+            level
+                .block_state(host, pos)
+                .is_some_and(|state| supported.contains(&state.block().id(host).as_str()))
+        })
+    })
+}
+
 fn consume(
     host: &mut dyn ServerHost,
     tx: &Transaction,
@@ -179,7 +263,21 @@ fn deposit(
         .kind
         .stack(host, output.count)
         .ok_or(Refusal::Unavailable)?;
-    let resource = ItemResource::of(&stack);
+    if deposit_stack(host, tx, dispenser, &stack, output.count) == 0 {
+        Ok(())
+    } else {
+        Err(Refusal::NoOutputSpace)
+    }
+}
+
+pub(crate) fn deposit_stack(
+    host: &mut dyn ServerHost,
+    tx: &Transaction,
+    dispenser: Dispenser,
+    stack: &ItemStack,
+    mut count: u32,
+) -> u32 {
+    let resource = ItemResource::of(stack);
     let slots = dispenser.slots(host);
     let occupied = slots.iter().enumerate().filter_map(|(index, current)| {
         current
@@ -192,15 +290,14 @@ fn deposit(
         .enumerate()
         .filter_map(|(index, stack)| stack.is_none().then_some(index));
 
-    let mut count = output.count;
     for index in occupied.chain(empty) {
         let place = ItemPlace::Strict(Box::new(dispenser.place(index)));
         count -= place.insert(host, tx, &resource, count);
         if count == 0 {
-            return Ok(());
+            break;
         }
     }
-    Err(Refusal::NoOutputSpace)
+    count
 }
 
 #[cfg(test)]

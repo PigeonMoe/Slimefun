@@ -75,6 +75,9 @@ public final class RuntimeSmoke extends JavaPlugin {
                     }
                 }
                 require(io.github.thebusybiscuit.slimefun4.libraries.dough.items.ItemUtils.getItemName(new ItemStack(Material.STONE)).equals("Stone"), "Public vanilla item names");
+                if (Boolean.getBoolean("slimefun.horizon.exportCatalog")) {
+                    HorizonCatalogExport.write(java.nio.file.Path.of("probe-horizon-catalog.json"));
+                }
                 Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "sf versions");
                 getLogger().info("SLIMEFUN_SMOKE_OK minecraft=" + Bukkit.getMinecraftVersion() + " items=" + items);
             } catch (Throwable failure) {
