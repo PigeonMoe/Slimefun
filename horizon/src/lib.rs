@@ -398,7 +398,8 @@ impl Hooks for Slimefun {
             return Flow::Continue;
         }
         if *event.use_item != TriState::False
-            && self.backpacks.use_held(host, player, event.click.hand)
+            && (self.backpacks.use_held(host, player, event.click.hand)
+                || network_runtime::trash::portable(host, player, event.click.hand))
         {
             *event.cancellation_result = InteractionResult::Consume;
             return Flow::Cancel;
@@ -477,7 +478,8 @@ impl Hooks for Slimefun {
                 player.game_mode(host),
                 Some(GameMode::Survival | GameMode::Creative)
             )
-            && self.backpacks.use_held(host, player, event.click.hand)
+            && (self.backpacks.use_held(host, player, event.click.hand)
+                || network_runtime::trash::portable(host, player, event.click.hand))
         {
             *event.cancellation_result = InteractionResult::Consume;
             return Flow::Cancel;

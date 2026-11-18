@@ -24,6 +24,7 @@ pub(crate) enum Component {
     },
     CargoManager,
     CargoConnector,
+    TrashCan,
     CargoInput,
     CargoOutput {
         advanced: bool,
@@ -44,6 +45,7 @@ impl Component {
             });
         }
         Some(match id {
+            "TRASH_CAN_BLOCK" => Self::TrashCan,
             "GPS_GEO_SCANNER" => Self::GeoScanner,
             "OIL_PUMP" => Self::ElectricMachine {
                 capacity: crate::geology::PUMP_CAPACITY,
@@ -147,6 +149,7 @@ impl Component {
             }
             Self::CargoManager => "Cargo manager | Paper connection range 5".into(),
             Self::CargoConnector => "Cargo connector | Paper connection range 5".into(),
+            Self::TrashCan => "Trash can | Seven input slots".into(),
             Self::CargoInput => cargo_terminal("Cargo input", metadata),
             Self::CargoOutput { advanced: false } => cargo_terminal("Cargo output", metadata),
             Self::CargoOutput { advanced: true } => {

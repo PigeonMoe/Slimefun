@@ -119,6 +119,9 @@ impl SlimefunItem {
         if let Some(lore) = crate::backpacks::item_lore(self.id) {
             components.insert("minecraft:lore".into(), lore);
         }
+        if let Some(lore) = crate::network_runtime::trash::lore(self.id) {
+            components.insert("minecraft:lore".into(), lore);
+        }
         if let Some(texture) = &self.texture {
             components.insert(
                 "minecraft:profile".into(),
@@ -862,6 +865,12 @@ pub(crate) fn network_item(id: &str) -> Option<Kind> {
     .or_else(|| crate::advanced_processing::machine(id).map(|spec| spec.item))
     .or_else(|| crate::thermal_machines::item(id))
     .or_else(|| crate::geology::network_item(id))
+    .or_else(|| {
+        use crate::network_runtime::trash::{PORTABLE_DUSTBIN, TRASH_CAN_BLOCK};
+        [PORTABLE_DUSTBIN, TRASH_CAN_BLOCK]
+            .into_iter()
+            .find(|kind| kind.id() == id)
+    })
     .or_else(|| {
         let pump = crate::factory::fluid_pump::FLUID_PUMP;
         (pump.id() == id).then_some(pump)

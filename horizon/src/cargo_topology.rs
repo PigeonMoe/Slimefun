@@ -218,6 +218,7 @@ impl Filter {
 enum InventoryKind {
     Ordinary,
     Chest,
+    TrashCan,
     Factory { smeltery: bool },
     Smelter(&'static str),
     Brewer,
@@ -243,6 +244,7 @@ impl InventoryKind {
     fn extract(self, size: usize) -> Range<usize> {
         match self {
             Self::Ordinary | Self::Chest => 0..size,
+            Self::TrashCan => 0..0,
             Self::Factory { .. } => 2..4.min(size),
             Self::Smelter(_) => 2..3.min(size),
             Self::Brewer => 0..3.min(size),
@@ -251,7 +253,7 @@ impl InventoryKind {
 
     fn insert(self, host: &dyn ServerHost, size: usize, stack: &ItemStack) -> Range<usize> {
         match self {
-            Self::Ordinary | Self::Chest => 0..size,
+            Self::Ordinary | Self::Chest | Self::TrashCan => 0..size,
             Self::Factory { smeltery: true } => 0..0,
             Self::Factory { smeltery: false } => 0..2.min(size),
             Self::Smelter(recipe) => {
@@ -330,6 +332,9 @@ fn attached_inventory(
         _ => return None,
     };
     pos[axis] = pos[axis].checked_add(delta)?;
+    if super::trash::registered(host, level, pos) {
+        return Some((pos, InventoryKind::TrashCan));
+    }
     if let Some(id) = factory_identity(host, level, pos) {
         let smeltery = crate::factory::ElectricMachine::for_item(&id)
             .is_some_and(crate::factory::ElectricMachine::is_smeltery);

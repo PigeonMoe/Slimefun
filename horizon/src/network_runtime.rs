@@ -30,6 +30,8 @@ mod cargo_topology;
 mod network_visuals;
 #[path = "plain_network.rs"]
 mod plain_network;
+#[path = "trash.rs"]
+pub(crate) mod trash;
 
 pub(crate) use cargo_menu::{menu_click, menu_closed, register as register_cargo, use_node};
 use cargo_topology::{CargoSettings, FILTER_SLOTS};
@@ -163,6 +165,7 @@ impl ItemPart for NetworkPlacement {
             && [
                 crate::thermal_machines::COOLING_UNIT,
                 crate::thermal_machines::REACTOR_COLLANT_CELL,
+                trash::PORTABLE_DUSTBIN,
             ]
             .iter()
             .any(|item| item.matches(*server, event.stack))
@@ -297,7 +300,7 @@ impl Node {
             | Component::GpsTransmitter { .. }
             | Component::FuelGenerator { .. }
             | Component::SolarGenerator { .. } => Network::Energy,
-            Component::GeoScanner => Network::Independent,
+            Component::GeoScanner | Component::TrashCan => Network::Independent,
             _ => Network::Cargo,
         }
     }
@@ -407,7 +410,14 @@ impl Networks {
                 cargo.imported_paper = true;
             }
         }
-        self.register(host, level, pos, node, data, true)?;
+        if node.component == Component::TrashCan {
+            host.transaction(|host, _| {
+                trash::restore(host, pos, row)?;
+                self.register(host, level, pos, node, data, true)
+            })?;
+        } else {
+            self.register(host, level, pos, node, data, true)?;
+        }
         Ok(format!("Restored the Slimefun network node {id}."))
     }
 
@@ -773,6 +783,11 @@ pub(crate) fn tick(
         .collect();
     let mut claimed = BTreeSet::new();
     let mut labels = BTreeMap::new();
+    for (&pos, &(node, _)) in &active {
+        if node.component == Component::TrashCan {
+            trash::clear(host, pos);
+        }
+    }
     for (&start, &(node, _)) in &active {
         if !node.regulator() || claimed.contains(&start) {
             continue;

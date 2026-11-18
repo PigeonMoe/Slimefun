@@ -11,7 +11,7 @@ use mod_api::{
 use super::{
     Component, FILTER_SLOTS, NETWORK_STATE, Networks, Node, Position, block_data,
     cargo_topology::{CargoSettings, item_key},
-    network_item, network_visuals, read_stack,
+    network_item, network_visuals, read_stack, trash,
 };
 
 #[derive(Clone, Copy)]
@@ -36,6 +36,10 @@ pub(crate) fn use_node(
         return false;
     };
     match component {
+        Component::TrashCan => {
+            trash::open(host, player, level, pos);
+            return true;
+        }
         Component::SolarGenerator { .. } => return true,
         Component::ElectricMachine { .. }
         | Component::FuelGenerator { .. }
@@ -196,6 +200,7 @@ pub(crate) fn menu_closed(networks: &Mutex<Networks>, event: &MenuClosedEvent) {
 
 pub(crate) fn register(registrar: &mut dyn mod_api::Registrar) {
     network_visuals::register(registrar);
+    trash::register(registrar);
     let head = registrar.block_key("minecraft:player_wall_head");
     registrar.block_capability_before_game(&ITEMS, &head, |host, at, _, entity| {
         let entity = entity?;
