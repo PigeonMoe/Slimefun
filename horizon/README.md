@@ -4,31 +4,31 @@
 
 ## 安装
 
-1. 下载本仓库预发布中的 `slimefun.hmod` 和 `horizon-wasm-std.wasm`，使用 `SHA256SUMS` 核对文件。服务端使用与 `dc215e79e27d1cf55bb041a2c1bf2c02a701cd74` 一致的 Mod API 布局，并将编译工具链为 Rust 1.99.1 的 `horizon-wasm-std.wasm` 放在游戏引擎可执行文件旁。这个版本使用普通 Mod API hooks，支持常规服务端引擎构建。
+1. 从同一预发布下载 `slimefun.hmod` 和 `horizon-wasm-std.wasm`，使用 `SHA256SUMS` 核对文件。使用该预发布标明的 PigeonMoe Horizon Fork 提交构建服务端，将配套的 `horizon-wasm-std.wasm` 放在游戏引擎可执行文件旁。
 2. 将文件放进服务端游戏目录的 `horizon-mods/`，在该游戏目录的 `horizon-mods.txt` 添加 `mod.slimefun:true`，然后重启。
 3. 如使用 PigeonMoe Horizon Panel，将 [slimefun.toml](panel-plugins/slimefun.toml) 放进服务端实例目录的 `panel-plugins/`。启用面板后，该条目调用固定的 `slimefun status` 查询命令。
 
 ## 游戏内
 
-- `/sf guide` 显示两种机器的摆放方式，`/sf recipe <物品>` 显示已移植配方，`/sf status` 显示覆盖范围。
+- `/sf guide` 显示已移植机器的摆放与使用方式，`/sf recipe <物品>` 显示配方，`/sf status` 显示覆盖范围。
 - 将橡木栅栏放在朝上的发射器上方，装入素材后对栅栏点右键。磨石包含原分支的 26 条默认配方，包括烈焰棒、下界疣、末影之眼和小麦。
 - 将工作台放在发射器上方，在发射器内排列 3×3 配方后对工作台点右键。增强工作台包含四条魔法块及末影块升级配方和一条海带饼干配方。
 - `/sf research lumps` 和 `/sf research kelp_cookie` 分别花费 3 级和 4 级经验。创造模式可免费使用。研究解锁保存在 Horizon 玩家的持久数据中。
 
-两台机器都将产物放回发射器。锁定的发射器拒绝加工，产物空间不足时回滚库存变更。支持的自定义物品使用原来的 `slimefun:slimefun_item` 持久键和原始 ID。与 PurtmarsArea 共用的服务器应采用具备发射器坐标保护的 Horizon 分支。
+磨石与增强工作台优先使用已标记的输出箱，其次使用发射器。受保护的发射器会检查领地权限，产物空间不足时回滚库存变更。支持的自定义物品使用原来的 `slimefun:slimefun_item` 持久键和原始 ID。
 
 ## 覆盖范围
 
 | 已实现 | 尚待移植或验证 |
 | --- | --- |
-| 磨石、增强工作台的上述配方 | 其余增强工作台配方、输出箱、其他机器、能源与货运网络 |
-| 上述物品的 Paper 持久键和原始 ID | 完整物品目录、动态物品行为、指南 GUI、多语言 |
-| 两项研究及 Horizon 存档记录 | Paper 存档和数据库迁移、PM-Sync 跨服同步 |
+| 磨石、增强工作台、输出箱、生存矿物处理链及多类电动机器 | 其余机器、物品行为、指南 GUI 与多语言 |
+| 太阳能、燃料发电、反应堆、电量缓冲、货运节点与过滤 | 网络配置细节及各路线的真实客户端验收 |
+| 研究、已支持机器菜单、原油档案和普通及特殊背包的 Paper 存档恢复 | 全部 Paper 数据类型、共享库存读取与 PM-Sync 跨服同步 |
 | Horizon Mod API | Bukkit/Paper 的 Java 插件 API 和 Slimefun 附属插件 |
 
 Horizon 的直接 JAR 引用只加载资源和数据。完整 Java 附属插件兼容需要 Bukkit/Paper 运行层，原有游戏功能也需要逐项移植和验收。
 
-请在独立测试存档中验证。本预览未通过真实客户端、完整生产存档或 Paper 数据迁移的端到端验收。
+旧预览已使用实际 26.3 客户端验证部分离线联机功能。本分支的新增功能仍在独立存档进行同服验收。
 
 ## 构建与检查
 
@@ -50,9 +50,11 @@ Java 版源码和原有构建指令位于仓库根目录。
 
 ## 本地开发增量
 
-本节描述本地 `0.1.0-dev.5`，对应 Horizon Fork `96d757fd4c6226a872c33071c5c360a9e68d7c36`。真实 26.3 客户端同服验收待完成。
+本节描述开发分支的变更。使用当前 PigeonMoe Horizon Fork 构建以取得最新的设备和背包接口。
 
 电炉和电动矿物粉碎机各有三档，电动锭粉碎机有一档，加热压力舱有两档。这些机器通过能源调节器取电，保存输入、输出、剩余进度及缓冲电量。部分原料来源和其他电力机器仍待移植。
+
+流体泵消耗 32 J，从下方水源或相连的熔岩源装桶。充电台读取 Paper 的电量字段与旧版物品说明。手动坩埚按 Paper 的间隔填放液体，每步都会检查原玩家在目标位置的改方块权限。每次网络更新时，运行中的核反应堆可提供 250 J，下界之星反应堆可提供 512 J。反应堆需要四周水和对应的冷却单元，货运通过位于反应堆正上方三个方块的访问端口供料和取出副产物。
 
 `0.1.0-dev.2` 加入了 Ore Crusher、Compressor、碳块配方和四项研究。Ore Crusher 默认启用原版的矿物翻倍。可在 `slimefun-server.toml` 将 `double-ores` 设置为 `false`，服务端会在读取该文件时应用设置。Compressor 按原版在第 0、20 和 40 个刻播放活塞声音，并在第 60 个刻交付产物。四种机器优先将产物写入上、北、东、南、西方向中第一个容量足够的已标记输出箱，其次尝试发射器。压缩机交付时库存满会尝试在机器位置掉落余量。
 
@@ -68,7 +70,7 @@ python3 horizon/tools/import-research.py probe-horizon-catalog.json \
   /path/to/horizon-world/horizon-mod-data/slimefun/research-import
 ```
 
-匹配同一 UUID 的玩家进入 Horizon 后会合并研究记录。导入保留已有研究和其他持久数据，重复导入不会扣除经验。该工具支持旧 YAML 的研究项，玩家背包、航点及 PM-Sync 数据仍待移植。
+匹配同一 UUID 的玩家进入 Horizon 后会合并研究记录。导入保留已有研究和其他持久数据，重复导入不会扣除经验。背包恢复使用下方的独立步骤。航点及 PM-Sync 数据仍待移植。
 
 ### 从砾石到输出箱
 
