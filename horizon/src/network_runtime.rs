@@ -138,6 +138,15 @@ fn saved_id(data: &Compound) -> Option<String> {
     Some(id)
 }
 
+pub(crate) fn enhanced_furnace(
+    host: &dyn mod_api::Host,
+    entity: mod_api::BlockEntityRef,
+) -> Option<crate::enhanced_furnaces::Furnace> {
+    let data =
+        host.block_entity_saved_attachment(entity, NETWORK_STATE.namespace, NETWORK_STATE.name)?;
+    crate::enhanced_furnaces::by_id(&saved_id(&data)?)
+}
+
 fn parse_uuid(value: &str) -> Option<u128> {
     let owned;
     let clean = if value.len() == 36
@@ -338,6 +347,7 @@ impl Node {
             | Component::IgnitionChamber
             | Component::DuctTape
             | Component::WitherProofObsidian
+            | Component::EnhancedFurnace
             | Component::ReactorPort => Network::Independent,
             _ => Network::Cargo,
         }
@@ -372,6 +382,7 @@ fn accepts_carrier(component: Component, actual: &str) -> bool {
         Component::IgnitionChamber => return actual == crate::items::IGNITION_CHAMBER.material(),
         Component::ReactorPort => return actual == reactors::REACTOR_ACCESS_PORT.material(),
         Component::WitherProofObsidian => {
+        Component::EnhancedFurnace => return actual == "minecraft:furnace",
             return actual == crate::enchantment_machines::WITHER_PROOF_OBSIDIAN.material();
         }
         Component::SolarGenerator { .. } => ["minecraft:daylight_detector"; 2],

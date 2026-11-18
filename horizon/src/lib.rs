@@ -21,6 +21,7 @@ mod compressor;
 mod crucible;
 mod electric_processing;
 mod enchantment_machines;
+mod enhanced_furnaces;
 mod factory;
 mod food_machines;
 mod fuel_generators;
@@ -728,6 +729,14 @@ impl Hooks for Slimefun {
             self.crucibles.tick(host, event.level);
         }
             ancient_altar::tick(host, event.level);
+    }
+
+    fn furnace_process(
+        &self,
+        host: &dyn mod_api::Host,
+        event: &mut mod_api::FurnaceProcessEvent<'_>,
+    ) {
+        enhanced_furnaces::process(host, event, &self.rolls);
     }
 
     fn scheduled_task(&self, host: &mut dyn ServerHost, event: &mut ScheduledTaskEvent<'_>) {

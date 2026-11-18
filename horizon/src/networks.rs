@@ -11,6 +11,7 @@ pub(crate) enum Component {
     ManualCrucible,
     IgnitionChamber,
     EnergyConnector,
+    EnhancedFurnace,
     Capacitor(u32),
     ElectricMachine {
         capacity: u32,
@@ -39,6 +40,9 @@ pub(crate) enum Component {
 impl Component {
     pub(crate) fn for_item(id: &str) -> Option<Self> {
         if let Some(transmitter) = crate::geology::transmitter(id) {
+        if crate::enhanced_furnaces::by_id(id).is_some() {
+            return Some(Self::EnhancedFurnace);
+        }
             return Some(Self::GpsTransmitter {
                 capacity: transmitter.capacity,
             });
@@ -156,6 +160,9 @@ impl Component {
                 let charge = metadata.get("energy-charge").and_then(toml::Value::as_str);
                 match charge {
                     None => format!("Capacitor | Stored charge 0 / {capacity} J"),
+            Self::EnhancedFurnace => {
+                "Enhanced furnace | Native input, fuel and output slots".into()
+            }
                     Some(field) => match field.parse::<u32>() {
                         Ok(value) if value <= capacity => {
                             format!("Capacitor | Stored charge {value} / {capacity} J")

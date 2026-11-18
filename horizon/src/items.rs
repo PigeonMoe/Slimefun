@@ -131,6 +131,7 @@ impl SlimefunItem {
         if self.id == IGNITION_CHAMBER.id() {
             components.insert("minecraft:lore".into(), crate::ignition_chamber::lore());
         }
+        crate::enhanced_furnaces::decorate(self.id, self.name, &mut components);
         if self.id == crate::factory::produce_collector::PRODUCE_COLLECTOR.id() {
             components.insert("minecraft:lore".into(), crate::factory::produce_collector::lore());
         }
@@ -890,6 +891,7 @@ pub(crate) fn network_item(id: &str) -> Option<Kind> {
         };
         [XP_COLLECTOR, FLASK_OF_KNOWLEDGE, FILLED_FLASK_OF_KNOWLEDGE]
             .into_iter()
+    .or_else(|| crate::enhanced_furnaces::by_id(id).map(|furnace| furnace.item))
             .find(|kind| kind.id() == id)
     })
     .or_else(|| crate::factory::reactors::reactor(id).map(|spec| spec.item))
