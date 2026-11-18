@@ -768,6 +768,12 @@ impl Hooks for Slimefun {
         }
     }
 
+    fn tags_updated(&self, _: HostSide<'_>, event: &mut mod_api::TagsUpdatedEvent) {
+        if matches!(event.cause, mod_api::TagsUpdateCause::ServerDataLoad { .. }) {
+            auto_crafter::invalidate_vanilla_recipes();
+        }
+    }
+
     fn level_tick_post(&self, host: HostSide<'_>, event: &mut LevelTickPostEvent) {
         if let HostSide::Server(host) = host {
             let settings = *self.settings.lock().unwrap();
@@ -776,6 +782,7 @@ impl Hooks for Slimefun {
             self.crucibles.tick(host, event.level);
             self.composters.tick(host, event.level, &self.rolls);
             ancient_altar::tick(host, event.level);
+            auto_crafter::refresh(host, event.level);
         }
     }
 

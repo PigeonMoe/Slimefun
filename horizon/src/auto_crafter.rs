@@ -7,18 +7,21 @@ use std::{
 
 use mod_api::{
     AttachmentCodec, AttachmentError, AttachmentType, BlockEntityRef, Capability, Compound, Hand,
-    Holder, Host, ITEMS, ItemPlace, ItemResource, ItemStack, LevelRef, MenuClickedEvent,
-    MenuClosedEvent, MenuReplace, ParticleKey, ParticleOptions, PlayerRef, Registrar,
-    ResourceHandler, ServerHost, SoundSource, Tag, Text, Transaction,
+    Holder, Host, ITEMS, Identifier, Ingredient, ItemPlace, ItemResource, ItemStack, LevelRef,
+    MenuClickedEvent, MenuClosedEvent, MenuReplace, ParticleKey, ParticleOptions, PlayerRef,
+    Registrar, ResourceHandler, ServerHost, SoundSource, Tag, Text, Transaction,
 };
 
 use crate::{
-    items::{HeadTexture, Kind, REDSTONE_ALLOY, item, item_id, text},
+    items::{ELECTRIC_MOTOR, HeadTexture, Kind, REDSTONE_ALLOY, item, item_id, text},
     network_recipes::{BLISTERING_INGOT_3, CARGO_MOTOR},
     network_runtime,
     recipes::{CraftingRecipe, Research, Stack},
     research,
 };
+
+#[path = "vanilla_crafter.rs"]
+mod vanilla;
 
 item!(
     CRAFTING_MOTOR,
@@ -42,6 +45,49 @@ item!(
         value: "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHBzOi8vdGV4dHVyZXMubWluZWNyYWZ0Lm5ldC90ZXh0dXJlLzUwMzgyOTgzMDZhNWUyODU4NGRmMzllODg4OTY5MTdjMzhkNDBhMzI2MjI2ZDhjODMwNzA3MjNjOTU3OThiMjQifX19",
     })
 );
+item!(
+    VANILLA_AUTO_CRAFTER,
+    "player_head",
+    "Auto-Crafter (Vanilla)",
+    "dark_green",
+    None,
+    Some(HeadTexture {
+        profile: [1495638746, -1734004258, -1911383768, 150787901],
+        value: "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHBzOi8vdGV4dHVyZXMubWluZWNyYWZ0Lm5ldC90ZXh0dXJlLzgwYTQzMzRmNmE2MWU0MGMwYzYzZGViNjY1ZmE3YjU4MWU2ZWIyNTlmN2EzMjA3Y2VkN2ExZmY4YmRjOGE5ZjkifX19",
+    })
+);
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Variant {
+    Enhanced,
+    Vanilla,
+}
+
+impl Variant {
+    fn from_item(id: &str) -> Option<Self> {
+        if id == ENHANCED_AUTO_CRAFTER.id() {
+            Some(Self::Enhanced)
+        } else if id == VANILLA_AUTO_CRAFTER.id() {
+            Some(Self::Vanilla)
+        } else {
+            None
+        }
+    }
+
+    fn station(self) -> &'static str {
+        match self {
+            Self::Enhanced => "Enhanced Crafting Table",
+            Self::Vanilla => "Crafting Table",
+        }
+    }
+
+    fn title(self) -> &'static str {
+        match self {
+            Self::Enhanced => "Auto-Crafter (Enhanced)",
+            Self::Vanilla => "Auto-Crafter (Vanilla)",
+        }
+    }
+}
 
 pub(crate) const CAPACITY: u32 = 256;
 pub(crate) const COST: u32 = 16;
@@ -89,11 +135,32 @@ pub(crate) const CRAFTING: &[CraftingRecipe] = &[
         },
         research: &RESEARCH,
     },
+    CraftingRecipe {
+        inputs: [
+            None,
+            Some(CARGO_MOTOR),
+            None,
+            TABLE,
+            Some(CRAFTING_MOTOR),
+            TABLE,
+            None,
+            Some(ELECTRIC_MOTOR),
+            None,
+        ],
+        output: Stack {
+            kind: VANILLA_AUTO_CRAFTER,
+            count: 1,
+        },
+        research: &RESEARCH,
+    },
 ];
 
 const PREVIEW_SLOTS: [usize; 9] = [11, 12, 13, 20, 21, 22, 29, 30, 31];
 const RESULT: usize = 24;
 const CONTROL: usize = 49;
+const PREVIOUS: usize = 46;
+const NEXT: usize = 52;
+const PREVIEW_TICKS: i64 = 14;
 static PARTICLE: OnceLock<ParticleKey> = OnceLock::new();
 
 pub(crate) fn register(registrar: &mut dyn Registrar) {
@@ -107,7 +174,10 @@ pub(crate) fn refuses_placement(
     if CRAFTING_MOTOR.matches(host, event.stack) {
         return true;
     }
-    if !ENHANCED_AUTO_CRAFTER.matches(host, event.stack) {
+    if ![ENHANCED_AUTO_CRAFTER, VANILLA_AUTO_CRAFTER]
+        .into_iter()
+        .any(|item| item.matches(host, event.stack))
+    {
         return false;
     }
     let Some(player) = host.player(event.player) else {
@@ -125,13 +195,13 @@ pub(crate) fn refuses_placement(
 }
 
 pub(crate) fn item_by_id(id: &str) -> Option<Kind> {
-    [CRAFTING_MOTOR, ENHANCED_AUTO_CRAFTER]
+    [CRAFTING_MOTOR, ENHANCED_AUTO_CRAFTER, VANILLA_AUTO_CRAFTER]
         .into_iter()
         .find(|kind| kind.id() == id)
 }
 
 pub(crate) fn is_machine(id: &str) -> bool {
-    id == ENHANCED_AUTO_CRAFTER.id()
+    Variant::from_item(id).is_some()
 }
 
 pub(crate) fn decorate(id: &str, components: &mut Compound) {
@@ -143,15 +213,22 @@ pub(crate) fn decorate(id: &str, components: &mut Compound) {
                 text("Important component of Auto-Crafters", "gray", false),
             ]),
         );
-    } else if is_machine(id) {
+    } else if let Some(variant) = Variant::from_item(id) {
         components.insert(
             "minecraft:lore".into(),
             Tag::List(vec![
                 Tag::String("".into()),
                 text("Place this machine on top of a", "white", false),
                 text("chest or similar and make it craft", "white", false),
-                text("anything that can be crafted using an", "white", false),
-                text("Enhanced Crafting Table", "yellow", false),
+                text(
+                    match variant {
+                        Variant::Enhanced => "anything that can be crafted using an",
+                        Variant::Vanilla => "anything that can be crafted using a",
+                    },
+                    "white",
+                    false,
+                ),
+                text(variant.station(), "yellow", false),
                 Tag::String("".into()),
                 text("Advanced Machine", "red", true),
                 text("⇨ ⚡ 16 J/Item", "gray", false),
@@ -202,13 +279,7 @@ fn read_selection(
         Some(Tag::String(id)) => Some(
             id.to_string()
                 .ok()
-                .filter(|id| {
-                    !id.is_empty()
-                        && id.len() <= 128
-                        && id
-                            .bytes()
-                            .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_')
-                })
+                .filter(|id| enhanced_key(id) || vanilla_key(id))
                 .ok_or("The existing Auto-Crafter recipe ID is invalid.")?,
         ),
         _ => return Err("The existing Auto-Crafter recipe ID is invalid."),
@@ -219,6 +290,18 @@ fn read_selection(
         Some(_) => return Err("The existing Auto-Crafter enabled flag is invalid."),
     };
     Ok(Selection { recipe, disabled })
+}
+
+fn enhanced_key(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 128
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_')
+}
+
+fn vanilla_key(id: &str) -> bool {
+    id.len() <= 256 && id.contains(':') && Identifier::parse(id).is_ok()
 }
 
 fn read(host: &mut dyn ServerHost, pos: Pos) -> Result<Option<Selection>, &'static str> {
@@ -247,10 +330,12 @@ pub(crate) fn restore_paper(
     host: &mut dyn ServerHost,
     level: LevelRef,
     pos: Pos,
+    id: &str,
     row: &toml::Table,
 ) -> Result<(), String> {
+    let variant = Variant::from_item(id).ok_or("Unknown Auto-Crafter variant.")?;
     if row.contains_key("paper_inventory") {
-        crate::storage::validate_inventory_preset(row, ENHANCED_AUTO_CRAFTER.id())?;
+        crate::storage::validate_inventory_preset(row, id)?;
         if !crate::storage::decode_archived_slots(host, row, 54)?.is_empty() {
             return Err("Paper Auto-Crafter recipes belong to the skull's saved data. The menu items remain archived.".into());
         }
@@ -264,7 +349,18 @@ pub(crate) fn restore_paper(
     let data = body
         .data(host)
         .ok_or("The Paper Auto-Crafter skull data could not be read.")?;
-    store(host, pos, paper_selection(&data)?)?;
+    let selected = paper_selection(&data)?;
+    if selected
+        .recipe
+        .as_deref()
+        .is_some_and(|recipe| !match variant {
+            Variant::Enhanced => enhanced_key(recipe),
+            Variant::Vanilla => vanilla_key(recipe),
+        })
+    {
+        return Err("The Paper recipe key belongs to a different Auto-Crafter variant.".into());
+    }
+    store(host, pos, selected)?;
     Ok(())
 }
 
@@ -303,11 +399,66 @@ struct Payment {
     amount: u32,
 }
 
+#[derive(Clone, Copy)]
+enum IngredientKind<'a> {
+    Slimefun(Kind),
+    Vanilla(&'a Ingredient),
+}
+
+impl IngredientKind<'_> {
+    fn matches(self, host: &dyn Host, stack: &ItemStack) -> bool {
+        match self {
+            Self::Slimefun(kind) => kind.matches(host, stack),
+            Self::Vanilla(ingredient) => {
+                vanilla::ingredient_allowed(stack) && ingredient.test(host, stack)
+            }
+        }
+    }
+}
+
+enum RecipeView<'a> {
+    Enhanced(&'a CraftingRecipe),
+    Vanilla(std::sync::Arc<vanilla::VanillaRecipe>),
+}
+
+fn selected_recipe(host: &dyn Host, variant: Variant, id: &str) -> Option<RecipeView<'static>> {
+    match variant {
+        Variant::Enhanced => recipe(id).map(RecipeView::Enhanced),
+        Variant::Vanilla => vanilla::find(host, id).map(RecipeView::Vanilla),
+    }
+}
+
+impl RecipeView<'_> {
+    fn input(&self) -> [Option<IngredientKind<'_>>; 9] {
+        match self {
+            Self::Enhanced(recipe) => recipe.inputs.map(|kind| kind.map(IngredientKind::Slimefun)),
+            Self::Vanilla(recipe) => recipe.input().map(|kind| kind.map(IngredientKind::Vanilla)),
+        }
+    }
+
+    fn icons(&self, host: &dyn Host, frame: usize) -> ([Option<ItemStack>; 9], Option<ItemStack>) {
+        match self {
+            Self::Enhanced(recipe) => (
+                recipe
+                    .inputs
+                    .map(|kind| kind.and_then(|kind| kind.stack(host, 1))),
+                recipe.output.kind.stack(host, recipe.output.count),
+            ),
+            Self::Vanilla(recipe) => (recipe.preview(host, frame), Some(recipe.output())),
+        }
+    }
+}
+
+struct PaymentPlan {
+    used: Vec<Payment>,
+    grid: Vec<Option<ItemStack>>,
+}
+
 fn payments(
     host: &dyn Host,
-    recipe: &CraftingRecipe,
+    inputs: [Option<IngredientKind<'_>>; 9],
     slots: Vec<Option<ItemStack>>,
-) -> Option<Vec<Payment>> {
+) -> Option<PaymentPlan> {
     // Paper requires a free slot before consuming any ingredient.
     if slots.iter().all(Option::is_some) {
         return None;
@@ -316,28 +467,33 @@ fn payments(
         .iter()
         .map(|stack| stack.as_ref().map_or(0, ItemStack::count))
         .collect();
-    for expected in recipe.inputs.iter().flatten() {
+    let mut grid = vec![None; 9];
+    for (cell, expected) in inputs
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, expected)| Some((index, expected?)))
+    {
         let slot = slots.iter().enumerate().find_map(|(slot, stack)| {
             (available[slot] > 0 && expected.matches(host, stack.as_ref()?)).then_some(slot)
         })?;
         available[slot] -= 1;
+        grid[cell] = ItemResource::of(slots[slot].as_ref()?).to_stack(1);
     }
-    Some(
-        slots
-            .into_iter()
-            .zip(available)
-            .enumerate()
-            .filter_map(|(slot, (stack, left))| {
-                let stack = stack?;
-                let amount = stack.count() - left;
-                (amount != 0).then_some(Payment {
-                    slot,
-                    stack,
-                    amount,
-                })
+    let used = slots
+        .into_iter()
+        .zip(available)
+        .enumerate()
+        .filter_map(|(slot, (stack, left))| {
+            let stack = stack?;
+            let amount = stack.count() - left;
+            (amount != 0).then_some(Payment {
+                slot,
+                stack,
+                amount,
             })
-            .collect(),
-    )
+        })
+        .collect();
+    Some(PaymentPlan { used, grid })
 }
 
 fn leftover(host: &dyn Host, payment: &Payment) -> Result<Option<ItemStack>, ()> {
@@ -386,12 +542,18 @@ pub(crate) fn stage(
     tx: &Transaction,
     level: LevelRef,
     pos: Pos,
+    id: &str,
 ) -> Result<(), ()> {
+    let variant = Variant::from_item(id).ok_or(())?;
     let selected = read(host, pos)
         .map_err(|_| ())?
         .filter(|selected| !selected.disabled)
         .ok_or(())?;
-    let recipe = selected.recipe.as_deref().and_then(recipe).ok_or(())?;
+    let recipe = selected
+        .recipe
+        .as_deref()
+        .and_then(|id| selected_recipe(host, variant, id))
+        .ok_or(())?;
     let (below, storage) = inventory(host, level, pos).ok_or(())?;
     let partner = if storage.size(host) > 27 {
         Some(
@@ -405,23 +567,31 @@ pub(crate) fn stage(
     } else {
         None
     };
-    run(host, tx, &storage, recipe, |host, stack, from_chest| {
-        [Some(below), partner].into_iter().flatten().all(|target| {
-            let (from, to) = if from_chest {
-                (target, pos)
-            } else {
-                (pos, target)
-            };
-            level.allow_inventory_transfer(host, from, to, stack)
-        })
-    })
+    run(
+        host,
+        tx,
+        level,
+        &storage,
+        recipe,
+        |host, stack, from_chest| {
+            [Some(below), partner].into_iter().flatten().all(|target| {
+                let (from, to) = if from_chest {
+                    (target, pos)
+                } else {
+                    (pos, target)
+                };
+                level.allow_inventory_transfer(host, from, to, stack)
+            })
+        },
+    )
 }
 
 fn run(
     host: &mut dyn ServerHost,
     tx: &Transaction,
+    level: LevelRef,
     storage: &Inventory,
-    recipe: &CraftingRecipe,
+    recipe: RecipeView<'_>,
     mut allows: impl FnMut(&mut dyn ServerHost, &ItemStack, bool) -> bool,
 ) -> Result<(), ()> {
     let size = storage.size(host);
@@ -432,20 +602,20 @@ fn run(
                 .to_stack(storage.amount(host, slot))
         })
         .collect();
-    let payments = payments(host, recipe, slots).ok_or(())?;
-    let mut output = recipe
-        .output
-        .kind
-        .stack(host, recipe.output.count)
-        .ok_or(())?;
+    let plan = payments(host, recipe.input(), slots).ok_or(())?;
+    let mut output = match recipe {
+        RecipeView::Enhanced(recipe) => recipe.output.kind.stack(host, recipe.output.count),
+        RecipeView::Vanilla(recipe) => recipe.assemble(host, level, plan.grid),
+    }
+    .ok_or(())?;
     crate::backpacks::prepare_automated_craft(
         host,
         tx,
-        payments.iter().map(|payment| &payment.stack),
+        plan.used.iter().map(|payment| &payment.stack),
         &mut output,
     )
     .map_err(|_| ())?;
-    for payment in &payments {
+    for payment in &plan.used {
         let resource = ItemResource::of(&payment.stack);
         let transfer = resource.to_stack(payment.amount).ok_or(())?;
         if !allows(host, &transfer, true)
@@ -458,7 +628,9 @@ fn run(
         return Err(());
     }
     insert_all(host, tx, storage, size, &output)?;
-    for payment in &payments {
+    // Paper returns these specific containers for all Auto-Crafters, even if
+    // a datapack's crafting remainder list declares something different.
+    for payment in &plan.used {
         if let Some(stack) = leftover(host, payment)? {
             if !allows(host, &stack, false) {
                 return Err(());
@@ -485,19 +657,58 @@ pub(crate) fn complete(host: &mut dyn ServerHost, level: LevelRef, [x, y, z]: Po
 }
 
 #[derive(Clone)]
+struct Pages {
+    recipes: Vec<String>,
+    index: usize,
+}
+
+impl Pages {
+    fn active(&self) -> &str {
+        &self.recipes[self.index]
+    }
+
+    fn turn(&mut self, slot: usize) -> bool {
+        let next = match slot {
+            PREVIOUS => self.index.checked_sub(1),
+            NEXT => self.index.checked_add(1),
+            _ => None,
+        };
+        if let Some(index) = next.filter(|&index| index < self.recipes.len()) {
+            self.index = index;
+            true
+        } else {
+            false
+        }
+    }
+}
+
+#[derive(Clone)]
 struct Viewer {
     level: LevelRef,
     pos: Pos,
     body: BlockEntityRef,
     window: i32,
+    variant: Variant,
     saved: Selection,
-    candidate: Option<String>,
+    candidate: Option<Pages>,
+    preview_start: i64,
+}
+
+impl Viewer {
+    fn key(&self) -> Option<&str> {
+        chosen_key(&self.saved, self.candidate.as_ref())
+    }
 }
 
 static VIEWERS: Mutex<BTreeMap<u128, Viewer>> = Mutex::new(BTreeMap::new());
 
 pub(crate) fn clear() {
     VIEWERS.lock().unwrap().clear();
+    invalidate_vanilla_recipes();
+}
+
+pub(crate) fn invalidate_vanilla_recipes() {
+    vanilla::invalidate();
 }
 
 pub(crate) fn closed(event: &MenuClosedEvent) {
@@ -522,17 +733,36 @@ fn named_icon(host: &dyn Host, id: &'static str, name: &str, color: &str) -> Opt
 
 fn preview(
     host: &dyn Host,
-    recipe: &CraftingRecipe,
-    candidate: bool,
+    recipe: &RecipeView<'_>,
+    variant: Variant,
+    candidate: Option<&Pages>,
     disabled: bool,
+    frame: usize,
 ) -> Vec<Option<ItemStack>> {
     let background = named_icon(host, "minecraft:gray_stained_glass_pane", " ", "gray");
     let mut items = vec![background; 54];
-    for (slot, kind) in PREVIEW_SLOTS.into_iter().zip(recipe.inputs) {
-        items[slot] = kind.and_then(|kind| kind.stack(host, 1));
+    let (ingredients, result) = recipe.icons(host, frame);
+    for (slot, icon) in PREVIEW_SLOTS.into_iter().zip(ingredients) {
+        items[slot] = icon;
     }
-    items[RESULT] = recipe.output.kind.stack(host, recipe.output.count);
-    let (control, label, color) = if candidate {
+    items[RESULT] = result;
+    if let Some(pages) = candidate.filter(|_| variant == Variant::Vanilla) {
+        let current = pages.index + 1;
+        let total = pages.recipes.len();
+        for (slot, label, available) in [
+            (PREVIOUS, "Previous recipe", current > 1),
+            (NEXT, "Next recipe", current < total),
+        ] {
+            let name = format!("{label} ({current}/{total})");
+            let (id, color) = if available {
+                ("minecraft:arrow", "green")
+            } else {
+                ("minecraft:gray_stained_glass_pane", "gray")
+            };
+            items[slot] = named_icon(host, id, &name, color);
+        }
+    }
+    let (control, label, color) = if candidate.is_some() {
         ("minecraft:crafting_table", "Select this recipe", "green")
     } else if disabled {
         (
@@ -565,36 +795,71 @@ fn click_sound(host: &mut dyn ServerHost, player: PlayerRef) {
     );
 }
 
+fn chosen_key<'a>(saved: &'a Selection, candidate: Option<&'a Pages>) -> Option<&'a str> {
+    candidate.map(Pages::active).or(saved.recipe.as_deref())
+}
+
+fn check_candidate(
+    host: &mut dyn ServerHost,
+    player: PlayerRef,
+    level: LevelRef,
+    recipe: &RecipeView<'_>,
+    key: &str,
+) -> Result<(), &'static str> {
+    match recipe {
+        RecipeView::Enhanced(recipe)
+            if !recipe.research.id.is_empty()
+                && !research::can_use(host, player, recipe.research) =>
+        {
+            Err("Unlock this recipe in your Slimefun research before selecting it.")
+        }
+        RecipeView::Vanilla(_) => {
+            if vanilla::limited(host, level)?
+                && player.has_discovered_recipe(host, key) != Some(true)
+            {
+                Err("Unlock this recipe in your recipe book before selecting it.")
+            } else {
+                Ok(())
+            }
+        }
+        _ => Ok(()),
+    }
+}
+
 fn present(
     host: &mut dyn ServerHost,
     player: PlayerRef,
     level: LevelRef,
     pos: Pos,
+    variant: Variant,
     saved: Selection,
-    candidate: Option<String>,
+    candidate: Option<Pages>,
 ) -> Result<(), &'static str> {
-    let selected = candidate
-        .as_deref()
-        .or(saved.recipe.as_deref())
+    let selected = chosen_key(&saved, candidate.as_ref())
         .ok_or("Sneak and right-click with the item to set an Auto-Crafter recipe.")?;
-    let recipe =
-        recipe(selected).ok_or("That item has no available Enhanced Crafting Table recipe.")?;
-    if candidate.is_some()
-        && !recipe.research.id.is_empty()
-        && !research::can_use(host, player, recipe.research)
-    {
-        return Err("Unlock this recipe in your Slimefun research before selecting it.");
+    let recipe = selected_recipe(host, variant, selected)
+        .ok_or("The selected Auto-Crafter recipe is unavailable.")?;
+    if candidate.is_some() {
+        check_candidate(host, player, level, &recipe, selected)?;
     }
     let body = host
         .block_entity(level, pos)
         .ok_or("The Auto-Crafter is no longer loaded.")?;
-    let items = preview(host, recipe, candidate.is_some(), saved.disabled);
+    let items = preview(
+        host,
+        &recipe,
+        variant,
+        candidate.as_ref(),
+        saved.disabled,
+        0,
+    );
+    let preview_start = level.game_time(host).unwrap_or_default();
     let window = host
         .open_block_inventory_menu(
             player,
             body,
             6,
-            Text::literal("Auto-Crafter (Enhanced)"),
+            Text::literal(variant.title()),
             items,
             MenuReplace::InPlace,
         )
@@ -607,13 +872,36 @@ fn present(
                 pos,
                 body,
                 window,
+                variant,
                 saved,
                 candidate,
+                preview_start,
             },
         );
         click_sound(host, player);
     }
     Ok(())
+}
+
+fn candidates(
+    host: &dyn Host,
+    player: PlayerRef,
+    level: LevelRef,
+    variant: Variant,
+    item: &ItemStack,
+) -> Result<Pages, &'static str> {
+    let recipes = match variant {
+        Variant::Enhanced => item_id(item)
+            .filter(|id| recipe(id).is_some_and(|recipe| recipe.output.kind.matches(host, item)))
+            .map(|id| vec![id])
+            .ok_or("Hold an item made by the Enhanced Crafting Table to set its recipe.")?,
+        Variant::Vanilla => vanilla::candidates(host, level, player, item)?,
+    };
+    if recipes.is_empty() {
+        Err("No available Crafting Table recipe produces the item in your hand.")
+    } else {
+        Ok(Pages { recipes, index: 0 })
+    }
 }
 
 pub(crate) fn use_at(
@@ -623,12 +911,12 @@ pub(crate) fn use_at(
     pos: Pos,
     use_item: bool,
 ) -> bool {
-    if !network_runtime::factory_identity(host, level, pos)
+    let Some(variant) = network_runtime::factory_identity(host, level, pos)
         .as_deref()
-        .is_some_and(is_machine)
-    {
+        .and_then(Variant::from_item)
+    else {
         return false;
-    }
+    };
     let activate = |host: &mut dyn ServerHost| {
         if !research::can_use(host, player, &RESEARCH) {
             return Err("Unlock the Auto-Crafter with /sf research auto_crafting.");
@@ -644,21 +932,15 @@ pub(crate) fn use_at(
                 player: player.uuid(),
                 hand: Hand::Main,
             };
-            let missing = "Hold an item made by the Enhanced Crafting Table to set its recipe.";
             let item = use_item
                 .then(|| place.stack(host))
                 .flatten()
-                .ok_or(missing)?;
-            let selected = item_id(&item)
-                .filter(|id| {
-                    recipe(id).is_some_and(|recipe| recipe.output.kind.matches(host, &item))
-                })
-                .ok_or(missing)?;
-            Some(selected)
+                .ok_or("Hold the desired crafting result to select its recipe.")?;
+            Some(candidates(host, player, level, variant, &item)?)
         } else {
             None
         };
-        present(host, player, level, pos, selected, candidate)
+        present(host, player, level, pos, variant, selected, candidate)
     };
     if let Err(message) = activate(host) {
         tell(host, player, message);
@@ -667,7 +949,13 @@ pub(crate) fn use_at(
 }
 
 pub(crate) fn clicked(host: &mut dyn ServerHost, event: &MenuClickedEvent) {
-    if event.slot != CONTROL as i32 || event.mode != 0 || !matches!(event.button, 0 | 1) {
+    let Ok(slot) = usize::try_from(event.slot) else {
+        return;
+    };
+    if !matches!(slot, PREVIOUS | CONTROL | NEXT)
+        || event.mode != 0
+        || !matches!(event.button, 0 | 1)
+    {
         return;
     }
     let viewer = VIEWERS.lock().unwrap().get(&event.uuid).cloned();
@@ -679,15 +967,16 @@ pub(crate) fn clicked(host: &mut dyn ServerHost, event: &MenuClickedEvent) {
     };
     if player.entity().level(host) != Some(viewer.level)
         || host.block_entity(viewer.level, viewer.pos) != Some(viewer.body)
-        || !network_runtime::factory_identity(host, viewer.level, viewer.pos)
+        || network_runtime::factory_identity(host, viewer.level, viewer.pos)
             .as_deref()
-            .is_some_and(is_machine)
+            .and_then(Variant::from_item)
+            != Some(viewer.variant)
         || !research::can_use(host, player, &RESEARCH)
     {
         host.close_menu(event.uuid);
         return;
     }
-    let result = apply_click(host, player, viewer, event.button);
+    let result = apply_click(host, player, viewer, slot, event.button);
     if let Err(message) = result {
         host.close_menu(event.uuid);
         tell(host, player, message);
@@ -697,23 +986,43 @@ pub(crate) fn clicked(host: &mut dyn ServerHost, event: &MenuClickedEvent) {
 fn apply_click(
     host: &mut dyn ServerHost,
     player: PlayerRef,
-    viewer: Viewer,
+    mut viewer: Viewer,
+    slot: usize,
     button: i32,
 ) -> Result<(), &'static str> {
     let mut saved = read(host, viewer.pos)?.unwrap_or_default();
     if saved != viewer.saved || inventory(host, viewer.level, viewer.pos).is_none() {
         return Err("The Auto-Crafter settings or inventory changed. Reopen its menu.");
     }
-    if let Some(candidate) = viewer.candidate {
-        let recipe =
-            recipe(&candidate).ok_or("That Enhanced Crafting Table recipe is unavailable.")?;
-        if !recipe.research.id.is_empty() && !research::can_use(host, player, recipe.research) {
-            return Err("Unlock this recipe in your Slimefun research before selecting it.");
+    if slot != CONTROL {
+        if let Some(pages) = &mut viewer.candidate
+            && viewer.variant == Variant::Vanilla
+            && pages.turn(slot)
+        {
+            send_preview(host, player.uuid(), &viewer, 0)?;
+            viewer.preview_start = viewer.level.game_time(host).unwrap_or_default();
+            VIEWERS.lock().unwrap().insert(player.uuid(), viewer);
+            click_sound(host, player);
         }
-        saved.recipe = Some(candidate);
+        return Ok(());
+    }
+    if let Some(candidate) = viewer.candidate {
+        let selected = candidate.active();
+        let recipe = selected_recipe(host, viewer.variant, selected)
+            .ok_or("The selected Auto-Crafter recipe is unavailable.")?;
+        check_candidate(host, player, viewer.level, &recipe, selected)?;
+        saved.recipe = Some(selected.to_owned());
         store(host, viewer.pos, saved.clone())?;
         tell(host, player, "The Auto-Crafter recipe was set.");
-        return present(host, player, viewer.level, viewer.pos, saved, None);
+        return present(
+            host,
+            player,
+            viewer.level,
+            viewer.pos,
+            viewer.variant,
+            saved,
+            None,
+        );
     }
     let message = if button == 1 {
         saved = Selection::default();
@@ -731,6 +1040,58 @@ fn apply_click(
     click_sound(host, player);
     tell(host, player, message);
     Ok(())
+}
+
+fn send_preview(
+    host: &mut dyn ServerHost,
+    uuid: u128,
+    viewer: &Viewer,
+    frame: usize,
+) -> Result<(), &'static str> {
+    let recipe = viewer
+        .key()
+        .and_then(|id| selected_recipe(host, viewer.variant, id))
+        .ok_or("The selected Auto-Crafter recipe is unavailable.")?;
+    let items = preview(
+        host,
+        &recipe,
+        viewer.variant,
+        viewer.candidate.as_ref(),
+        viewer.saved.disabled,
+        frame,
+    );
+    host.menu_set_items(uuid, viewer.window, items)
+        .map_err(|_| "The Auto-Crafter preview could not be updated.")
+}
+
+pub(crate) fn refresh(host: &mut dyn ServerHost, level: LevelRef) {
+    let Some(now) = level.game_time(host) else {
+        return;
+    };
+    let active: Vec<_> = VIEWERS
+        .lock()
+        .unwrap()
+        .iter()
+        .filter_map(|(&uuid, view)| {
+            let elapsed = now.saturating_sub(view.preview_start);
+            (view.level == level
+                && view.variant == Variant::Vanilla
+                && elapsed > 0
+                && elapsed % PREVIEW_TICKS == 0)
+                .then(|| (uuid, view.clone(), (elapsed / PREVIEW_TICKS) as usize))
+        })
+        .collect();
+    for (uuid, view, frame) in active {
+        if host.menu(uuid, view.window).is_some() {
+            let animated = view
+                .key()
+                .and_then(|id| vanilla::find(host, id))
+                .is_some_and(|recipe| recipe.animated());
+            if animated {
+                let _ = send_preview(host, uuid, &view, frame);
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -800,9 +1161,14 @@ mod tests {
             container.slots[0] = Some(raw.clone());
             let result = host.transaction(|host, tx| {
                 let storage = level.capability(host, &ITEMS, chest, None).unwrap();
-                run(host, tx, &storage, &recipe, |_, _, from_chest| {
-                    output_allowed || from_chest
-                })
+                run(
+                    host,
+                    tx,
+                    level,
+                    &storage,
+                    RecipeView::Enhanced(&recipe),
+                    |_, _, from_chest| output_allowed || from_chest,
+                )
             });
             let contents = host
                 .level
@@ -843,13 +1209,63 @@ mod tests {
         };
         let first = stone.stack(&host, 1);
         let next = stone.stack(&host, 9);
-        assert!(payments(&host, &recipe, vec![first.clone(), next.clone()]).is_none());
-        let raw = payments(&host, &recipe, vec![first, None, next]).unwrap();
+        let view = RecipeView::Enhanced(&recipe);
+        let inputs = view.input();
+        assert!(payments(&host, inputs, vec![first.clone(), next.clone()]).is_none());
+        let raw = payments(&host, inputs, vec![first, None, next]).unwrap();
         assert_eq!(
-            raw.into_iter()
+            raw.used
+                .into_iter()
                 .map(|payment| (payment.slot, payment.amount))
                 .collect::<Vec<_>>(),
             vec![(0, 1), (2, 2)]
+        );
+    }
+
+    #[test]
+    fn a_vanilla_saved_key_and_two_pages_remain_exact() {
+        let saved = paper_selection(&Compound::from([(
+            "PublicBukkitValues".into(),
+            Tag::compound([
+                (
+                    "slimefun:recipe_key",
+                    Tag::String("demo:processing/oak_sticks".into()),
+                ),
+                ("slimefun:recipe_enabled", Tag::Byte(0)),
+            ]),
+        )]))
+        .unwrap();
+        assert_eq!(saved.recipe.as_deref(), Some("demo:processing/oak_sticks"));
+        assert!(saved.disabled);
+        assert!(!vanilla_key("demo:INVALID"));
+        let mut pages = Pages {
+            recipes: vec![
+                "minecraft:stick".into(),
+                "demo:processing/oak_sticks".into(),
+            ],
+            index: 0,
+        };
+        assert!(!pages.turn(PREVIOUS));
+        assert!(pages.turn(NEXT));
+        assert_eq!(pages.active(), "demo:processing/oak_sticks");
+        assert!(!pages.turn(NEXT));
+        assert!(pages.turn(PREVIOUS));
+        assert!(!pages.turn(CONTROL));
+        assert_eq!(pages.active(), "minecraft:stick");
+        let recipe = recipe("VANILLA_AUTO_CRAFTER").unwrap();
+        assert_eq!(
+            recipe.inputs.map(|part| part.map(Kind::id)),
+            [
+                None,
+                Some("CARGO_MOTOR"),
+                None,
+                Some("minecraft:crafting_table"),
+                Some("CRAFTING_MOTOR"),
+                Some("minecraft:crafting_table"),
+                None,
+                Some("ELECTRIC_MOTOR"),
+                None
+            ]
         );
     }
 }

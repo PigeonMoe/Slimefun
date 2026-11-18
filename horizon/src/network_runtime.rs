@@ -489,7 +489,7 @@ impl Networks {
         }
         if crate::auto_crafter::is_machine(id) {
             host.transaction(|host, _| {
-                crate::auto_crafter::restore_paper(host, level, pos, row)?;
+                crate::auto_crafter::restore_paper(host, level, pos, id, row)?;
                 self.register(host, level, pos, node, data, true)
             })?;
         } else if node.component == Component::TrashCan {
@@ -1082,7 +1082,7 @@ pub(crate) fn tick(
                         .charge
                         .checked_sub(crate::auto_crafter::COST)
                         .ok_or(())?;
-                    crate::auto_crafter::stage(host, tx, level, pos)?;
+                    crate::auto_crafter::stage(host, tx, level, pos, &node.id)?;
                     write_data(host, pos, data).map_err(|_| ())
                 });
                 if crafted.is_ok() {
