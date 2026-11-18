@@ -30,6 +30,7 @@ struct Output {
 
 enum Action {
     Sound(PlayerRef, &'static str),
+    BlockSound(Dispenser, &'static str),
     PressureStep {
         level: LevelRef,
         position: [i32; 3],
@@ -127,6 +128,33 @@ impl DelayedCrafts {
         self.queue(host, steps.chain([(60, Action::Output(output))]))
     }
 
+    pub fn queue_armor_forge(
+        &self,
+        host: &mut dyn ServerHost,
+        holder: BlockEntityRef,
+        dispenser: Dispenser,
+        stack: ItemStack,
+    ) -> Result<(), Refusal> {
+        let output = Output {
+            holder,
+            dispenser,
+            stack,
+        };
+        let sounds = [
+            (0, "minecraft:entity.arrow.hit_player"),
+            (20, "minecraft:entity.arrow.hit_player"),
+            (40, "minecraft:entity.arrow.hit_player"),
+            (60, "minecraft:block.anvil.use"),
+        ];
+        self.queue(
+            host,
+            sounds
+                .map(|(delay, sound)| (delay, Action::BlockSound(dispenser, sound)))
+                .into_iter()
+                .chain([(60, Action::Output(output))]),
+        )
+    }
+
     pub fn queue_panning(
         &self,
         host: &mut dyn ServerHost,
@@ -188,6 +216,17 @@ impl DelayedCrafts {
         match action {
             Some(Action::Sound(player, sound)) => {
                 player.play_sound(host, sound, SoundSource::Blocks, 1.0, 1.0);
+            }
+            Some(Action::BlockSound(dispenser, sound)) => {
+                let position = dispenser.position.map(|axis| f64::from(axis) + 0.5);
+                let _ = dispenser.level.play_sound(
+                    host,
+                    sound,
+                    position,
+                    SoundSource::Blocks,
+                    1.0,
+                    1.0,
+                );
             }
             Some(Action::PressureStep {
                 level,

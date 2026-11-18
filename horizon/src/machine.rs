@@ -22,6 +22,7 @@ pub(crate) enum Machine {
     Grinding,
     Crafting,
     MagicCrafting { table: [i32; 3] },
+    ArmorCrafting,
     Crushing,
     Compressing,
     Pressing,
@@ -141,6 +142,7 @@ impl Machine {
 
         let machine = match block.as_str() {
             "minecraft:crafting_table" => Self::Crafting,
+            "minecraft:anvil" => Self::ArmorCrafting,
             "minecraft:nether_brick_fence"
                 if y.checked_add(1)
                     .is_some_and(|top| has_block(host, level, [x, top, z], "minecraft:glass")) =>
@@ -203,7 +205,10 @@ impl Machine {
             Ok(())
                 if matches!(
                     self,
-                    Self::Compressing | Self::Pressing | Self::MagicCrafting { .. }
+                    Self::Compressing
+                        | Self::Pressing
+                        | Self::MagicCrafting { .. }
+                        | Self::ArmorCrafting
                 ) =>
             {
                 return;
@@ -272,6 +277,7 @@ impl Machine {
             Self::Pressing => Some(&PRESSURE_CHAMBER),
             Self::Juicing => Some(&JUICER),
             Self::Washing => Some(&ORE_WASHER),
+            Self::ArmorCrafting => Some(&crate::armor_forge::FORGE_RESEARCH),
             Self::Smelting {
                 makeshift: true, ..
             } => Some(&MAKESHIFT_SMELTERY),
@@ -435,7 +441,7 @@ impl Machine {
                     }
                     Ok(())
                 }
-                Self::Crafting | Self::MagicCrafting { .. } => {
+                Self::Crafting | Self::MagicCrafting { .. } | Self::ArmorCrafting => {
                     let matches_inputs = |recipe: &&crate::recipes::CraftingRecipe| {
                         recipe.inputs.iter().zip(&slots).all(|(input, actual)| {
                             match (input, actual) {
@@ -445,16 +451,23 @@ impl Machine {
                             }
                         })
                     };
-                    let recipe = if matches!(self, Self::MagicCrafting { .. }) {
-                        crate::recipes::magic_crafting().find(matches_inputs)
-                    } else {
-                        crafting().find(matches_inputs)
+                    let recipe = match self {
+                        Self::MagicCrafting { .. } => {
+                            crate::recipes::magic_crafting().find(matches_inputs)
+                        }
+                        Self::ArmorCrafting => {
+                            crate::armor_forge::RECIPES.iter().find(matches_inputs)
+                        }
+                        _ => crafting().find(matches_inputs),
                     }
                     .ok_or(Refusal::MissingRecipe)?;
                     if recipe.output.kind == OUTPUT_CHEST && !output_chest::enabled() {
                         return Err(Refusal::Disabled);
                     }
-                    if !recipe.research.id.is_empty()
+                    let untagged_forge_output = matches!(self, Self::ArmorCrafting)
+                        && matches!(recipe.output.kind, crate::items::Kind::Vanilla(_));
+                    if !untagged_forge_output
+                        && !recipe.research.id.is_empty()
                         && !research::can_use(host, player, recipe.research)
                     {
                         return Err(Refusal::MissingResearch(recipe.research.id));
@@ -471,13 +484,19 @@ impl Machine {
                             consume(host, tx, &dispenser.place(slot), item, 1)?;
                         }
                     }
-                    if let Self::MagicCrafting { table } = self {
+                    if matches!(self, Self::MagicCrafting { .. } | Self::ArmorCrafting) {
                         host.transaction(|host, tx| {
                             Err::<(), _>(deposit_output(host, tx, dispenser, &output))
                         })
                         .expect_err("the capacity check always rolls back")?;
-                        return delayed_crafts
-                            .queue_magic_crafting(host, holder, dispenser, table, output);
+                        return match self {
+                            Self::MagicCrafting { table } => delayed_crafts
+                                .queue_magic_crafting(host, holder, dispenser, table, output),
+                            Self::ArmorCrafting => {
+                                delayed_crafts.queue_armor_forge(host, holder, dispenser, output)
+                            }
+                            _ => unreachable!(),
+                        };
                     }
                     deposit_output(host, tx, dispenser, &output)
                 }

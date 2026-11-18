@@ -12,6 +12,7 @@ use mod_api::{
 
 mod advanced_processing;
 mod ancient_altar;
+mod armor_forge;
 mod auto_anvil;
 mod auto_brewer;
 mod auto_crafter;
@@ -783,6 +784,7 @@ impl Hooks for Slimefun {
             self.composters.tick(host, event.level, &self.rolls);
             ancient_altar::tick(host, event.level);
             auto_crafter::refresh(host, event.level);
+            armor_forge::tick_equipment(host, event.level);
         }
     }
 
@@ -1024,11 +1026,20 @@ fn describe_recipe(id: &str, double_ores: bool) -> Vec<String> {
         .map(|recipe| ("Enhanced Crafting Table", recipe))
         .chain(recipes::magic_crafting().map(|recipe| ("Magic Workbench", recipe)))
         .chain(
+            armor_forge::RECIPES
+                .iter()
+                .map(|recipe| ("Armor Forge", recipe)),
+        )
+        .chain(
             ancient_altar::CRAFTING
                 .iter()
+                .chain(armor_forge::ALTAR_RECIPES)
                 .map(|recipe| ("Ancient Altar", recipe)),
         );
-    for (workbench, recipe) in workbenches.filter(|(_, recipe)| outputs(recipe.output.kind.id())) {
+    for (workbench, recipe) in workbenches.filter(|(bench, recipe)| {
+        outputs(recipe.output.kind.id())
+            || (*bench == "Armor Forge" && outputs(armor_forge::paper_id(recipe.output.kind)))
+    }) {
         let mut header = format!(
             "{workbench} | {} × {}",
             recipe.output.count,

@@ -1206,15 +1206,18 @@ fn ritual_recipe(
     catalyst: &ItemStack,
     ring: &[ItemStack; 8],
 ) -> Option<&'static CraftingRecipe> {
-    CRAFTING.iter().find(|recipe| {
-        recipe.inputs[4].is_some_and(|kind| kind.matches(host, catalyst))
-            && (0..8).any(|rotation| {
-                PEDESTAL_PATTERN.iter().enumerate().all(|(offset, &cell)| {
-                    recipe.inputs[cell]
-                        .is_some_and(|kind| kind.matches(host, &ring[(offset + rotation) % 8]))
+    CRAFTING
+        .iter()
+        .chain(crate::armor_forge::ALTAR_RECIPES)
+        .find(|recipe| {
+            recipe.inputs[4].is_some_and(|kind| kind.matches(host, catalyst))
+                && (0..8).any(|rotation| {
+                    PEDESTAL_PATTERN.iter().enumerate().all(|(offset, &cell)| {
+                        recipe.inputs[cell]
+                            .is_some_and(|kind| kind.matches(host, &ring[(offset + rotation) % 8]))
+                    })
                 })
-            })
-    })
+        })
 }
 
 pub(crate) fn decorate(id: &str, components: &mut Compound) {
@@ -1236,6 +1239,8 @@ pub(crate) fn decorate(id: &str, components: &mut Compound) {
         "ANCIENT_RUNE_EARTH" => ("Earth", "red", 0x702f07),
         "ANCIENT_RUNE_FIRE" => ("Fire", "dark_red", 0xff0000),
         "ANCIENT_RUNE_WATER" => ("Water", "dark_blue", 0x0000ff),
+        "ANCIENT_RUNE_ENDER" => ("Ender", "dark_purple", 0x800080),
+        "ANCIENT_RUNE_RAINBOW" => ("Rainbow", "light_purple", 0xff00ff),
         _ => return,
     };
     components.insert(
