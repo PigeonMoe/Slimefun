@@ -221,6 +221,7 @@ enum InventoryKind {
     TrashCan,
     ReactorPort,
     ExperienceCollector,
+    GeoMiner,
     TreeGrowthAccelerator,
     Assembler(&'static crate::factory::assemblers::Assembler),
     Factory { smeltery: bool },
@@ -251,6 +252,7 @@ impl InventoryKind {
             Self::TrashCan => 0..0,
             Self::ReactorPort => 6.min(size)..7.min(size),
             Self::ExperienceCollector => 0..3.min(size),
+            Self::GeoMiner => 0..size,
             Self::TreeGrowthAccelerator => 0..0,
             Self::Assembler(_) => 0..0,
             Self::Factory { .. } => 2..4.min(size),
@@ -271,7 +273,7 @@ impl InventoryKind {
                     0..3.min(size)
                 }
             }
-            Self::ExperienceCollector => 0..0,
+            Self::ExperienceCollector | Self::GeoMiner => 0..0,
             Self::TreeGrowthAccelerator => 0..size,
             Self::Assembler(spec) => {
                 let carrier = stack.item().id(host);
@@ -369,6 +371,9 @@ fn attached_inventory(
         }
         if id == crate::factory::experience_collector::XP_COLLECTOR.id() {
             return Some((pos, InventoryKind::ExperienceCollector));
+        }
+        if id == crate::geology::GEO_MINER.id() {
+            return Some((pos, InventoryKind::GeoMiner));
         }
         if id == crate::factory::tree_growth::TREE_GROWTH_ACCELERATOR.id() {
             return Some((pos, InventoryKind::TreeGrowthAccelerator));

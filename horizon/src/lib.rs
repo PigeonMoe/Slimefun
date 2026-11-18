@@ -27,6 +27,7 @@ mod enhanced_furnaces;
 mod factory;
 mod food_machines;
 mod fuel_generators;
+mod geo_deposits;
 mod geology;
 mod gold_pan;
 mod hand_machine;
@@ -432,6 +433,14 @@ impl Hooks for Slimefun {
                 2,
             ),
             Command::op(
+                "slimefun storage restore-geo <dimension:dimension> <pos:block_pos>",
+                2,
+            ),
+            Command::op(
+                "sf storage restore-geo <dimension:dimension> <pos:block_pos>",
+                2,
+            ),
+            Command::op(
                 "slimefun storage restore-oil <dimension:dimension> <pos:block_pos>",
                 2,
             ),
@@ -579,12 +588,29 @@ impl Hooks for Slimefun {
             *event.cancellation_result = InteractionResult::Consume;
             return Flow::Cancel;
         }
-        if event.click.hand != Hand::Main {
-            return Flow::Continue;
-        }
         let Some(level) = player.entity().level(host) else {
             return Flow::Continue;
         };
+        if *event.use_item != TriState::False
+            && let Some(item) = geology::held_scanner_item(host, player, event.click.hand)
+        {
+            if item == geology::PORTABLE_GEO_SCANNER {
+                network_runtime::open_scanner(
+                    &self.networks,
+                    host,
+                    player,
+                    level,
+                    event.click.pos,
+                    true,
+                    &self.rolls,
+                );
+            }
+            *event.cancellation_result = InteractionResult::Consume;
+            return Flow::Cancel;
+        }
+        if event.click.hand != Hand::Main {
+            return Flow::Continue;
+        }
         if self.composters.use_at(
             host,
             player,
@@ -607,6 +633,7 @@ impl Hooks for Slimefun {
             player,
             level,
             event.click.pos,
+            false,
             &self.rolls,
         ) {
             *event.cancellation_result = InteractionResult::Consume;
@@ -671,6 +698,7 @@ impl Hooks for Slimefun {
             )
             && (self.backpacks.use_held(host, player, event.click.hand)
                 || network_runtime::trash::portable(host, player, event.click.hand)
+                || geology::held_scanner_item(host, player, event.click.hand).is_some()
                 || factory::experience_collector::use_flask(host, player, event.click.hand))
         {
             *event.cancellation_result = InteractionResult::Consume;
@@ -843,6 +871,15 @@ fn describe_recipe(id: &str, double_ores: bool) -> Vec<String> {
             recipe.output.count,
             recipe.output.kind.id(),
         ));
+    }
+    for resource in geo_deposits::MINER_RESOURCES {
+        let item = resource.item();
+        if outputs(item.id()) || outputs(geology::GEO_MINER.id()) {
+            lines.push(format!(
+                "GEO Miner | 1 × {} from a scanned chunk",
+                item.id()
+            ));
+        }
     }
     if outputs(items::SALT.id()) {
         lines.push("Electric Dust Washer | 1 × minecraft:sand -> 1 × SALT".into());

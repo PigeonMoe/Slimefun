@@ -85,6 +85,10 @@ impl Component {
                 capacity: crate::geology::PUMP_CAPACITY,
                 carrier: "minecraft:player_head",
             },
+            "GEO_MINER" => Self::ElectricMachine {
+                capacity: crate::geology::MINER_CAPACITY,
+                carrier: crate::geology::GEO_MINER.material(),
+            },
             "FLUID_PUMP" => Self::ElectricMachine {
                 capacity: crate::factory::fluid_pump::CAPACITY,
                 carrier: crate::factory::fluid_pump::FLUID_PUMP.material(),

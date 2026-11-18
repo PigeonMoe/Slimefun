@@ -51,7 +51,7 @@ class BlockStorageTest(unittest.TestCase):
             self.assertEqual(profile["backpacks"][0]["paper_item_issues"],
                              ["Invalid backpack inventory slot 'invalid_slot'."])
 
-    def test_archives_depleted_and_nonempty_paper_oil_reserves(self):
+    def test_archives_partial_and_depleted_paper_geo_reserves(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             source = root / "paper"
@@ -59,23 +59,36 @@ class BlockStorageTest(unittest.TestCase):
             chunks.mkdir(parents=True)
             file = chunks / "chunks.sfc"
             file.write_text(yaml.safe_dump({
-                "survival;Chunk;-1;-2": '{"slimefun-oil":"0","slimefun-salt":"2"}',
+                "survival;Chunk;-1;-2": ('{"slimefun-oil":"0","slimefun-salt":"2",'
+                                         '"slimefun-nether_ice":"45","slimefun-uranium":"0"}'),
                 "survival;Chunk;1;-2": '{"slimefun-oil":"79"}',
                 "survival;Chunk;0;0": '{"slimefun-salt":"1"}',
             }))
             dimension = "example:survival"
-            reserves = IMPORT.collect_oil(source, {"survival": dimension})
-            self.assertEqual(reserves, {(dimension, -1, -2): 0, (dimension, 1, -2): 79})
+            reserves = IMPORT.collect_geo(source, {"survival": dimension})
+            self.assertEqual(reserves, {
+                (dimension, -1, -2): {"slimefun-oil": 0, "slimefun-salt": 2,
+                                      "slimefun-nether_ice": 45, "slimefun-uranium": 0},
+                (dimension, 1, -2): {"slimefun-oil": 79},
+                (dimension, 0, 0): {"slimefun-salt": 1},
+            })
             output = root / "archive"
-            IMPORT.publish(output, {}, oil=reserves)
+            IMPORT.publish(output, {}, geo=reserves)
             archived = output / "geo" / dimension.encode().hex() / "-1_-2.toml"
             self.assertEqual(tomllib.loads(archived.read_text()), {
-                "format": 1, "dimension": dimension, "chunk": [-1, -2], "slimefun-oil": 0,
+                "format": 1, "dimension": dimension, "chunk": [-1, -2],
+                "slimefun-oil": 0, "slimefun-salt": 2,
+                "slimefun-nether_ice": 45, "slimefun-uranium": 0,
             })
-            self.assertEqual(tomllib.loads((output / "index.toml").read_text())["oil_reserves"], 2)
-            file.write_text(yaml.safe_dump({"survival;Chunk;-1;-2": '{"slimefun-oil":"-1"}'}))
-            with self.assertRaisesRegex(ValueError, "Invalid Paper oil supply"):
-                IMPORT.collect_oil(source, {"survival": dimension})
+            index = tomllib.loads((output / "index.toml").read_text())
+            self.assertEqual(index["oil_reserves"], 2)
+            self.assertEqual(index["geo_chunks"], 3)
+            for invalid in ('-1', '2147483648', '002'):
+                file.write_text(yaml.safe_dump({
+                    "survival;Chunk;-1;-2": f'{{"slimefun-nether_ice":"{invalid}"}}',
+                }))
+                with self.assertRaisesRegex(ValueError, "Invalid Paper GEO supply"):
+                    IMPORT.collect_geo(source, {"survival": dimension})
 
     def test_archives_paper_metadata_and_inventory_without_overwriting(self):
         with tempfile.TemporaryDirectory() as tmp:

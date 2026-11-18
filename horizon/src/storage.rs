@@ -7,8 +7,11 @@ use mod_api::{
 use std::{collections::BTreeMap, fmt::Write, sync::Mutex};
 
 use crate::{
-    ancient_altar, geology, network_runtime::Networks, networks::Component, output_chest,
-    universal_storage,
+    ancient_altar,
+    geo_deposits::{self, Resource},
+    network_runtime::Networks,
+    networks::Component,
+    output_chest, universal_storage,
 };
 
 fn read(host: &dyn ServerHost, path: &str) -> Result<toml::Table, String> {
@@ -225,7 +228,12 @@ pub(crate) fn command(
                     optional_count("backpacks")?,
                 ));
             }
-            if index.contains_key("oil_reserves") {
+            if index.contains_key("geo_chunks") {
+                lines.push(format!(
+                    "Paper GEO | {} scanned chunks",
+                    count("geo_chunks")?
+                ));
+            } else if index.contains_key("oil_reserves") {
                 lines.push(format!(
                     "Paper GEO | {} scanned oil reserves",
                     count("oil_reserves")?
@@ -239,11 +247,11 @@ pub(crate) fn command(
             };
             at(host, level, pos, action, networks)
         }
-        Some("restore-oil") => {
+        Some(action @ ("restore-geo" | "restore-oil")) => {
             let Some((level, pos)) = dimension_and_position(event) else {
                 return vec!["Specify a loaded dimension and block position.".into()];
             };
-            restore_oil(host, level, pos)
+            restore_geo(host, level, pos, action == "restore-oil")
         }
         Some("restore-chunk") => {
             let Some((level, pos)) = dimension_and_position(event) else {
@@ -261,16 +269,17 @@ pub(crate) fn command(
     result.unwrap_or_else(|message| vec![message])
 }
 
-fn restore_oil(
+fn restore_geo(
     host: &mut dyn ServerHost,
     level: LevelRef,
     pos: [i32; 3],
+    oil_only: bool,
 ) -> Result<Vec<String>, String> {
     let dimension = level
         .dimension()
         .id(host)
         .ok_or("Unknown Horizon dimension.")?;
-    let [x, z] = geology::chunk(pos);
+    let [x, z] = geo_deposits::chunk(pos);
     let file = format!(
         "storage-import/geo/{}/{}_{}.toml",
         encoded_dimension(&dimension),
@@ -289,16 +298,36 @@ fn restore_oil(
     {
         return Err("The Paper GEO archive belongs to another chunk.".into());
     }
-    let imported = row
-        .get("slimefun-oil")
-        .and_then(toml::Value::as_integer)
-        .and_then(|amount| u32::try_from(amount).ok())
-        .filter(|&amount| amount <= i32::MAX as u32)
-        .ok_or("Invalid Paper GEO oil count.")?;
-    let remaining = geology::restore(host, level, pos, imported)?;
-    Ok(vec![format!(
-        "Paper GEO reserve at chunk {x}, {z} has {remaining} units of oil."
-    )])
+    let resources: &[Resource] = if oil_only {
+        &[Resource::Oil]
+    } else {
+        &geo_deposits::SCANNER_RESOURCES
+    };
+    let mut imported = Vec::with_capacity(resources.len());
+    for &resource in resources {
+        let Some(amount) = row.get(resource.paper_key()) else {
+            continue;
+        };
+        let amount = amount
+            .as_integer()
+            .and_then(|amount| i32::try_from(amount).ok())
+            .and_then(|amount| u32::try_from(amount).ok())
+            .ok_or_else(|| format!("Invalid Paper GEO count for {}.", resource.name()))?;
+        imported.push((resource, amount));
+    }
+    if imported.is_empty() {
+        return Err("The Paper archive contains no matching GEO reserves.".into());
+    }
+    let remaining = geo_deposits::restore(host, level, pos, &imported)?;
+    Ok(remaining
+        .into_iter()
+        .map(|(resource, remaining)| {
+            format!(
+                "Paper GEO reserve at chunk {x}, {z} | {}: {remaining}",
+                resource.name()
+            )
+        })
+        .collect())
 }
 
 fn at(

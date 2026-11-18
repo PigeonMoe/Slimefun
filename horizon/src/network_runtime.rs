@@ -778,13 +778,22 @@ pub(crate) fn open_scanner(
     player: mod_api::PlayerRef,
     level: LevelRef,
     pos: Position,
+    portable: bool,
     rolls: &Rolls,
 ) -> bool {
-    if !block_data(host, level, pos).is_some_and(|data| data.id == "GPS_GEO_SCANNER") {
-        return false;
-    }
+    let entity = if portable {
+        None
+    } else {
+        if !block_data(host, level, pos).is_some_and(|data| data.id == "GPS_GEO_SCANNER") {
+            return false;
+        }
+        let Some(entity) = host.block_entity(level, pos) else {
+            return false;
+        };
+        Some(entity)
+    };
     let complexity = networks.lock().unwrap().gps_complexity(player.uuid());
-    geology::open_scanner(host, player, level, pos, complexity, rolls);
+    geology::open_scanner(host, player, level, pos, entity, complexity, rolls);
     true
 }
 

@@ -20,6 +20,7 @@ use crate::{
     advanced_processing,
     electric_processing::{self, Family, MachineSpec},
     fuel_generators::{self, Generator},
+    geo_deposits::{self, Mining, Resource},
     geology,
     gold_pan::PANS,
     items::{GOLD_PAN, Kind, PULVERIZED_ORE, PURE_ORE_CLUSTER, SALT, SIFTED_ORE},
@@ -125,6 +126,7 @@ enum RecipeFamily {
     Fuel(&'static Generator),
     Advanced(&'static advanced_processing::Machine),
     OilPump,
+    GeoMiner,
     FluidPump,
     ExperienceCollector,
     ProduceCollector,
@@ -420,6 +422,18 @@ impl ElectricMachine {
                 speed: 1,
             });
         }
+        if id == geology::GEO_MINER.id() {
+            return Some(Self {
+                id: geology::GEO_MINER.id(),
+                carrier: geology::GEO_MINER.material(),
+                title: "GEO Miner",
+                cost: geology::MINER_COST,
+                work_ticks: geology::MINER_WORK_TICKS,
+                research: &geology::MINER,
+                family: RecipeFamily::GeoMiner,
+                speed: 1,
+            });
+        }
         if id == fluid_pump::FLUID_PUMP.id() {
             return Some(Self {
                 id: fluid_pump::FLUID_PUMP.id(),
@@ -578,6 +592,9 @@ impl ElectricMachine {
         if self.reactor_menu() {
             return reactors::SLOTS;
         }
+        if matches!(self.family, RecipeFamily::GeoMiner) {
+            return geology::MINER_OUTPUT;
+        }
         let count = if self.is_smeltery() {
             SLOTS.len()
         } else {
@@ -590,7 +607,10 @@ impl ElectricMachine {
         if matches!(self.family, RecipeFamily::Assembler(_)) {
             return index < assemblers::MENU_SLOTS.len();
         }
-        if matches!(self.family, RecipeFamily::ExperienceCollector) {
+        if matches!(
+            self.family,
+            RecipeFamily::ExperienceCollector | RecipeFamily::GeoMiner
+        ) {
             return false;
         }
         if matches!(self.family, RecipeFamily::TreeGrowthAccelerator) {
@@ -600,6 +620,14 @@ impl ElectricMachine {
             return index < 6;
         }
         !OUTPUT.contains(&index)
+    }
+
+    fn slot_keys(self) -> &'static [&'static str] {
+        if matches!(self.family, RecipeFamily::GeoMiner) {
+            geology::MINER_SLOT_KEYS
+        } else {
+            &SLOTS
+        }
     }
 
     fn storage(self, level: LevelRef, pos: Position) -> Storage {
@@ -634,6 +662,7 @@ pub(crate) fn register(registrar: &mut dyn mod_api::Registrar) {
             }
             Some(Box::new(MachineInventory {
                 storage,
+                slot_keys: machine.slot_keys(),
                 // An empty handler also refuses the backing vanilla slots for sided access.
                 size: if at.side.is_none() {
                     machine.slot_count()
@@ -665,7 +694,7 @@ pub(crate) fn open(
         return true;
     }
     if matches!(furnace.family, RecipeFamily::OilPump) {
-        match geology::supply(host, level, pos) {
+        match geo_deposits::supply(host, level, pos, Resource::Oil) {
             Ok(Some(_)) => {}
             Ok(None) => {
                 let _ = player.tell(
@@ -781,6 +810,26 @@ fn menu_items(
         }
         return items;
     }
+    if matches!(furnace.family, RecipeFamily::GeoMiner) {
+        let mut items = vec![None; 54];
+        for (slots, material) in [
+            (geology::MINER_BORDER, "minecraft:gray_stained_glass_pane"),
+            (
+                geology::MINER_OUTPUT_BORDER,
+                "minecraft:orange_stained_glass_pane",
+            ),
+        ] {
+            let pane = display_item(host, material, " ");
+            for &slot in slots {
+                items[slot] = pane.clone();
+            }
+        }
+        for (&slot, &key) in geology::MINER_OUTPUT.iter().zip(geology::MINER_SLOT_KEYS) {
+            items[slot] = read_slot(host, data, key);
+        }
+        items[4] = progress_item(host, data, furnace);
+        return items;
+    }
     let mut items = vec![None; 45];
     let (background, input_border) = if furnace.is_smeltery() {
         (SMELTERY_BACKGROUND, SMELTERY_INPUT_BORDER)
@@ -804,7 +853,12 @@ fn menu_items(
         items[22] = display_item(host, "minecraft:gray_stained_glass_pane", " ");
         return items;
     }
-    items[22] = match remaining(data) {
+    items[22] = progress_item(host, data, furnace);
+    items
+}
+
+fn progress_item(host: &dyn Host, data: &Compound, furnace: ElectricMachine) -> Option<ItemStack> {
+    match remaining(data) {
         Some(remaining) => {
             let total = match data.get(&TOTAL.into()) {
                 Some(Tag::Int(total @ 0..)) => *total as u32,
@@ -813,7 +867,12 @@ fn menu_items(
             let progress = if total == 0 {
                 100
             } else {
-                100 - (u64::from((remaining + 1).min(total)) * 100 / u64::from(total)) as u32
+                let displayed_remaining = if matches!(furnace.family, RecipeFamily::GeoMiner) {
+                    remaining
+                } else {
+                    remaining.saturating_add(1)
+                };
+                100 - (u64::from(displayed_remaining.min(total)) * 100 / u64::from(total)) as u32
             };
             let (icon, damage) = match furnace.family {
                 RecipeFamily::Furnace | RecipeFamily::HeatedPressure => {
@@ -847,6 +906,7 @@ fn menu_items(
                     advanced_processing::Family::BookBinder => ("minecraft:iron_chestplate", 240),
                     _ => ("minecraft:flint_and_steel", 63),
                 },
+                RecipeFamily::GeoMiner => ("minecraft:diamond_pickaxe", 1560),
                 RecipeFamily::OilPump | RecipeFamily::FluidPump => {
                     ("minecraft:diamond_shovel", 1560)
                 }
@@ -854,7 +914,7 @@ fn menu_items(
                 | RecipeFamily::ReactorPort
                 | RecipeFamily::Assembler(_)
                 | RecipeFamily::TreeGrowthAccelerator
-                | RecipeFamily::ExperienceCollector => return items,
+                | RecipeFamily::ExperienceCollector => return None,
             };
             let mut bar = display_item(host, icon, &format!("{progress}%"));
             if let Some(stack) = &mut bar {
@@ -863,8 +923,7 @@ fn menu_items(
             bar
         }
         _ => display_item(host, "minecraft:black_stained_glass_pane", " "),
-    };
-    items
+    }
 }
 
 fn display_item(host: &dyn Host, material: &str, name: &str) -> Option<ItemStack> {
@@ -906,7 +965,7 @@ pub(crate) fn restore_plain_drops(level: &dyn LevelHost, event: &mut BlockDropsE
 
 fn drop_slots(level: &dyn LevelHost, event: &mut BlockDropsEvent<'_>, saved: &Compound) {
     let position = [event.pos.x, event.pos.y, event.pos.z].map(|axis| f64::from(axis) + 0.5);
-    for slot in SLOTS {
+    for &slot in SLOTS.iter().chain(geology::MINER_SLOT_KEYS) {
         let Some(Tag::Compound(item)) = saved.get(&slot.into()) else {
             continue;
         };
@@ -982,7 +1041,11 @@ pub(crate) fn clear_plain_data(host: &mut dyn ServerHost, level: LevelRef, pos: 
 }
 
 fn stack_in(host: &dyn Host, data: &Compound, index: usize) -> Option<ItemStack> {
-    let Tag::Compound(saved) = data.get(&(*SLOTS.get(index)?).into())? else {
+    read_slot(host, data, SLOTS.get(index)?)
+}
+
+fn read_slot(host: &dyn Host, data: &Compound, key: &str) -> Option<ItemStack> {
+    let Tag::Compound(saved) = data.get(&key.into())? else {
         return None;
     };
     ItemStack::from_nbt(host, saved)
@@ -994,7 +1057,11 @@ fn write_stack(
     index: usize,
     stack: Option<ItemStack>,
 ) -> bool {
-    let key = SLOTS[index].into();
+    write_slot(host, data, SLOTS[index], stack)
+}
+
+fn write_slot(host: &dyn Host, data: &mut Compound, key: &str, stack: Option<ItemStack>) -> bool {
+    let key = key.into();
     if let Some(stack) = stack {
         let Some(saved) = stack.to_nbt(host) else {
             return false;
@@ -1006,7 +1073,7 @@ fn write_stack(
     true
 }
 
-fn max_stack(host: &dyn Host, resource: &ItemResource) -> u32 {
+pub(crate) fn max_stack(host: &dyn Host, resource: &ItemResource) -> u32 {
     let key = ComponentId::new("minecraft:max_stack_size").expect("a built-in component id");
     match resource.value(host, &key) {
         Some(Tag::Int(max @ 1..=99)) => max.min(64) as u32,
@@ -1016,6 +1083,7 @@ fn max_stack(host: &dyn Host, resource: &ItemResource) -> u32 {
 
 struct MachineInventory {
     storage: Storage,
+    slot_keys: &'static [&'static str],
     size: usize,
 }
 
@@ -1027,7 +1095,7 @@ impl ResourceHandler<ItemResource> for MachineInventory {
     fn resource(&self, host: &mut dyn ServerHost, index: usize) -> Option<ItemResource> {
         (index < self.size).then_some(())?;
         let data = data_at(host, self.storage)?;
-        stack_in(host, &data, index).map(|stack| ItemResource::of(&stack))
+        read_slot(host, &data, self.slot_keys[index]).map(|stack| ItemResource::of(&stack))
     }
 
     fn amount(&self, host: &mut dyn ServerHost, index: usize) -> u32 {
@@ -1035,7 +1103,7 @@ impl ResourceHandler<ItemResource> for MachineInventory {
             return 0;
         }
         data_at(host, self.storage)
-            .and_then(|data| stack_in(host, &data, index))
+            .and_then(|data| read_slot(host, &data, self.slot_keys[index]))
             .map_or(0, |stack| stack.count())
     }
 
@@ -1062,7 +1130,7 @@ impl ResourceHandler<ItemResource> for MachineInventory {
         let Some(mut data) = data_at(host, self.storage) else {
             return 0;
         };
-        let held = match stack_in(host, &data, index) {
+        let held = match read_slot(host, &data, self.slot_keys[index]) {
             Some(stack) if resource.matches(&stack) => stack.count(),
             Some(_) => return 0,
             None => 0,
@@ -1074,7 +1142,9 @@ impl ResourceHandler<ItemResource> for MachineInventory {
         let Some(stack) = resource.to_stack(held + accepted) else {
             return 0;
         };
-        if write_stack(host, &mut data, index, Some(stack)) && save(host, self.storage, data) {
+        if write_slot(host, &mut data, self.slot_keys[index], Some(stack))
+            && save(host, self.storage, data)
+        {
             accepted
         } else {
             0
@@ -1095,13 +1165,19 @@ impl ResourceHandler<ItemResource> for MachineInventory {
         let Some(mut data) = data_at(host, self.storage) else {
             return 0;
         };
-        let Some(stack) = stack_in(host, &data, index).filter(|stack| resource.matches(stack))
+        let Some(stack) =
+            read_slot(host, &data, self.slot_keys[index]).filter(|stack| resource.matches(stack))
         else {
             return 0;
         };
         let extracted = amount.min(stack.count());
         if extracted > 0
-            && write_stack(host, &mut data, index, stack.shrink(extracted))
+            && write_slot(
+                host,
+                &mut data,
+                self.slot_keys[index],
+                stack.shrink(extracted),
+            )
             && save(host, self.storage, data)
         {
             extracted
@@ -1445,6 +1521,7 @@ fn find_recipe(
         RecipeFamily::Fuel(_)
         | RecipeFamily::Advanced(_)
         | RecipeFamily::FluidPump
+        | RecipeFamily::GeoMiner
         | RecipeFamily::ExperienceCollector
         | RecipeFamily::ProduceCollector
         | RecipeFamily::TreeGrowthAccelerator
@@ -1499,20 +1576,26 @@ pub(crate) fn tick(
         return charge_items(host, storage, data, charge);
     }
     if let Some(saved) = data.get(&PENDING.into()) {
-        let next_charge = charge.checked_sub(furnace.cost)?;
         let remaining = remaining(&data)?;
+        let mining = matches!(furnace.family, RecipeFamily::GeoMiner);
+        let next_charge = pending_charge(furnace, remaining, charge)?;
         if remaining > 0 {
             let mut next = data;
             next.insert(REMAINING.into(), Tag::Int(remaining as i32 - 1));
             return save(host, storage, next).then_some(next_charge);
         }
+        let indices = if mining {
+            0..geology::MINER_OUTPUT.len()
+        } else {
+            OUTPUT[0]..OUTPUT[1] + 1
+        };
         let outputs = decode_pending(host, saved)?;
         return host
             .transaction(|host, tx| {
                 for output in outputs {
                     let resource = ItemResource::of(&output);
                     let mut left = output.count();
-                    for index in OUTPUT {
+                    for index in indices.clone() {
                         left -= place(level, pos, index).insert(host, tx, &resource, left);
                         if left == 0 {
                             break;
@@ -1531,6 +1614,25 @@ pub(crate) fn tick(
             .ok();
     }
 
+    if matches!(furnace.family, RecipeFamily::GeoMiner) {
+        let Mining::Available(resource) = geo_deposits::mining(host, level, pos).ok()? else {
+            return None;
+        };
+        let output = resource.item().stack(host, 1)?;
+        if !miner_fits(host, &data, &output) {
+            return None;
+        }
+        let pending = encode_pending(host, &[output])?;
+        let ticks = i32::try_from(furnace.work_ticks).ok()?;
+        return host
+            .transaction(|host, _| {
+                geo_deposits::reserve_one(host, level, pos, resource)?;
+                let mut next = data;
+                set_pending(&mut next, pending, ticks);
+                save(host, storage, next).then_some(charge).ok_or(())
+            })
+            .ok();
+    }
     let run = if matches!(furnace.family, RecipeFamily::ProduceCollector) {
         find_produce(host, &data, |recipe| {
             recipe.has_animal(host, level, pos, settings.produce_collector_range)
@@ -1546,7 +1648,12 @@ pub(crate) fn tick(
         work_override,
     } = run;
     let pumping_oil = matches!(furnace.family, RecipeFamily::OilPump);
-    if pumping_oil && geology::supply(host, level, pos).ok()?.unwrap_or(0) == 0 {
+    if pumping_oil
+        && geo_deposits::supply(host, level, pos, Resource::Oil)
+            .ok()?
+            .unwrap_or(0)
+            == 0
+    {
         let (index, (bucket, _)) = inputs
             .iter()
             .enumerate()
@@ -1557,7 +1664,7 @@ pub(crate) fn tick(
     let work_ticks = i32::try_from(work_override.unwrap_or(furnace.work_ticks)).ok()?;
     host.transaction(|host, tx| {
         if pumping_oil {
-            geology::reserve_one(host, level, pos)?;
+            geo_deposits::reserve_one(host, level, pos, Resource::Oil)?;
         }
         for (index, consumed) in inputs.into_iter().enumerate() {
             if let Some((input, amount)) = consumed
@@ -1568,12 +1675,35 @@ pub(crate) fn tick(
             }
         }
         let mut next = data_at(host, storage).ok_or(())?;
-        next.insert(PENDING.into(), saved_result);
-        next.insert(REMAINING.into(), Tag::Int(work_ticks));
-        next.insert(TOTAL.into(), Tag::Int(work_ticks));
+        set_pending(&mut next, saved_result, work_ticks);
         save(host, storage, next).then_some(charge).ok_or(())
     })
     .ok()
+}
+
+fn pending_charge(machine: ElectricMachine, remaining: u32, charge: u32) -> Option<u32> {
+    if remaining == 0 && matches!(machine.family, RecipeFamily::GeoMiner) {
+        Some(charge)
+    } else {
+        charge.checked_sub(machine.cost)
+    }
+}
+
+fn set_pending(data: &mut Compound, pending: Tag, ticks: i32) {
+    data.insert(PENDING.into(), pending);
+    data.insert(REMAINING.into(), Tag::Int(ticks));
+    data.insert(TOTAL.into(), Tag::Int(ticks));
+}
+
+fn miner_fits(host: &dyn Host, data: &Compound, output: &ItemStack) -> bool {
+    let resource = ItemResource::of(output);
+    let limit = max_stack(host, &resource);
+    geology::MINER_SLOT_KEYS
+        .iter()
+        .any(|key| match read_slot(host, data, key) {
+            None => true,
+            Some(stack) => resource.matches(&stack) && stack.count() < limit,
+        })
 }
 
 fn find_produce(
@@ -1782,7 +1912,7 @@ pub(crate) fn prepare_paper_inventory(
             ));
         };
         if stack.count() > max_stack(host, &ItemResource::of(&stack))
-            || !write_stack(host, &mut restored, index, Some(stack))
+            || !write_slot(host, &mut restored, machine.slot_keys()[index], Some(stack))
         {
             return Err(format!("Cannot restore the stack in slot {paper_slot}."));
         }
@@ -1863,6 +1993,63 @@ pub(crate) fn restore_paper_inventory(
 mod tests {
     use super::*;
     use mod_api::testing::FakeHost;
+
+    #[test]
+    fn geo_miner_reads_every_output_without_exposing_an_input() {
+        let host = recipe_host([
+            "minecraft:sugar",
+            "minecraft:stone",
+            "minecraft:gray_stained_glass_pane",
+            "minecraft:orange_stained_glass_pane",
+            "minecraft:black_stained_glass_pane",
+            "minecraft:diamond_pickaxe",
+        ]);
+        let machine = ElectricMachine::for_item("GEO_MINER").unwrap();
+        let slots = [29, 30, 31, 32, 33, 38, 39, 40, 41, 42];
+        assert_eq!(machine.menu_slots(), slots);
+        assert!((0..slots.len()).all(|index| !machine.input_slot(index)));
+        let salt = Resource::Salt.item().stack(&host, 1).unwrap();
+        let stone = Kind::Vanilla("minecraft:stone").stack(&host, 64).unwrap();
+        let mut data = Compound::new();
+        for &key in &machine.slot_keys()[..slots.len() - 1] {
+            assert!(write_slot(&host, &mut data, key, Some(stone.clone())));
+        }
+        assert!(miner_fits(&host, &data, &salt));
+        let last = machine.slot_keys()[slots.len() - 1];
+        assert!(write_slot(&host, &mut data, last, Some(stone)));
+        assert!(!miner_fits(&host, &data, &salt));
+        assert!(write_slot(&host, &mut data, last, Some(salt.clone())));
+        assert!(miner_fits(&host, &data, &salt));
+        let items = menu_items(&host, &data, machine);
+        assert_eq!(items.len(), 54);
+        assert_eq!(items[42], Some(salt));
+        assert!(items[4].is_some());
+        assert!(items.iter().all(Option::is_some));
+    }
+
+    #[test]
+    fn geo_miner_only_debits_for_fourteen_progress_ticks() {
+        use crate::networks::Component;
+
+        let id = "GEO_MINER";
+        let machine = ElectricMachine::for_item(id).unwrap();
+        assert!(matches!(
+            Component::for_item(id),
+            Some(Component::ElectricMachine {
+                capacity: 512,
+                carrier: "minecraft:player_head"
+            })
+        ));
+        assert_eq!(machine.work_ticks, 14);
+        assert_eq!(machine.cost, 24);
+        let mut charge = 512;
+        for remaining in (1..=machine.work_ticks).rev() {
+            assert_eq!(pending_charge(machine, remaining, 23), None);
+            charge = pending_charge(machine, remaining, charge).unwrap();
+        }
+        assert_eq!(charge, 176);
+        assert_eq!(pending_charge(machine, 0, 0), Some(0));
+    }
 
     #[test]
     fn produce_collector_checks_for_animals_and_output_space_before_starting() {
