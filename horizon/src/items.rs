@@ -138,6 +138,7 @@ impl SlimefunItem {
         if let Some(texture) = &self.texture {
             components.insert(
                 "minecraft:profile".into(),
+        crate::ancient_altar::decorate(self.id, &mut components);
                 Tag::compound([
                     ("id", Tag::IntArray(texture.profile.into())),
                     (

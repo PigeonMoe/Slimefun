@@ -11,6 +11,7 @@ use mod_api::{
 };
 
 mod advanced_processing;
+mod ancient_altar;
 mod auto_anvil;
 mod auto_brewer;
 mod backpacks;
@@ -87,11 +88,20 @@ impl Slimefun {
             output_chest::set_enabled(true);
             self.crucibles.configure(false);
         }
+            ancient_altar::configure(None);
         let Ok(table) = config.text.parse::<toml::Table>() else {
             return;
         };
         settings.book_binder = book_binder::Rules::read_config(&table);
         if let Some(range) = table
+        ancient_altar::configure(
+            table
+                .get("ancient-altar")
+                .and_then(|section| section.get("step-delay"))
+                .and_then(toml::Value::as_integer)
+                .and_then(|delay| i32::try_from(delay).ok())
+                .filter(|&delay| delay >= 0),
+        );
             .get("produce-collector")
             .and_then(|section| section.get("range"))
             .and_then(toml::Value::as_integer)
@@ -215,13 +225,14 @@ impl Hooks for Slimefun {
         factory::register(registrar);
         backpacks::register(registrar);
         self.universal.register(registrar);
+        ancient_altar::register(registrar);
     }
 
     fn register_configs(&self, _: HostSide<'_>, event: &mut RegisterConfigsEvent<'_>) {
         event.configs.push(Config::new(
             "slimefun",
             ConfigKind::Server,
-            "double-ores = true\ncrucible-allow-water-in-nether = false\nlegacy-ore-washer = false\nlegacy-dust-washer = false\nlegacy-ore-grinder = true\nelectric-gold-pan-override-output-limit = [false, false, false]\nfreezer-use-vanilla-ratios = [false, false, false]\nfire-breaking-chance = 34\noutput-chest-enabled = true\ndrop-from-golems = true\ngolem-drop-chance = 75\n\n[networks]\nenable-visualizer = true\ncargo-ticker-delay = 0\n\n[book-binder]\nbypass-vanilla-max-level = false\nhas-custom-max-level = false\ncustom-max-level = 15\n\n[produce-collector]\nrange = 2\n",
+            "double-ores = true\ncrucible-allow-water-in-nether = false\nlegacy-ore-washer = false\nlegacy-dust-washer = false\nlegacy-ore-grinder = true\nelectric-gold-pan-override-output-limit = [false, false, false]\nfreezer-use-vanilla-ratios = [false, false, false]\nfire-breaking-chance = 34\noutput-chest-enabled = true\ndrop-from-golems = true\ngolem-drop-chance = 75\n\n[networks]\nenable-visualizer = true\ncargo-ticker-delay = 0\n\n[book-binder]\nbypass-vanilla-max-level = false\nhas-custom-max-level = false\ncustom-max-level = 15\n\n[produce-collector]\nrange = 2\n\n[ancient-altar]\nstep-delay = 8\n",
         ));
     }
 
@@ -241,6 +252,7 @@ impl Hooks for Slimefun {
         factory::restore_drops(level, event);
         food_machines::restore_drop(level, event);
         Flow::Continue
+        ancient_altar::restore_drops(level, event);
     }
 
     fn block_changed(&self, level: &dyn LevelHost, event: &mut mod_api::BlockChangedEvent) {
@@ -250,6 +262,65 @@ impl Hooks for Slimefun {
     }
 
     fn piston_pre(&self, level: &dyn LevelHost, event: &mut mod_api::PistonPreEvent<'_>) -> Flow {
+    fn entity_place(
+        &self,
+        host: &mut dyn ServerHost,
+        event: &mut mod_api::EntityPlaceEvent,
+    ) -> Flow {
+        let Some(player) = host.players().acting_player() else {
+            return Flow::Continue;
+        };
+        let Some(level) = player.entity().level(host) else {
+            return Flow::Continue;
+        };
+        let denied = match &event.placement {
+            mod_api::Placement::Multi(blocks) => blocks
+                .iter()
+                .any(|block| ancient_altar::denies_placement(host, level, block.pos)),
+            _ => ancient_altar::denies_placement(host, level, event.pos),
+        };
+        if denied {
+            let _ = player.tell(
+                host,
+                Text::literal("You cannot place blocks on an Ancient Pedestal."),
+            );
+            Flow::Cancel
+        } else {
+            Flow::Continue
+        }
+    }
+
+    fn block_dispense_pre(
+        &self,
+        host: &dyn mod_api::Host,
+        event: &mut mod_api::BlockDispensePreEvent<'_>,
+    ) -> Flow {
+        if host
+            .level(event.dimension)
+            .is_some_and(|level| ancient_altar::is_pedestal(host, level, event.pos))
+        {
+            Flow::Cancel
+        } else {
+            Flow::Continue
+        }
+    }
+
+    fn inventory_move_item(
+        &self,
+        host: &dyn mod_api::Host,
+        event: &mut mod_api::InventoryMoveItemEvent<'_>,
+    ) -> Flow {
+        if host.level(host.dimension()).is_some_and(|level| {
+            [event.source, event.destination]
+                .into_iter()
+                .any(|pos| ancient_altar::is_pedestal(host, level, pos))
+        }) {
+            Flow::Cancel
+        } else {
+            Flow::Continue
+        }
+    }
+
         if network_runtime::protect_piston(level, event) {
             Flow::Cancel
         } else {
@@ -477,6 +548,19 @@ impl Hooks for Slimefun {
             return Flow::Continue;
         }
         if *event.use_item != TriState::False
+        if event.click.hand == Hand::Main
+            && let Some(level) = player.entity().level(host)
+            && ancient_altar::use_at(
+                host,
+                player,
+                level,
+                event.click.pos,
+                *event.use_item != TriState::False,
+            )
+        {
+            *event.cancellation_result = InteractionResult::Consume;
+            return Flow::Cancel;
+        }
             && (self.backpacks.use_held(host, player, event.click.hand)
                 || network_runtime::trash::portable(host, player, event.click.hand))
         {
@@ -643,6 +727,7 @@ impl Hooks for Slimefun {
             factory::VIEWERS.refresh(host, event.level);
             self.crucibles.tick(host, event.level);
         }
+            ancient_altar::tick(host, event.level);
     }
 
     fn scheduled_task(&self, host: &mut dyn ServerHost, event: &mut ScheduledTaskEvent<'_>) {
@@ -862,7 +947,12 @@ fn describe_recipe(id: &str, double_ores: bool) -> Vec<String> {
     }
     let workbenches = crafting()
         .map(|recipe| ("Enhanced Crafting Table", recipe))
-        .chain(recipes::magic_crafting().map(|recipe| ("Magic Workbench", recipe)));
+        .chain(recipes::magic_crafting().map(|recipe| ("Magic Workbench", recipe)))
+        .chain(
+            ancient_altar::CRAFTING
+                .iter()
+                .map(|recipe| ("Ancient Altar", recipe)),
+        );
     for (workbench, recipe) in workbenches.filter(|(_, recipe)| outputs(recipe.output.kind.id())) {
         let mut header = format!(
             "{workbench} | {} × {}",

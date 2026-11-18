@@ -23,7 +23,7 @@ pub(super) const ENDER_STORAGE: Research = Research {
     cost: 4,
 };
 
-pub(super) const NECROMANCY: Research = Research {
+pub(crate) const NECROMANCY: Research = Research {
     id: "essence_of_afterlife",
     name: "Necromancy",
     cost: 19,

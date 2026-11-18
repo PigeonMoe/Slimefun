@@ -20,7 +20,8 @@ use crate::{
 
 #[path = "special_backpacks.rs"]
 mod special;
-pub(crate) use special::{MAGIC_CRAFTING, keep_on_death};
+pub(crate) use special::NECROMANCY;
+pub(crate) use special::{ESSENCE_OF_AFTERLIFE, MAGIC_CRAFTING, NECROTIC_SKULL, keep_on_death};
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub(crate) struct BackpackId {
