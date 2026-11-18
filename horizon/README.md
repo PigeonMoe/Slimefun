@@ -78,3 +78,9 @@ python3 horizon/tools/import-research.py probe-horizon-catalog.json \
 四项设置保存在该 Horizon 存档的 `slimefun-server.toml`。默认值为 `double-ores = true`、`legacy-ore-washer = false`、`fire-breaking-chance = 34` 和 `output-chest-enabled = true`。最后一项控制该存档中的输出箱配方和产物路由，维度级覆盖仍待补齐。
 
 冶炼炉点火室自动复燃、非玩家移除导致的输出箱标识恢复及其他配方行为仍待移植。开发版以本地 Fork 构建和原版代码为校验基线，真实客户端的整条生产路线仍需验收。
+
+### 下界淘金盘
+
+本地开发版 `0.1.0-dev.4` 加入下界淘金盘。花费 8 级经验研究 `nether_gold_pan`，在增强工作台用普通淘金盘和五块下界砖制作。右击灵魂沙或灵魂土时会检查方块破坏权限，再按 Paper 默认权重从石英、金粒、下界疣、烈焰粉、荧石粉和恶魂之泪中产出一件物品。可用 `/sf recipe ghast_tear` 等命令查询权重。
+
+自定义掉落权重及 Bukkit 物品生成事件仍待移植。

@@ -504,6 +504,14 @@ item!(
 );
 item!(GOLD_PAN, "bowl", "Gold Pan", "gold", None, None);
 item!(
+    NETHER_GOLD_PAN,
+    "bowl",
+    "Nether Gold Pan",
+    "dark_red",
+    None,
+    None
+);
+item!(
     HARDENED_METAL_INGOT,
     "iron_ingot",
     "Hardened Metal",

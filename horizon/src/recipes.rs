@@ -7,10 +7,10 @@ use crate::items::{
     ENDER_LUMP_1, ENDER_LUMP_2, ENDER_LUMP_3, FERROSILICON, GOLD_4K, GOLD_6K, GOLD_8K, GOLD_10K,
     GOLD_12K, GOLD_14K, GOLD_16K, GOLD_18K, GOLD_20K, GOLD_22K, GOLD_24K, GOLD_DUST, GOLD_PAN,
     HARDENED_METAL_INGOT, IRON_DUST, KELP_COOKIE, Kind, LEAD_DUST, LEAD_INGOT, MAGIC_LUMP_1,
-    MAGIC_LUMP_2, MAGIC_LUMP_3, MAGNESIUM_DUST, MAGNESIUM_INGOT, NICKEL_INGOT, OUTPUT_CHEST,
-    PULVERIZED_ORE, PURE_ORE_CLUSTER, REINFORCED_ALLOY_INGOT, REINFORCED_PLATE, SALT, SIFTED_ORE,
-    SILICON, SILVER_DUST, SILVER_INGOT, SOLDER_INGOT, STEEL_INGOT, STEEL_PLATE, STONE_CHUNK,
-    SULFATE, TIN_DUST, TIN_INGOT, WHEAT_FLOUR, ZINC_DUST, ZINC_INGOT,
+    MAGIC_LUMP_2, MAGIC_LUMP_3, MAGNESIUM_DUST, MAGNESIUM_INGOT, NETHER_GOLD_PAN, NICKEL_INGOT,
+    OUTPUT_CHEST, PULVERIZED_ORE, PURE_ORE_CLUSTER, REINFORCED_ALLOY_INGOT, REINFORCED_PLATE, SALT,
+    SIFTED_ORE, SILICON, SILVER_DUST, SILVER_INGOT, SOLDER_INGOT, STEEL_INGOT, STEEL_PLATE,
+    STONE_CHUNK, SULFATE, TIN_DUST, TIN_INGOT, WHEAT_FLOUR, ZINC_DUST, ZINC_INGOT,
 };
 
 #[derive(Clone, Copy)]
@@ -114,6 +114,7 @@ pub(crate) const RESEARCHES: &[Research] = &[
     GOLD_PAN_RESEARCH,
     INGREDIENTS_AND_CHEESE,
     MAKESHIFT_SMELTERY,
+    NETHER_GOLD_PAN_RESEARCH,
     NICKEL_AND_COBALT,
     ORE_WASHER,
     REINFORCED_ALLOY,
@@ -158,6 +159,21 @@ pub(crate) const CRAFTING: &[CraftingRecipe] = &[
         ],
         output: stack(GOLD_PAN, 1),
         research: &GOLD_PAN_RESEARCH,
+    },
+    CraftingRecipe {
+        inputs: [
+            None,
+            None,
+            None,
+            Some(vanilla!("nether_brick")),
+            Some(GOLD_PAN),
+            Some(vanilla!("nether_brick")),
+            Some(vanilla!("nether_brick")),
+            Some(vanilla!("nether_brick")),
+            Some(vanilla!("nether_brick")),
+        ],
+        output: stack(NETHER_GOLD_PAN, 1),
+        research: &NETHER_GOLD_PAN_RESEARCH,
     },
     CraftingRecipe {
         inputs: [
@@ -338,6 +354,15 @@ pub(crate) const PAN_DROPS: &[(u32, Kind)] = &[
     (20, vanilla!("clay_ball")),
     (35, SIFTED_ORE),
     (5, vanilla!("iron_nugget")),
+];
+
+pub(crate) const NETHER_PAN_DROPS: &[(u32, Kind)] = &[
+    (50, vanilla!("quartz")),
+    (25, vanilla!("gold_nugget")),
+    (10, vanilla!("nether_wart")),
+    (8, vanilla!("blaze_powder")),
+    (5, vanilla!("glowstone_dust")),
+    (2, vanilla!("ghast_tear")),
 ];
 
 pub(crate) const WASHER_DUSTS: &[Kind] = &[
@@ -562,6 +587,12 @@ pub(crate) const MAKESHIFT_SMELTERY: Research = Research {
     id: "makeshift_smeltery",
     name: "Improvised Smeltery",
     cost: 6,
+};
+
+pub(crate) const NETHER_GOLD_PAN_RESEARCH: Research = Research {
+    id: "nether_gold_pan",
+    name: "Nether Gold Pan",
+    cost: 8,
 };
 
 pub(crate) const NICKEL_AND_COBALT: Research = Research {

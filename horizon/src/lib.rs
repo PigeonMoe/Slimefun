@@ -173,6 +173,7 @@ impl Hooks for Slimefun {
                 "Build a Grind Stone by putting a wooden fence above a dispenser. Load the dispenser and right-click the fence.".into(),
                 "Build an Enhanced Crafting Table by putting a crafting table on a dispenser. Arrange the recipe in its 3×3 grid and right-click the table.".into(),
                 "An Ore Crusher uses a nether brick fence over a dispenser, with iron bars on opposite sides of the dispenser. A Compressor uses pistons instead of bars.".into(),
+                "Use a Gold Pan on gravel and a Nether Gold Pan on soul sand or soul soil.".into(),
                 "Wash Sifted Ore by placing a dispenser on a wooden fence with an empty cauldron below it and right-clicking the fence.".into(),
                 "For a Makeshift Smeltery use a wooden fence above a dispenser, bricks on opposite sides of the dispenser, and fire below it. Use a nether brick fence and nether bricks for the regular Smeltery.".into(),
                 "Use /sf recipe <item> to read a supported recipe, /sf research <key> to unlock research, and /sf status to view coverage.".into(),
@@ -207,12 +208,12 @@ impl Hooks for Slimefun {
         let Some(level) = player.entity().level(host) else {
             return Flow::Continue;
         };
-        let is_gold_pan = event
-            .click
-            .stack
-            .is_some_and(|stack| items::GOLD_PAN.matches(host, stack));
-        if is_gold_pan {
-            gold_pan::use_pan(host, player, level, event.click.pos, &self.rolls);
+        if let Some(stack) = event.click.stack
+            && let Some(pan) = gold_pan::PANS
+                .iter()
+                .find(|pan| pan.item.matches(host, stack))
+        {
+            pan.use_on(host, player, level, event.click.pos, &self.rolls);
             *event.cancellation_result = InteractionResult::Consume;
             return Flow::Cancel;
         }
@@ -321,12 +322,21 @@ fn describe_recipe(id: &str, double_ores: bool) -> Vec<String> {
             recipe.output.kind.id()
         ));
     }
-    for &(weight, kind) in recipes::PAN_DROPS {
-        if outputs(kind.id()) {
-            lines.push(format!(
-                "Gold Pan | minecraft:gravel -> 1 × {} ({weight}%)",
-                kind.id()
-            ));
+    for pan in gold_pan::PANS {
+        for &(weight, kind) in pan.drops {
+            if outputs(kind.id()) {
+                let targets = pan
+                    .targets
+                    .iter()
+                    .map(|&(target, _)| target)
+                    .collect::<Vec<_>>()
+                    .join(" or ");
+                lines.push(format!(
+                    "{} | {targets} -> 1 × {} ({weight}%)",
+                    pan.research.name,
+                    kind.id()
+                ));
+            }
         }
     }
 
@@ -357,6 +367,23 @@ fn describe_recipe(id: &str, double_ores: bool) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nether_pan_recipe_and_uses_have_the_paper_ingredients_and_targets() {
+        assert_eq!(
+            describe_recipe("NETHER_GOLD_PAN", true),
+            [
+                "Enhanced Crafting Table | 1 × NETHER_GOLD_PAN | research nether_gold_pan",
+                "- | - | -",
+                "minecraft:nether_brick | GOLD_PAN | minecraft:nether_brick",
+                "minecraft:nether_brick | minecraft:nether_brick | minecraft:nether_brick",
+            ],
+        );
+        assert!(describe_recipe("ghast_tear", true).iter().any(|line| line ==
+            "Nether Gold Pan | minecraft:soul_sand or minecraft:soul_soil -> 1 × minecraft:ghast_tear (2%)"
+        ));
+        assert_eq!(recipes::NETHER_GOLD_PAN_RESEARCH.cost, 8);
+    }
 
     #[test]
     fn recipe_lookup_reports_the_configured_ore_yield() {
