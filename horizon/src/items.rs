@@ -54,6 +54,12 @@ impl Kind {
         }
     }
 
+    pub fn decorate(self, stack: &mut ItemStack) {
+        if let Self::Slimefun(item) = self {
+            let _ = stack.apply_components(&item.components());
+        }
+    }
+
     pub fn stack(self, host: &dyn Host, count: u32) -> Option<ItemStack> {
         let material = Identifier::parse(self.material()).ok()?;
         let mut stack = ItemStack::new(host.item_key(&material)?, count)?;
@@ -418,3 +424,139 @@ item!(
     None,
     None
 );
+
+// Starter ore-processing and alloy items.
+item!(
+    ALUMINUM_BRASS_INGOT,
+    "gold_ingot",
+    "Aluminum Brass Ingot",
+    "aqua",
+    None,
+    None
+);
+item!(
+    ALUMINUM_BRONZE_INGOT,
+    "gold_ingot",
+    "Aluminum Bronze Ingot",
+    "aqua",
+    None,
+    None
+);
+item!(ALUMINUM_DUST, "sugar", "Aluminum Dust", "gold", None, None);
+item!(
+    ALUMINUM_INGOT,
+    "iron_ingot",
+    "Aluminum Ingot",
+    "aqua",
+    None,
+    None
+);
+item!(
+    BILLON_INGOT,
+    "iron_ingot",
+    "Billon Ingot",
+    "aqua",
+    None,
+    None
+);
+item!(BRASS_INGOT, "gold_ingot", "Brass Ingot", "aqua", None, None);
+item!(BRONZE_INGOT, "brick", "Bronze Ingot", "aqua", None, None);
+item!(
+    COBALT_INGOT,
+    "iron_ingot",
+    "Cobalt Ingot",
+    "blue",
+    None,
+    None
+);
+item!(COPPER_INGOT, "brick", "Copper Ingot", "aqua", None, None);
+item!(
+    CORINTHIAN_BRONZE_INGOT,
+    "gold_ingot",
+    "Corinthian Bronze Ingot",
+    "aqua",
+    None,
+    None
+);
+item!(
+    DAMASCUS_STEEL_INGOT,
+    "iron_ingot",
+    "Damascus Steel Ingot",
+    "aqua",
+    None,
+    None
+);
+item!(
+    DURALUMIN_INGOT,
+    "iron_ingot",
+    "Duralumin Ingot",
+    "aqua",
+    None,
+    None
+);
+item!(
+    FERROSILICON,
+    "iron_ingot",
+    "Ferrosilicon",
+    "aqua",
+    None,
+    None
+);
+item!(GOLD_PAN, "bowl", "Gold Pan", "gold", None, None);
+item!(
+    HARDENED_METAL_INGOT,
+    "iron_ingot",
+    "Hardened Metal",
+    "aqua",
+    None,
+    None
+);
+item!(LEAD_DUST, "gunpowder", "Lead Dust", "gold", None, None);
+item!(MAGNESIUM_DUST, "sugar", "Magnesium", "gold", None, None);
+item!(
+    MAGNESIUM_INGOT,
+    "iron_ingot",
+    "Magnesium Ingot",
+    "aqua",
+    None,
+    None
+);
+item!(
+    NICKEL_INGOT,
+    "iron_ingot",
+    "Nickel Ingot",
+    "aqua",
+    None,
+    None
+);
+item!(
+    PURE_ORE_CLUSTER,
+    "gunpowder",
+    "Pure Ore Cluster",
+    "gold",
+    None,
+    None
+);
+item!(SALT, "sugar", "Salt", "white", None, None);
+item!(SILICON, "firework_star", "Silicon", "gold", None, None);
+item!(SILVER_DUST, "sugar", "Silver Dust", "gold", None, None);
+item!(
+    SILVER_INGOT,
+    "iron_ingot",
+    "Silver Ingot",
+    "aqua",
+    None,
+    None
+);
+item!(
+    SOLDER_INGOT,
+    "iron_ingot",
+    "Solder Ingot",
+    "aqua",
+    None,
+    None
+);
+item!(TIN_DUST, "sugar", "Tin Dust", "gold", None, None);
+item!(TIN_INGOT, "iron_ingot", "Tin Ingot", "aqua", None, None);
+item!(ZINC_DUST, "sugar", "Zinc Dust", "gold", None, None);
+item!(ZINC_INGOT, "iron_ingot", "Zinc Ingot", "aqua", None, None);

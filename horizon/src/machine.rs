@@ -1,13 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use mod_api::{
-    Host, HostTransaction, ItemPlace, ItemResource, ItemStack, LevelRef, PlayerRef, ServerHost,
-    SoundSource, Text, Transaction,
+    BlockUpdateFlags, Host, HostTransaction, ItemPlace, ItemResource, ItemStack, LevelRef,
+    PlayerRef, ServerHost, SoundSource, Text, Transaction,
 };
 
 use crate::compressor::Compressor;
+use crate::items::{OUTPUT_CHEST, SIFTED_ORE, STONE_CHUNK};
 use crate::output_chest;
-use crate::recipes::{COMPRESSING, CRAFTING, CRUSHING, DOUBLING, GRINDING, Stack, output_research};
+use crate::random::Rolls;
+use crate::recipes::{
+    ALLOY_RECIPES, COMPRESSING, CRAFTING, CRUSHING, DOUBLING, GRINDING, MAKESHIFT_SMELTERY,
+    ORE_WASHER, SMELTERY, SMELTING, SmeltingRecipe, Stack, WASHER_DUSTS, WASHING, output_research,
+};
 use crate::research;
 
 #[derive(Clone, Copy)]
@@ -16,12 +21,31 @@ pub(crate) enum Machine {
     Crafting,
     Crushing,
     Compressing,
+    Washing,
+    Smelting { heat: [i32; 3], makeshift: bool },
 }
 
 #[derive(Clone, Copy)]
 pub(crate) struct Dispenser {
     pub level: LevelRef,
     pub position: [i32; 3],
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct Settings {
+    pub double_ores: bool,
+    pub legacy_ore_washer: bool,
+    pub fire_breaking_chance: u32,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            double_ores: true,
+            legacy_ore_washer: false,
+            fire_breaking_chance: 34,
+        }
+    }
 }
 
 impl Dispenser {
@@ -41,6 +65,7 @@ impl Dispenser {
 
 pub(crate) enum Refusal {
     Locked,
+    Disabled,
     MissingRecipe,
     MissingResearch(&'static str),
     NoOutputSpace,
@@ -50,35 +75,69 @@ pub(crate) enum Refusal {
 impl Machine {
     pub fn at(host: &dyn Host, level: LevelRef, clicked: [i32; 3]) -> Option<(Self, Dispenser)> {
         let [x, y, z] = clicked;
-        let position = [x, y.checked_sub(1)?, z];
-        let input = level.block_state(host, position)?;
-        if Some(input.block()) != host.block_key("minecraft:dispenser") {
+        let below = [x, y.checked_sub(1)?, z];
+        let block = level.block_state(host, clicked)?.block().id(host);
+        let wooden_fence = is_wooden_fence(host, &block);
+        let dispenser = host.block_key("minecraft:dispenser")?;
+        if wooden_fence && has_block(host, level, below, "minecraft:cauldron") {
+            let above = [x, y.checked_add(1)?, z];
+            if level
+                .block_state(host, above)
+                .is_some_and(|state| state.block() == dispenser)
+            {
+                return Some((
+                    Self::Washing,
+                    Dispenser {
+                        level,
+                        position: above,
+                    },
+                ));
+            }
+        }
+        if level.block_state(host, below)?.block() != dispenser {
             return None;
         }
 
-        let block = level.block_state(host, clicked)?;
-        let clicked_block = block.block().id(host);
-        let facing_up = || level.block_property(host, position, "facing").as_deref() == Some("up");
-        let machine = match clicked_block.as_str() {
+        let machine = match block.as_str() {
             "minecraft:crafting_table" => Self::Crafting,
-            "minecraft:nether_brick_fence" if facing_up() => {
-                if opposite_blocks(host, level, position, &["minecraft:iron_bars"]) {
-                    Self::Crushing
-                } else if opposite_blocks(
-                    host,
-                    level,
-                    position,
-                    &["minecraft:piston", "minecraft:moving_piston"],
-                ) {
+            _ if wooden_fence || block == "minecraft:nether_brick_fence" => {
+                let heat = [x, y.checked_sub(2)?, z];
+                let bricks = if wooden_fence {
+                    "minecraft:bricks"
+                } else {
+                    "minecraft:nether_bricks"
+                };
+                let heat_block = level
+                    .block_state(host, heat)
+                    .map(|state| state.block().id(host));
+                if matches!(
+                    heat_block.as_deref(),
+                    Some("minecraft:fire" | "minecraft:soul_fire")
+                ) && opposite_blocks(host, level, below, &[bricks])
+                {
+                    Self::Smelting {
+                        heat,
+                        makeshift: wooden_fence,
+                    }
+                } else if wooden_fence {
+                    Self::Grinding
+                } else if opposite_blocks(host, level, below, &["minecraft:piston"]) {
                     Self::Compressing
+                } else if opposite_blocks(host, level, below, &["minecraft:iron_bars"]) {
+                    Self::Crushing
                 } else {
                     return None;
                 }
             }
-            block if facing_up() && is_wooden_fence(host, block) => Self::Grinding,
             _ => return None,
         };
-        Some((machine, Dispenser { level, position }))
+        Some((
+            machine,
+            Dispenser {
+                level,
+                position: below,
+            },
+        ))
     }
 
     pub fn activate(
@@ -88,15 +147,31 @@ impl Machine {
         dispenser: Dispenser,
         clicked: [i32; 3],
         compressor: &Compressor,
-        double_ores: bool,
+        settings: Settings,
+        rolls: &Rolls,
     ) {
-        let outcome = self.process(host, player, dispenser, compressor, double_ores);
+        let outcome = self.process(host, player, dispenser, compressor, settings, rolls);
+
         let message = match outcome {
             Ok(()) if matches!(self, Self::Compressing) => return,
             Ok(()) => {
+                let sound = match self {
+                    Self::Washing => "minecraft:entity.player.splash",
+                    Self::Smelting { heat, makeshift } => {
+                        if makeshift
+                            || rolls
+                                .next(host, dispenser.level, 100)
+                                .is_some_and(|roll| roll < settings.fire_breaking_chance)
+                        {
+                            exhaust_fire(host, dispenser.level, heat);
+                        }
+                        "minecraft:block.lava.pop"
+                    }
+                    _ => "minecraft:block.wooden_button.click_on",
+                };
                 dispenser.level.play_sound(
                     host,
-                    "minecraft:block.wooden_button.click_on",
+                    sound,
                     clicked.map(|axis| f64::from(axis) + 0.5),
                     SoundSource::Blocks,
                     1.0,
@@ -105,6 +180,7 @@ impl Machine {
                 return;
             }
             Err(Refusal::Locked) => "The dispenser is locked.".to_owned(),
+            Err(Refusal::Disabled) => "The machine output is disabled in this world.".to_owned(),
             Err(Refusal::MissingRecipe) => {
                 "No matching Slimefun recipe in the dispenser.".to_owned()
             }
@@ -123,8 +199,24 @@ impl Machine {
         player: PlayerRef,
         dispenser: Dispenser,
         compressor: &Compressor,
-        double_ores: bool,
+        settings: Settings,
+        rolls: &Rolls,
     ) -> Result<(), Refusal> {
+        let required = match self {
+            Self::Washing => Some(&ORE_WASHER),
+            Self::Smelting {
+                makeshift: true, ..
+            } => Some(&MAKESHIFT_SMELTERY),
+            Self::Smelting {
+                makeshift: false, ..
+            } => Some(&SMELTERY),
+            _ => None,
+        };
+        if let Some(research) = required
+            && !research::can_use(host, player, research)
+        {
+            return Err(Refusal::MissingResearch(research.id));
+        }
         let holder = host
             .block_entity(dispenser.level, dispenser.position)
             .ok_or(Refusal::Unavailable)?;
@@ -141,14 +233,14 @@ impl Machine {
                         Self::Grinding => (GRINDING, no_bonus),
                         Self::Crushing => (CRUSHING, DOUBLING),
                         Self::Compressing => (COMPRESSING, no_bonus),
-                        Self::Crafting => unreachable!(),
+                        _ => unreachable!(),
                     };
                     for (slot, input) in slots.iter().enumerate() {
                         let Some(input) = input else { continue };
                         let candidates = base.iter().map(|recipe| (recipe, 1)).chain(
                             bonus
                                 .iter()
-                                .map(|recipe| (recipe, 1 + u32::from(double_ores))),
+                                .map(|recipe| (recipe, 1 + u32::from(settings.double_ores))),
                         );
                         let Some((recipe, multiplier)) =
                             candidates.into_iter().find(|(recipe, _)| {
@@ -193,6 +285,74 @@ impl Machine {
                     }
                     Err(Refusal::MissingRecipe)
                 }
+                Self::Washing => {
+                    for (slot, item) in slots.iter().enumerate() {
+                        let Some(item) = item else { continue };
+                        if SIFTED_ORE.matches(host, item) {
+                            let index = rolls
+                                .next(host, dispenser.level, WASHER_DUSTS.len() as u32)
+                                .ok_or(Refusal::Unavailable)?;
+                            let dust = WASHER_DUSTS[index as usize]
+                                .stack(host, 1)
+                                .ok_or(Refusal::Unavailable)?;
+                            let stone = STONE_CHUNK.stack(host, 1).ok_or(Refusal::Unavailable)?;
+                            let require_empty = !settings.legacy_ore_washer;
+                            if !output_chest::try_deposit_with_extra(
+                                host,
+                                dispenser.level,
+                                dispenser.position,
+                                &dust,
+                                Some(&stone),
+                                require_empty,
+                            ) && !store_washed(host, tx, dispenser, &dust, &stone, require_empty)
+                            {
+                                return Err(Refusal::NoOutputSpace);
+                            }
+                            return consume(host, tx, &dispenser.place(slot), item, 1);
+                        }
+                        if let Some(recipe) = WASHING.iter().find(|recipe| {
+                            item.count() >= recipe.input.count
+                                && recipe.input.kind.matches(host, item)
+                        }) {
+                            deposit(host, tx, dispenser, recipe.output)?;
+                            return consume(
+                                host,
+                                tx,
+                                &dispenser.place(slot),
+                                item,
+                                recipe.input.count,
+                            );
+                        }
+                    }
+                    Err(Refusal::MissingRecipe)
+                }
+                Self::Smelting { makeshift, .. } => {
+                    let alloys = if makeshift { &[] } else { ALLOY_RECIPES };
+                    let (recipe, consumption) = alloys
+                        .iter()
+                        .chain(
+                            SMELTING
+                                .iter()
+                                .filter(|recipe| !makeshift || makeshift_recipe(recipe)),
+                        )
+                        .find_map(|recipe| {
+                            smelting_inputs(host, &slots, recipe).map(|slots| (recipe, slots))
+                        })
+                        .ok_or(Refusal::MissingRecipe)?;
+                    if let Some(research) = output_research(recipe.output.kind)
+                        && !research::can_use(host, player, research)
+                    {
+                        return Err(Refusal::MissingResearch(research.id));
+                    }
+                    deposit(host, tx, dispenser, recipe.output)?;
+                    for (slot, count) in consumption.into_iter().enumerate() {
+                        if count != 0 {
+                            let item = slots[slot].as_ref().ok_or(Refusal::Unavailable)?;
+                            consume(host, tx, &dispenser.place(slot), item, count)?;
+                        }
+                    }
+                    Ok(())
+                }
                 Self::Crafting => {
                     let recipe = CRAFTING
                         .iter()
@@ -206,6 +366,9 @@ impl Machine {
                             })
                         })
                         .ok_or(Refusal::MissingRecipe)?;
+                    if recipe.output.kind == OUTPUT_CHEST && !output_chest::enabled() {
+                        return Err(Refusal::Disabled);
+                    }
                     if !research::can_use(host, player, recipe.research) {
                         return Err(Refusal::MissingResearch(recipe.research.id));
                     }
@@ -219,6 +382,67 @@ impl Machine {
             }
         })
     }
+}
+
+fn has_block(host: &dyn Host, level: LevelRef, pos: [i32; 3], name: &str) -> bool {
+    level
+        .block_state(host, pos)
+        .is_some_and(|state| Some(state.block()) == host.block_key(name))
+}
+
+fn exhaust_fire(host: &mut dyn ServerHost, level: LevelRef, pos: [i32; 3]) {
+    let current = level
+        .block_state(host, pos)
+        .map(|state| state.block().id(host));
+    if matches!(
+        current.as_deref(),
+        Some("minecraft:fire" | "minecraft:soul_fire")
+    ) && let Some(air) = host.block_state_id("minecraft:air")
+    {
+        let flags = BlockUpdateFlags::NEIGHBORS | BlockUpdateFlags::CLIENTS;
+        let _ = level.set_block(host, pos, air, flags);
+    }
+}
+
+pub(crate) fn makeshift_recipe(recipe: &SmeltingRecipe) -> bool {
+    matches!(recipe.inputs, [input] if input.kind.id().ends_with("_DUST"))
+}
+
+fn smelting_inputs(
+    host: &dyn Host,
+    slots: &[Option<ItemStack>; 9],
+    recipe: &SmeltingRecipe,
+) -> Option<[u32; 9]> {
+    let mut consumed = [0; 9];
+    for ingredient in recipe.inputs {
+        let index = slots.iter().enumerate().position(|(slot, item)| {
+            item.as_ref().is_some_and(|item| {
+                item.count().saturating_sub(consumed[slot]) >= ingredient.count
+                    && ingredient.kind.matches(host, item)
+            })
+        })?;
+        consumed[index] += ingredient.count;
+    }
+    Some(consumed)
+}
+
+fn store_washed(
+    host: &mut dyn ServerHost,
+    tx: &Transaction,
+    dispenser: Dispenser,
+    dust: &ItemStack,
+    stone: &ItemStack,
+    require_empty: bool,
+) -> bool {
+    if require_empty && dispenser.slots(host).iter().all(Option::is_some) {
+        return false;
+    }
+    if deposit_stack(host, tx, dispenser, dust, dust.count()) != 0 {
+        return false;
+    }
+    // Paper adds the by-product to the already selected inventory and discards overflow.
+    let _ = deposit_stack(host, tx, dispenser, stone, stone.count());
+    true
 }
 
 fn is_wooden_fence(host: &dyn Host, block: &str) -> bool {
@@ -341,6 +565,58 @@ mod tests {
     const POSITION: [i32; 3] = [0, 64, 0];
     const BLAZE_ROD: Kind = Kind::Vanilla("minecraft:blaze_rod");
     const BLAZE_POWDER: Kind = Kind::Vanilla("minecraft:blaze_powder");
+
+    #[test]
+    fn lead_progression_from_gravel_to_output_chest_has_all_required_recipes() {
+        use crate::items::{LEAD_DUST, LEAD_INGOT, OUTPUT_CHEST};
+        use crate::recipes::PAN_DROPS;
+
+        assert!(
+            PAN_DROPS
+                .iter()
+                .any(|&(weight, item)| weight == 35 && item == SIFTED_ORE)
+        );
+        assert_eq!(
+            WASHER_DUSTS
+                .iter()
+                .filter(|&&item| item == LEAD_DUST)
+                .count(),
+            1
+        );
+
+        let recipe = SMELTING
+            .iter()
+            .find(|recipe| recipe.output.kind == LEAD_INGOT)
+            .unwrap();
+        assert!(makeshift_recipe(recipe));
+        assert!(matches!(recipe.inputs, [input] if input.kind == LEAD_DUST && input.count == 1));
+
+        let chest = CRAFTING
+            .iter()
+            .find(|recipe| recipe.output.kind == OUTPUT_CHEST)
+            .unwrap();
+        assert_eq!(
+            chest
+                .inputs
+                .iter()
+                .filter(|&&input| input == Some(LEAD_INGOT))
+                .count(),
+            5
+        );
+        assert_eq!(chest.research.cost, 20);
+    }
+
+    #[test]
+    fn makeshift_smeltery_copies_only_single_dust_inputs() {
+        assert_eq!(
+            SMELTING
+                .iter()
+                .filter(|recipe| makeshift_recipe(recipe))
+                .count(),
+            9
+        );
+        assert!(!ALLOY_RECIPES.iter().any(makeshift_recipe));
+    }
 
     #[test]
     fn output_merges_before_using_empty_slots() {

@@ -1,12 +1,25 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use mod_api::{
-    AttachmentCodec, AttachmentError, AttachmentType, Compound, Holder, HostTransaction, ITEMS,
-    ItemPart, ItemStack, LevelRef, OnBlockPlacedByEvent, ServerHost, Tag,
+    AttachmentCodec, AttachmentError, AttachmentType, BlockDropsEvent, Compound, Holder,
+    HostTransaction, ITEMS, ItemKey, ItemPart, ItemStack, LevelHost, LevelRef,
+    OnBlockPlacedByEvent, ServerHost, Tag,
 };
 
 use crate::items::OUTPUT_CHEST;
 use crate::machine::deposit_into;
+
+static ENABLED: AtomicBool = AtomicBool::new(true);
+
+pub(crate) fn enabled() -> bool {
+    ENABLED.load(Ordering::Relaxed)
+}
+
+pub(crate) fn set_enabled(enabled: bool) {
+    ENABLED.store(enabled, Ordering::Relaxed);
+}
 
 static MARKER: AttachmentType<bool> = AttachmentType {
     namespace: "slimefun",
@@ -48,6 +61,20 @@ pub(crate) fn try_deposit(
     dispenser: [i32; 3],
     stack: &ItemStack,
 ) -> bool {
+    try_deposit_with_extra(host, level, dispenser, stack, None, false)
+}
+
+pub(crate) fn try_deposit_with_extra(
+    host: &mut dyn ServerHost,
+    level: LevelRef,
+    dispenser: [i32; 3],
+    stack: &ItemStack,
+    extra: Option<&ItemStack>,
+    require_empty: bool,
+) -> bool {
+    if !enabled() {
+        return false;
+    }
     if !level.in_place(host) {
         return false;
     }
@@ -67,23 +94,58 @@ pub(crate) fn try_deposit(
         ) {
             continue;
         }
-        if try_store(host, level, pos, stack) {
+        if try_store(host, level, pos, stack, extra, require_empty) {
             return true;
         }
     }
     false
 }
 
-fn try_store(host: &mut dyn ServerHost, level: LevelRef, pos: [i32; 3], stack: &ItemStack) -> bool {
+fn try_store(
+    host: &mut dyn ServerHost,
+    level: LevelRef,
+    pos: [i32; 3],
+    stack: &ItemStack,
+    extra: Option<&ItemStack>,
+    require_empty: bool,
+) -> bool {
     let Some(handler) = level.capability(host, &ITEMS, pos, None) else {
         return false;
     };
     let slots = handler.size(host);
+    if require_empty && (0..slots).all(|slot| handler.resource(host, slot).is_some()) {
+        return false;
+    }
     host.transaction(|host, tx| {
-        let remaining = deposit_into(host, tx, level, pos, slots, stack, stack.count());
-        (remaining == 0).then_some(()).ok_or(())
+        if deposit_into(host, tx, level, pos, slots, stack, stack.count()) != 0 {
+            return Err(());
+        }
+        if let Some(extra) = extra {
+            let _ = deposit_into(host, tx, level, pos, slots, extra, extra.count());
+        }
+        Ok(())
     })
     .is_ok()
+}
+
+pub(crate) fn restore_drop(level: &dyn LevelHost, event: &mut BlockDropsEvent<'_>, chest: ItemKey) {
+    let Some(entity) = event.block_entity else {
+        return;
+    };
+    let Some(marker) = level.block_entity_saved_attachment(entity, MARKER.namespace, MARKER.name)
+    else {
+        return;
+    };
+    if marker.get(&"placed".into()) != Some(&Tag::Byte(1)) {
+        return;
+    }
+    if let Some(drop) = event
+        .drops
+        .iter_mut()
+        .find(|drop| drop.stack.item() == chest)
+    {
+        OUTPUT_CHEST.decorate(&mut drop.stack);
+    }
 }
 
 fn adjacent([x, y, z]: [i32; 3]) -> impl Iterator<Item = [i32; 3]> {
@@ -122,8 +184,8 @@ mod tests {
         host.level.block_entity(first).items.as_mut().unwrap().slots[0] = Some(occupied);
         let stack = powder.stack(&host, 4).unwrap();
 
-        assert!(!try_store(&mut host, level, first, &stack));
-        assert!(try_store(&mut host, level, next, &stack));
+        assert!(!try_store(&mut host, level, first, &stack, None, false));
+        assert!(try_store(&mut host, level, next, &stack, None, false));
         let amounts = [first, next].map(|pos| {
             host.level
                 .block_entity_at(pos)
