@@ -13,7 +13,7 @@ use mod_api::{
 };
 
 use crate::{
-    factory::fluid_pump,
+    factory::{fluid_pump, reactors},
     geology,
     items::{item_id, network_item},
     machine::Settings,
@@ -50,6 +50,7 @@ struct BlockData {
     charge: u32,
     cargo: Option<CargoSettings>,
     cargo_visualizer_disabled: bool,
+    reactor_production: bool,
     gps_owner: Option<u128>,
 }
 
@@ -71,6 +72,9 @@ static NETWORK_STATE: AttachmentType<BlockData> = AttachmentType {
             }
             if value.cargo_visualizer_disabled {
                 data.insert("visualizer_disabled".into(), Tag::Byte(1));
+            }
+            if value.reactor_production {
+                data.insert("reactor_production".into(), Tag::Byte(1));
             }
             if let Some(owner) = value.gps_owner {
                 data.insert(
@@ -95,6 +99,10 @@ static NETWORK_STATE: AttachmentType<BlockData> = AttachmentType {
                 },
                 cargo_visualizer_disabled: matches!(
                     data.get(&"visualizer_disabled".into()),
+                    Some(Tag::Byte(1))
+                ),
+                reactor_production: matches!(
+                    data.get(&"reactor_production".into()),
                     Some(Tag::Byte(1))
                 ),
                 gps_owner: match data.get(&"owner".into()) {
@@ -166,6 +174,13 @@ impl ItemPart for NetworkPlacement {
             && [
                 crate::thermal_machines::COOLING_UNIT,
                 crate::thermal_machines::REACTOR_COLLANT_CELL,
+                crate::heated_pressure::URANIUM,
+                crate::heated_pressure::PLUTONIUM,
+                crate::heated_pressure::BOOSTED_URANIUM,
+                crate::heated_pressure::NETHER_ICE,
+                crate::heated_pressure::ENRICHED_NETHER_ICE,
+                crate::heated_pressure::NETHER_ICE_COOLANT_CELL,
+                reactors::NEPTUNIUM,
                 trash::PORTABLE_DUSTBIN,
             ]
             .iter()
@@ -308,9 +323,10 @@ impl Node {
             | Component::GpsTransmitter { .. }
             | Component::FuelGenerator { .. }
             | Component::SolarGenerator { .. } => Network::Energy,
-            Component::GeoScanner | Component::TrashCan | Component::ManualCrucible => {
-                Network::Independent
-            }
+            Component::GeoScanner
+            | Component::TrashCan
+            | Component::ManualCrucible
+            | Component::ReactorPort => Network::Independent,
             _ => Network::Cargo,
         }
     }
@@ -341,6 +357,7 @@ impl Node {
 fn accepts_carrier(component: Component, actual: &str) -> bool {
     let expected = match component {
         Component::ManualCrucible => return crate::crucible::carrier(actual),
+        Component::ReactorPort => return actual == reactors::REACTOR_ACCESS_PORT.material(),
         Component::SolarGenerator { .. } => ["minecraft:daylight_detector"; 2],
         Component::ElectricMachine { carrier, .. } | Component::FuelGenerator { carrier, .. } => {
             if carrier == "minecraft:player_head" {
@@ -534,6 +551,13 @@ fn imported(id: &str, metadata: &toml::Table) -> Result<(Node, BlockData), &'sta
                     None => None,
                 };
             }
+            if reactors::reactor(id).is_some() {
+                data.reactor_production = match field("reactor-mode") {
+                    Some("PRODUCTION") => true,
+                    None | Some("GENERATOR") => false,
+                    _ => return Err("Invalid Paper reactor mode."),
+                };
+            }
         }
         Component::CargoInput | Component::CargoOutput { .. } => {
             data.cargo = Some(CargoSettings::from_paper(metadata, node.filters_items())?);
@@ -716,7 +740,11 @@ pub(crate) fn factory_identity(
     let data = block_data(host, level, pos)?;
     matches!(
         Component::for_item(&data.id),
-        Some(Component::ElectricMachine { .. } | Component::FuelGenerator { .. })
+        Some(
+            Component::ElectricMachine { .. }
+                | Component::FuelGenerator { .. }
+                | Component::ReactorPort
+        )
     )
     .then_some(data.id)
 }
@@ -764,13 +792,35 @@ fn write_data(
 }
 
 fn is_plain_node(component: Component) -> bool {
-    if component == Component::ManualCrucible {
+    if matches!(
+        component,
+        Component::ManualCrucible | Component::ReactorPort
+    ) {
         return true;
     }
     matches!(
         component, Component::ElectricMachine { carrier, .. } | Component::FuelGenerator { carrier, .. }
             if is_plain_carrier(carrier)
     )
+}
+
+pub(crate) fn reactor_production(
+    host: &mut dyn ServerHost,
+    level: LevelRef,
+    pos: Position,
+) -> Option<bool> {
+    let state = block_data(host, level, pos)?;
+    reactors::reactor(&state.id)?;
+    Some(state.reactor_production)
+}
+
+pub(crate) fn toggle_reactor_focus(host: &mut dyn ServerHost, level: LevelRef, pos: Position) {
+    if let Some(mut state) = block_data(host, level, pos)
+        && reactors::reactor(&state.id).is_some()
+    {
+        state.reactor_production = !state.reactor_production;
+        let _ = write_data(host, pos, state);
+    }
 }
 
 pub(crate) fn tick(
@@ -826,7 +876,7 @@ pub(crate) fn tick(
                 let status = if group.iter().all(|pos| active[pos].0.regulator()) {
                     Some(Status::EnergyEmpty)
                 } else {
-                    tick_energy(host, level, &dimension, &active, &group)
+                    tick_energy(host, level, &dimension, &active, &group, rolls)
                 };
                 (status, Status::EnergyConflict)
             }
@@ -858,7 +908,17 @@ pub(crate) fn tick(
             labels.insert(pos, Some(conflict));
         }
     }
-    if nodes.values().any(Node::regulator) {
+    for (&pos, &(node, _)) in &active {
+        if let Some(spec) = reactors::reactor(&node.id)
+            && let Some(cooling) = reactors::cooling_percent(host, level, pos, spec)
+        {
+            labels.insert(pos, Some(Status::ReactorCooling(cooling)));
+        }
+    }
+    if nodes
+        .values()
+        .any(|node| node.regulator() || reactors::reactor(&node.id).is_some())
+    {
         network_visuals::reconcile(host, level, &dimension, labels);
     }
     let mut gps_signals = BTreeMap::new();
@@ -941,62 +1001,88 @@ fn tick_energy(
     dimension: &str,
     active: &BTreeMap<Position, (&Node, u32)>,
     group: &[Position],
+    rolls: &Rolls,
 ) -> Option<Status> {
     let time = level.day_time(host).map(|time| time.rem_euclid(24_000));
     let day = time.is_some_and(|time| !(12_300..=23_850).contains(&time))
         && level.is_raining(host) == Some(false)
         && level.is_thundering(host) == Some(false);
-    host.transaction(|host, tx| {
-        let mut available = 0u64;
-        let mut demand = 0u64;
-        for &pos in group {
-            let (node, charge) = active[&pos];
-            let energy = match node.component {
-                Component::ElectricMachine { capacity, .. }
-                | Component::GpsTransmitter { capacity } => {
-                    demand += u64::from(capacity.saturating_sub(charge));
-                    0
-                }
-                Component::Capacitor(capacity) => charge.min(capacity),
-                Component::FuelGenerator { capacity, .. } => {
-                    charge.min(capacity)
-                        + crate::factory::generate(host, tx, level, pos, &node.id, charge)?
-                }
-                Component::SolarGenerator {
-                    day: sun,
-                    night: moon,
-                } if dimension == "minecraft:overworld"
-                    && level.brightness(host, LightLayer::Sky, pos) == Some(15) =>
-                {
-                    if day {
-                        sun
-                    } else {
-                        moon
+    let (status, reactors) = host
+        .transaction(|host, tx| {
+            let mut available = 0u64;
+            let mut demand = 0u64;
+            let mut effects = Vec::new();
+            let mut surviving = Vec::with_capacity(group.len());
+            for &pos in group {
+                let (node, charge) = active[&pos];
+                let energy = match node.component {
+                    Component::ElectricMachine { capacity, .. }
+                    | Component::GpsTransmitter { capacity } => {
+                        demand += u64::from(capacity.saturating_sub(charge));
+                        0
                     }
+                    Component::Capacitor(capacity) => charge.min(capacity),
+                    Component::FuelGenerator { capacity, .. } => {
+                        let production = if let Some(spec) = reactors::reactor(&node.id) {
+                            let focus = reactor_production(host, level, pos).ok_or(())?;
+                            let outcome =
+                                reactors::poll(host, tx, level, pos, spec, charge, focus, rolls)?;
+                            let (energy, melt) = (outcome.energy, outcome.melt);
+                            if outcome.wither || melt {
+                                effects.push((pos, outcome));
+                            }
+                            if melt {
+                                continue;
+                            }
+                            energy
+                        } else {
+                            crate::factory::generate(host, tx, level, pos, &node.id, charge)?
+                        };
+                        charge.min(capacity) + production
+                    }
+                    Component::SolarGenerator {
+                        day: sun,
+                        night: moon,
+                    } if dimension == "minecraft:overworld"
+                        && level.brightness(host, LightLayer::Sky, pos) == Some(15) =>
+                    {
+                        if day {
+                            sun
+                        } else {
+                            moon
+                        }
+                    }
+                    _ => 0,
+                };
+                available += u64::from(energy);
+                surviving.push(pos);
+            }
+            for (pos, stored) in capacity_updates(available, active, &surviving) {
+                let mut data = block_data(host, level, pos).ok_or(())?;
+                if data.id != active[&pos].0.id {
+                    return Err(());
                 }
-                _ => 0,
-            };
-            available += u64::from(energy);
-        }
-        for (pos, stored) in capacity_updates(available, active, group) {
-            let mut data = block_data(host, level, pos).ok_or(())?;
-            if data.id != active[&pos].0.id {
-                return Err(());
+                if let Component::Capacitor(capacity) = active[&pos].0.component
+                    && capacitor_tier(data.charge, capacity) != capacitor_tier(stored, capacity)
+                {
+                    set_capacitor_profile(host, level, pos, stored, capacity);
+                }
+                data.charge = stored;
+                write_data(host, pos, data).map_err(|_| ())?;
             }
-            if let Component::Capacitor(capacity) = active[&pos].0.component
-                && capacitor_tier(data.charge, capacity) != capacitor_tier(stored, capacity)
-            {
-                set_capacitor_profile(host, level, pos, stored, capacity);
-            }
-            data.charge = stored;
-            write_data(host, pos, data).map_err(|_| ())?;
-        }
-        Ok::<_, ()>(Status::Energy {
-            supply: available,
-            demand,
+            Ok::<_, ()>((
+                Status::Energy {
+                    supply: available,
+                    demand,
+                },
+                effects,
+            ))
         })
-    })
-    .ok()
+        .ok()?;
+    for (pos, poll) in reactors {
+        reactors::apply_effects(host, level, pos, poll);
+    }
+    Some(status)
 }
 
 fn capacitor_tier(charge: u32, capacity: u32) -> usize {

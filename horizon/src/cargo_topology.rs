@@ -219,6 +219,7 @@ enum InventoryKind {
     Ordinary,
     Chest,
     TrashCan,
+    ReactorPort,
     Factory { smeltery: bool },
     Smelter(&'static str),
     Brewer,
@@ -245,6 +246,7 @@ impl InventoryKind {
         match self {
             Self::Ordinary | Self::Chest => 0..size,
             Self::TrashCan => 0..0,
+            Self::ReactorPort => 6.min(size)..7.min(size),
             Self::Factory { .. } => 2..4.min(size),
             Self::Smelter(_) => 2..3.min(size),
             Self::Brewer => 0..3.min(size),
@@ -256,6 +258,13 @@ impl InventoryKind {
             Self::Ordinary | Self::Chest | Self::TrashCan => 0..size,
             Self::Factory { smeltery: true } => 0..0,
             Self::Factory { smeltery: false } => 0..2.min(size),
+            Self::ReactorPort => {
+                if crate::factory::reactors::coolant(host, stack) {
+                    3.min(size)..6.min(size)
+                } else {
+                    0..3.min(size)
+                }
+            }
             Self::Smelter(recipe) => {
                 let fuel = host
                     .item_burn_time(stack.item())
@@ -336,6 +345,12 @@ fn attached_inventory(
         return Some((pos, InventoryKind::TrashCan));
     }
     if let Some(id) = factory_identity(host, level, pos) {
+        if id == crate::factory::reactors::REACTOR_ACCESS_PORT.id() {
+            return Some((pos, InventoryKind::ReactorPort));
+        }
+        if crate::factory::reactors::reactor(&id).is_some() {
+            return None;
+        }
         let smeltery = crate::factory::ElectricMachine::for_item(&id)
             .is_some_and(crate::factory::ElectricMachine::is_smeltery);
         return Some((pos, InventoryKind::Factory { smeltery }));

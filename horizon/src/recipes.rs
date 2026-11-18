@@ -115,6 +115,7 @@ pub(crate) fn crafting() -> impl Iterator<Item = &'static CraftingRecipe> {
         .chain([&crate::factory::fluid_pump::CRAFTING])
         .chain([&crate::factory::charging_bench::CRAFTING])
         .chain(crate::network_runtime::trash::CRAFTING)
+        .chain(crate::factory::reactors::CRAFTING)
 }
 
 pub(crate) fn researches() -> impl Iterator<Item = &'static Research> {
@@ -132,6 +133,7 @@ pub(crate) fn researches() -> impl Iterator<Item = &'static Research> {
         .chain([&crate::factory::charging_bench::RESEARCH])
         .chain(crate::backpacks::RESEARCHES)
         .chain(crate::network_runtime::trash::RESEARCHES)
+        .chain(crate::factory::reactors::RESEARCHES)
 }
 
 pub(crate) fn smelting() -> impl Iterator<Item = &'static SmeltingRecipe> {

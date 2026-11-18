@@ -402,7 +402,11 @@ fn restore_network(
     let mut networks = networks.lock().unwrap();
     if !matches!(
         Component::for_item(id),
-        Some(Component::ElectricMachine { .. } | Component::FuelGenerator { .. })
+        Some(
+            Component::ElectricMachine { .. }
+                | Component::FuelGenerator { .. }
+                | Component::ReactorPort
+        )
     ) {
         return networks.restore(host, level, pos, id, metadata, row);
     }

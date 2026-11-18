@@ -529,6 +529,7 @@ impl Hooks for Slimefun {
     }
 
     fn menu_clicked(&self, host: &mut dyn ServerHost, event: &mut mod_api::MenuClickedEvent) {
+        factory::VIEWERS.clicked(host, event);
         network_runtime::menu_click(&self.networks, host, event);
     }
 

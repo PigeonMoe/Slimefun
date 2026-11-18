@@ -33,6 +33,8 @@ use crate::{
 pub(crate) mod charging_bench;
 #[path = "fluid_pump.rs"]
 pub(crate) mod fluid_pump;
+#[path = "reactors.rs"]
+pub(crate) mod reactors;
 
 type Position = [i32; 3];
 const SLOTS: [&str; 8] = ["19", "20", "24", "25", "10", "11", "28", "29"];
@@ -117,6 +119,8 @@ enum RecipeFamily {
     Advanced(&'static advanced_processing::Machine),
     OilPump,
     FluidPump,
+    Reactor(&'static reactors::Reactor),
+    ReactorPort,
 }
 
 #[derive(Clone, Copy)]
@@ -125,7 +129,58 @@ struct Viewer {
     storage: Storage,
     entity: Option<BlockEntityRef>,
     window: i32,
-    remaining: Option<u32>,
+    view: ViewState,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct ViewState {
+    progress: Option<u32>,
+    production: bool,
+    link: Option<Position>,
+}
+
+impl ViewState {
+    fn read(
+        host: &mut dyn ServerHost,
+        storage: Storage,
+        machine: ElectricMachine,
+        data: &Compound,
+    ) -> Self {
+        let mut view = Self {
+            progress: remaining(data),
+            production: false,
+            link: None,
+        };
+        if machine.reactor_menu() {
+            view.link = reactors::link(host, storage.level, storage.pos, machine);
+            if let RecipeFamily::Reactor(spec) = machine.family {
+                view.progress = reactors::progress(data, spec).map(|(progress, _)| progress);
+                view.production =
+                    network_runtime::reactor_production(host, storage.level, storage.pos)
+                        .unwrap_or(false);
+            }
+        }
+        view
+    }
+
+    fn items(
+        self,
+        host: &dyn Host,
+        data: &Compound,
+        machine: ElectricMachine,
+    ) -> Vec<Option<ItemStack>> {
+        let mut items = menu_items(host, data, machine);
+        if machine.reactor_menu() {
+            reactors::decorate_controls(
+                host,
+                &mut items,
+                machine,
+                self.production,
+                self.link.is_some(),
+            );
+        }
+        items
+    }
 }
 
 #[derive(Default)]
@@ -134,6 +189,37 @@ pub(crate) struct FactoryViewers(Mutex<BTreeMap<u128, Viewer>>);
 pub(crate) static VIEWERS: FactoryViewers = FactoryViewers(Mutex::new(BTreeMap::new()));
 
 impl FactoryViewers {
+    pub fn clicked(&self, host: &mut dyn ServerHost, event: &mod_api::MenuClickedEvent) {
+        if event.mode != 0 || !matches!(event.button, 0 | 1) || !matches!(event.slot, 4 | 49) {
+            return;
+        }
+        let viewer = self.0.lock().unwrap().get(&event.uuid).copied();
+        let Some(viewer) =
+            viewer.filter(|viewer| viewer.window == event.window && viewer.furnace.reactor_menu())
+        else {
+            return;
+        };
+        let Some(player) = host.player(event.uuid) else {
+            return;
+        };
+        let Storage { level, pos, .. } = viewer.storage;
+        if player.entity().level(host) != Some(level)
+            || network_runtime::factory_identity(host, level, pos).as_deref()
+                != Some(viewer.furnace.id)
+            || host.block_entity(level, pos) != viewer.entity
+        {
+            host.close_menu(event.uuid);
+            return;
+        }
+        if event.slot == 49 {
+            if let Some(link) = reactors::link(host, level, pos, viewer.furnace) {
+                open(host, player, level, link);
+            }
+        } else if matches!(viewer.furnace.family, RecipeFamily::Reactor(_)) {
+            network_runtime::toggle_reactor_focus(host, level, pos);
+        }
+    }
+
     pub fn closed(&self, event: &MenuClosedEvent) {
         let mut viewers = self.0.lock().unwrap();
         if viewers
@@ -192,16 +278,16 @@ impl FactoryViewers {
             let Some(data) = data_at(host, viewer.storage) else {
                 continue;
             };
-            let remaining = remaining(&data);
-            if remaining == viewer.remaining {
+            let view = ViewState::read(host, viewer.storage, viewer.furnace, &data);
+            if view == viewer.view {
                 continue;
             }
-            let items = menu_items(host, &data, viewer.furnace);
+            let items = view.items(host, &data, viewer.furnace);
             if host.menu_set_items(uuid, viewer.window, items).is_ok()
                 && let Some(current) = self.0.lock().unwrap().get_mut(&uuid)
                 && current.window == viewer.window
             {
-                current.remaining = remaining;
+                current.view = view;
             }
         }
     }
@@ -210,6 +296,30 @@ impl FactoryViewers {
 impl ElectricMachine {
     pub fn for_item(id: &str) -> Option<Self> {
         use RecipeFamily::{Furnace, HeatedPressure, IngotPulverizer, OreGrinder};
+        if let Some(spec) = reactors::reactor(id) {
+            return Some(Self {
+                id: spec.item.id(),
+                carrier: spec.item.material(),
+                title: spec.title,
+                cost: 0,
+                work_ticks: 0,
+                research: spec.research,
+                family: RecipeFamily::Reactor(spec),
+                speed: 1,
+            });
+        }
+        if id == reactors::REACTOR_ACCESS_PORT.id() {
+            return Some(Self {
+                id: reactors::REACTOR_ACCESS_PORT.id(),
+                carrier: reactors::REACTOR_ACCESS_PORT.material(),
+                title: "Reactor Access Port",
+                cost: 0,
+                work_ticks: 0,
+                research: &reactors::ACCESS_RESEARCH,
+                family: RecipeFamily::ReactorPort,
+                speed: 1,
+            });
+        }
         if let Some(spec) = fuel_generators::generator(id) {
             return Some(Self {
                 id: spec.item.id(),
@@ -369,11 +479,33 @@ impl ElectricMachine {
     }
 
     fn slot_count(self) -> usize {
-        if self.is_smeltery() {
+        self.menu_slots().len()
+    }
+
+    fn reactor_menu(self) -> bool {
+        matches!(
+            self.family,
+            RecipeFamily::Reactor(_) | RecipeFamily::ReactorPort
+        )
+    }
+
+    fn menu_slots(self) -> &'static [usize] {
+        if self.reactor_menu() {
+            return reactors::SLOTS;
+        }
+        let count = if self.is_smeltery() {
             SLOTS.len()
         } else {
             STANDARD_SLOT_COUNT
+        };
+        &MENU_SLOTS[..count]
+    }
+
+    fn input_slot(self, index: usize) -> bool {
+        if self.reactor_menu() {
+            return index < 6;
         }
+        !OUTPUT.contains(&index)
     }
 
     fn storage(self, level: LevelRef, pos: Position) -> Storage {
@@ -462,17 +594,24 @@ pub(crate) fn open(
         return true;
     };
     let entity = host.block_entity(level, pos);
-    let items = menu_items(host, &data, furnace);
+    let view = ViewState::read(host, storage, furnace, &data);
+    let items = view.items(host, &data, furnace);
+    let rows = (items.len() / 9) as u8;
     let title = Text::literal(furnace.title);
     let opened = match entity {
-        Some(entity) if !storage.plain => {
-            host.open_block_inventory_menu(player, entity, 5, title, items, MenuReplace::CloseFirst)
-        }
+        Some(entity) if !storage.plain => host.open_block_inventory_menu(
+            player,
+            entity,
+            rows,
+            title,
+            items,
+            MenuReplace::CloseFirst,
+        ),
         None if storage.plain => host.open_inventory_menu_at(
             player,
             level,
             pos,
-            5,
+            rows,
             title,
             items,
             MenuReplace::CloseFirst,
@@ -480,9 +619,9 @@ pub(crate) fn open(
         _ => return true,
     };
     if let Ok(Some(window)) = opened {
-        let mut backing = vec![MenuSlotPlace::Decoration; 45];
-        for (slot, &menu_slot) in MENU_SLOTS[..furnace.slot_count()].iter().enumerate() {
-            let allow_insert = !OUTPUT.contains(&slot);
+        let mut backing = vec![MenuSlotPlace::Decoration; usize::from(rows) * 9];
+        for (slot, &menu_slot) in furnace.menu_slots().iter().enumerate() {
+            let allow_insert = furnace.input_slot(slot);
             backing[menu_slot] = match entity {
                 Some(entity) => MenuSlotPlace::BlockEntityItems {
                     entity,
@@ -508,7 +647,7 @@ pub(crate) fn open(
                     storage,
                     entity,
                     window,
-                    remaining: remaining(&data),
+                    view,
                 },
             );
         }
@@ -528,6 +667,9 @@ fn menu_items(
     data: &Compound,
     furnace: ElectricMachine,
 ) -> Vec<Option<ItemStack>> {
+    if furnace.reactor_menu() {
+        return reactors::menu_items(host, data, furnace);
+    }
     let mut items = vec![None; 45];
     let (background, input_border) = if furnace.is_smeltery() {
         (SMELTERY_BACKGROUND, SMELTERY_INPUT_BORDER)
@@ -588,6 +730,7 @@ fn menu_items(
                 RecipeFamily::OilPump | RecipeFamily::FluidPump => {
                     ("minecraft:diamond_shovel", 1560)
                 }
+                RecipeFamily::Reactor(_) | RecipeFamily::ReactorPort => return items,
             };
             let mut bar = display_item(host, icon, &format!("{progress}%"));
             if let Some(stack) = &mut bar {
@@ -1176,7 +1319,11 @@ fn find_recipe(
             }),
             false,
         ),
-        RecipeFamily::Fuel(_) | RecipeFamily::Advanced(_) | RecipeFamily::FluidPump => None,
+        RecipeFamily::Fuel(_)
+        | RecipeFamily::Advanced(_)
+        | RecipeFamily::FluidPump
+        | RecipeFamily::Reactor(_)
+        | RecipeFamily::ReactorPort => None,
     }?;
     fits_all(host, data, &run.outputs).then_some(run)
 }
@@ -1469,9 +1616,10 @@ pub(crate) fn prepare_paper_inventory(
     }
     let mut restored = Compound::new();
     for (paper_slot, stack) in items {
-        let Some(index) = SLOTS[..machine.slot_count()]
+        let Some(index) = machine
+            .menu_slots()
             .iter()
-            .position(|slot| slot.parse::<u32>() == Ok(paper_slot))
+            .position(|&slot| slot as u32 == paper_slot)
         else {
             return Err(format!(
                 "Unexpected electric machine inventory slot {paper_slot}."

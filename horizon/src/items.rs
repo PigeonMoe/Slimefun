@@ -866,6 +866,13 @@ pub(crate) fn network_item(id: &str) -> Option<Kind> {
     .or_else(|| crate::advanced_processing::machine(id).map(|spec| spec.item))
     .or_else(|| crate::thermal_machines::item(id))
     .or_else(|| crate::geology::network_item(id))
+    .or_else(|| crate::factory::reactors::reactor(id).map(|spec| spec.item))
+    .or_else(|| {
+        use crate::factory::reactors::{NEPTUNIUM, REACTOR_ACCESS_PORT};
+        [NEPTUNIUM, REACTOR_ACCESS_PORT]
+            .into_iter()
+            .find(|kind| kind.id() == id)
+    })
     .or_else(|| {
         use crate::network_runtime::trash::{PORTABLE_DUSTBIN, TRASH_CAN_BLOCK};
         [PORTABLE_DUSTBIN, TRASH_CAN_BLOCK]

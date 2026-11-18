@@ -24,6 +24,7 @@ pub(super) enum Status {
     CargoConflict,
     EnergyConflict,
     Energy { supply: u64, demand: u64 },
+    ReactorCooling(u32),
 }
 
 impl Status {
@@ -38,6 +39,17 @@ impl Status {
             Self::CargoConflict => single_label("Multiple Cargo Regulators connected", "dark_red"),
             Self::EnergyConflict => {
                 single_label("Multiple Energy Regulators connected", "dark_red")
+            }
+            Self::ReactorCooling(percent) => {
+                let percent = if percent == 100 {
+                    "100%".into()
+                } else {
+                    format!("{percent}.0%")
+                };
+                (
+                    format!("❄ {percent}"),
+                    color("❄ ", "aqua", false).append(color(percent, "gray", false)),
+                )
             }
             Self::Energy { supply, demand } => {
                 let (sign, prefix, number) = if supply < demand {

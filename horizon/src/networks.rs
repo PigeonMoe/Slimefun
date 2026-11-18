@@ -26,6 +26,7 @@ pub(crate) enum Component {
     CargoManager,
     CargoConnector,
     TrashCan,
+    ReactorPort,
     CargoInput,
     CargoOutput {
         advanced: bool,
@@ -45,7 +46,14 @@ impl Component {
                 carrier: generator.item.material(),
             });
         }
+        if let Some(reactor) = crate::factory::reactors::reactor(id) {
+            return Some(Self::FuelGenerator {
+                capacity: reactor.capacity,
+                carrier: reactor.item.material(),
+            });
+        }
         Some(match id {
+            "REACTOR_ACCESS_PORT" => Self::ReactorPort,
             "TRASH_CAN_BLOCK" => Self::TrashCan,
             "GPS_GEO_SCANNER" => Self::GeoScanner,
             "CRUCIBLE" => Self::ManualCrucible,
@@ -153,6 +161,7 @@ impl Component {
             Self::CargoManager => "Cargo manager | Paper connection range 5".into(),
             Self::CargoConnector => "Cargo connector | Paper connection range 5".into(),
             Self::TrashCan => "Trash can | Seven input slots".into(),
+            Self::ReactorPort => "Reactor Access Port | Three blocks above a Reactor".into(),
             Self::CargoInput => cargo_terminal("Cargo input", metadata),
             Self::CargoOutput { advanced: false } => cargo_terminal("Cargo output", metadata),
             Self::CargoOutput { advanced: true } => {
