@@ -1,0 +1,11 @@
+# ItemMeta from https://github.com/PaperMC/Paper/issues/3950
+preset: ELECTRIC_FURNACE
+'19':
+  ==: org.bukkit.inventory.ItemStack
+  v: 2567
+  type: PLAYER_HEAD
+  meta:
+    ==: ItemMeta
+    meta-type: SKULL
+    skull-owner: DerFrZocker
+    internal: H4sIAAAAAAAAAONiYOBi4AnOLs3JCSjKT8vMSeVgYPFLzE1l4HZJLXIrispPzk4t4mZg8kxhYGBg0VzCos262qdoSkLV4q3pL24xMAAApa5iAEEAAAA=

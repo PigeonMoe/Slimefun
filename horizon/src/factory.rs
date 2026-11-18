@@ -1166,6 +1166,57 @@ mod tests {
     use mod_api::testing::FakeHost;
 
     #[test]
+    fn paper_restore_rolls_back_and_cannot_refill_a_consumed_slot() {
+        let mut host = FakeHost::new();
+        let level = host.level.level();
+        let pos = [1, 64, 2];
+        let id = "ELECTRIC_FURNACE";
+        let storage = ElectricMachine::for_item(id).unwrap().storage(level, pos);
+        host.level.block_entity(pos);
+        host.attachments.read_saved_over(Compound::from([(
+            "slimefun".into(),
+            Tag::Compound(Compound::from([(
+                "network_state".into(),
+                Tag::Compound(Compound::from([(
+                    "value".into(),
+                    Tag::Compound(Compound::from([
+                        ("id".into(), Tag::String(id.into())),
+                        ("charge".into(), Tag::Int(20)),
+                    ])),
+                )])),
+            )])),
+        )]));
+        let material = Identifier::parse("minecraft:iron_ingot").unwrap();
+        host.registries.resolve_items([material.clone()]).unwrap();
+        let item = (&host as &dyn Host).item_key(&material).unwrap();
+        let ingot = ItemStack::new(item, 1).unwrap();
+        let slots = BTreeMap::from([(24, ingot.clone())]);
+        let mut invalid = slots.clone();
+        invalid.insert(26, ingot);
+
+        let original = host.attachments.to_nbt();
+        assert!(prepare_paper_inventory(&mut host, level, pos, id, invalid).is_err());
+        assert_eq!(host.attachments.to_nbt(), original);
+
+        let prepared = prepare_paper_inventory(&mut host, level, pos, id, slots).unwrap();
+        let failure = host.transaction(|host, _| {
+            restore_paper_inventory(host, level, pos, id, prepared.clone()).unwrap();
+            Err::<(), _>("abort after the Paper inventory was written")
+        });
+        assert!(failure.is_err());
+        assert_eq!(host.attachments.to_nbt(), original);
+
+        restore_paper_inventory(&mut host, level, pos, id, prepared.clone()).unwrap();
+        let mut current = data_at(&mut host, storage).unwrap();
+        assert!(current.remove(&"24".into()).is_some());
+        assert!(save(&mut host, storage, current.clone()));
+
+        restore_paper_inventory(&mut host, level, pos, id, prepared).unwrap();
+        assert!(restore_paper_inventory(&mut host, level, pos, id, Compound::new()).is_err());
+        assert_eq!(data_at(&mut host, storage), Some(current));
+    }
+
+    #[test]
     fn furnace_slots_preserve_input_and_check_both_output_stacks() {
         let mut host = FakeHost::new();
         let identifiers = [

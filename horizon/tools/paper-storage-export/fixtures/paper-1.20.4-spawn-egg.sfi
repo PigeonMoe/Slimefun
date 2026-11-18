@@ -1,0 +1,10 @@
+# Internal ItemMeta from https://github.com/PaperMC/Paper/issues/11423
+preset: ELECTRIC_FURNACE
+'24':
+  ==: org.bukkit.inventory.ItemStack
+  v: 3700
+  type: MAGMA_CUBE_SPAWN_EGG
+  meta:
+    ==: ItemMeta
+    meta-type: SPAWN_EGG
+    internal: H4sIAAAAAAAA/+NiYOBi4HbKLy6O90sqCUlM52BgB/PCTBi4fBLLEn1Ki7JTixgYADZ7h3UpAAAA

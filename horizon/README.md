@@ -107,7 +107,9 @@ python3 horizon/tools/import-block-storage.py \
 
 `/sf storage restore-chunk minecraft:overworld -1 64 -17` 按位置顺序恢复指定区块已支持的方块，每批 32 条。命令会列出拒绝恢复的坐标和原因。剩余批次可使用输出中的偏移量继续，未移植的方块仍保存在原档案中。
 
-旧式库存可先用 [Paper 存档导出工具](tools/paper-storage-export/build.sh) 转换。用 JDK 25 构建，`PAPER_EXPORT_CLASSPATH` 填 Paper 26.2 API 和依赖 JAR 的 classpath。将生成的 JAR 装到 Paper 26.2 测试服，在本地控制台执行 `sf-export-inventories paper-snapshot normalized-snapshot`。工具会由 Paper 读取旧物品，并写到单独的新目录，任何槽位无法读取时保留原快照。将转换后的 `normalized-snapshot` 作为导入脚本的输入。脚本同时归档 `universal-inventories` 和 `Players/*.yml` 中的背包，保留菜单名、背包所有者 UUID、编号和容量。这两类档案仍待接入 Horizon 的游戏内背包和共享菜单。
+旧式库存可先用 [Paper 存档导出工具](tools/paper-storage-export/build.sh) 转换。用 JDK 25 在临时目录执行 `java -Dpaperclip.patchonly=true -jar /path/to/paper-26.2.jar`，解包 Paper 26.2 及其依赖。将 `versions/26.2/paper-26.2.jar` 与 `libraries/` 内每个 JAR 的绝对路径用冒号连接，填入 `PAPER_EXPORT_CLASSPATH`。执行 `build.sh /path/to/exporter.jar` 构建，或执行 `build.sh --test` 核验历史 ItemMeta 和失败回滚。解包和测试只加载 Paper 的注册表与物品编码器。
+
+将生成的 JAR 装到 Paper 26.2，在本地控制台执行 `sf-export-inventories paper-snapshot normalized-snapshot`。工具保留旧头颅的所有者 UUID 和旧刷怪蛋中的插件 NBT。遇到无法保留的字段会报告文件与槽位，原快照可用于重试。将 `normalized-snapshot` 作为 Horizon 导入脚本的输入。脚本同时归档 `universal-inventories` 和 `Players/*.yml` 中的背包，保留菜单名、背包所有者 UUID、编号和容量。这两类档案仍待接入 Horizon 的游戏内背包和共享菜单。
 
 `/sf storage restore-network minecraft:overworld -1 64 -17` 激活已导入的网络节点。也可以在增强工作台制作网络节点并直接放置。能源调节器和连接器可将露天太阳能发电机、电容和电力机器相连。电容电量随方块实体保存，`inspect` 同时显示 Paper 档案电量和当前电量。
 

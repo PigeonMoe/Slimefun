@@ -13,7 +13,6 @@ import java.util.Set;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 import org.bukkit.command.ConsoleCommandSender;
-import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.yaml.snakeyaml.LoaderOptions;
@@ -117,18 +116,21 @@ public final class PaperStorageExporter extends JavaPlugin {
         if (!(document.get("preset") instanceof String preset) || preset.isBlank()) {
             throw new IOException("The inventory has no Slimefun preset.");
         }
-        return normalizeSlots(input, readSlots(document, 54, true));
+        Map<?, ?> normalized = normalizeSlots(document, 54, "", true);
+        return normalized == document ? input : new Yaml().dump(normalized);
     }
 
     static String normalizePlayer(String input) throws Exception {
-        Object raw = readDocument(input).get("backpacks");
+        Map<?, ?> document = readDocument(input);
+        Object raw = document.get("backpacks");
         if (raw == null) {
             return input;
         }
         if (!(raw instanceof Map<?, ?> backpacks)) {
             throw new IOException("The player's backpacks must be a mapping.");
         }
-        Map<String, Map<?, ?>> slots = new LinkedHashMap<>();
+        Map<Object, Object> updated = new LinkedHashMap<>(backpacks);
+        boolean changed = false;
         Set<String> seen = new HashSet<>();
         for (var entry : backpacks.entrySet()) {
             String id = String.valueOf(entry.getKey());
@@ -145,33 +147,20 @@ public final class PaperStorageExporter extends JavaPlugin {
             if (!(contents instanceof Map<?, ?> inventory)) {
                 throw new IOException("Invalid contents for backpack " + id);
             }
-            for (var slot : readSlots(inventory, size, false).entrySet()) {
-                slots.put("backpacks." + id + ".contents." + slot.getKey(), slot.getValue());
+            Map<?, ?> normalized = normalizeSlots(inventory, size, "backpacks." + id + ".contents.", false);
+            if (normalized != inventory) {
+                Map<Object, Object> pack = new LinkedHashMap<>(data);
+                pack.put("contents", normalized);
+                updated.put(entry.getKey(), pack);
+                changed = true;
             }
         }
-        return normalizeSlots(input, slots);
-    }
-
-    private static String normalizeSlots(String input, Map<String, Map<?, ?>> slots) throws Exception {
-        if (slots.values().stream().allMatch(PaperStorageExporter::isComponentStack)) {
+        if (!changed) {
             return input;
         }
-        YamlConfiguration saved = new YamlConfiguration();
-        saved.loadFromString(input);
-        for (String slot : slots.keySet()) {
-            ItemStack stack = saved.getItemStack(slot);
-            if (stack == null) {
-                throw new IOException("Paper could not deserialize item slot " + slot);
-            }
-            if (!isComponentStack(stack.serialize())) {
-                throw new IOException("Paper did not write slot " + slot + " using item schema 1.");
-            }
-        }
-        return saved.saveToString();
-    }
-
-    private static boolean isComponentStack(Map<?, ?> item) {
-        return Integer.valueOf(1).equals(item.get("schema_version"));
+        Map<Object, Object> profile = new LinkedHashMap<>(document);
+        profile.put("backpacks", updated);
+        return new Yaml().dump(profile);
     }
 
     private static Map<?, ?> readDocument(String input) throws IOException {
@@ -189,9 +178,10 @@ public final class PaperStorageExporter extends JavaPlugin {
         return data;
     }
 
-    private static Map<String, Map<?, ?>> readSlots(Map<?, ?> data, int size, boolean isMenu)
-            throws IOException {
-        Map<String, Map<?, ?>> slots = new LinkedHashMap<>();
+    private static Map<?, ?> normalizeSlots(Map<?, ?> data, int size, String prefix, boolean isMenu)
+            throws Exception {
+        Map<Object, Object> normalized = new LinkedHashMap<>(data);
+        boolean changed = false;
         Set<String> seen = new HashSet<>();
         for (var entry : data.entrySet()) {
             String key = String.valueOf(entry.getKey());
@@ -209,8 +199,17 @@ public final class PaperStorageExporter extends JavaPlugin {
             if (!(value instanceof Map<?, ?> item) || !ITEM_CLASS.equals(item.get("=="))) {
                 throw new IOException("Slot " + key + " is not a serialized Bukkit ItemStack.");
             }
-            slots.put(key, item);
+            if (Integer.valueOf(1).equals(item.get("schema_version"))) {
+                continue;
+            }
+            try {
+                normalized.put(entry.getKey(), PaperLegacyItem.normalize(item));
+                changed = true;
+            } catch (Exception failure) {
+                throw new IOException("Could not export item slot " + prefix + key + ". "
+                        + failure.getMessage(), failure);
+            }
         }
-        return slots;
+        return changed ? normalized : data;
     }
 }
