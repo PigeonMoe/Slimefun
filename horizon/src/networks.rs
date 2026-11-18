@@ -66,6 +66,12 @@ impl Component {
                 carrier: generator.item.material(),
             });
         }
+        if let Some(machine) = crate::factory::animal_machines::machine(id) {
+            return Some(Self::ElectricMachine {
+                capacity: crate::factory::animal_machines::CAPACITY,
+                carrier: machine.item.material(),
+            });
+        }
         if let Some(reactor) = crate::factory::reactors::reactor(id) {
             return Some(Self::FuelGenerator {
                 capacity: reactor.capacity,

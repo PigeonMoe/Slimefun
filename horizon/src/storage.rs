@@ -656,6 +656,8 @@ mod tests {
             "BOOK_BINDER",
             "LAVA_GENERATOR_2",
             "BIO_REACTOR",
+            "AUTO_BREEDER",
+            "ANIMAL_GROWTH_ACCELERATOR",
             "CARGO_NODE_INPUT",
             "CARGO_NODE_OUTPUT_ADVANCED",
         ] {

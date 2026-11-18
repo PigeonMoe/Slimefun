@@ -30,6 +30,8 @@ use crate::{
     research,
 };
 
+#[path = "animal_machines.rs"]
+pub(crate) mod animal_machines;
 #[path = "assemblers.rs"]
 pub(crate) mod assemblers;
 #[path = "charging_bench.rs"]
@@ -130,6 +132,7 @@ enum RecipeFamily {
     FluidPump,
     ExperienceCollector,
     ProduceCollector,
+    AnimalMachine,
     TreeGrowthAccelerator,
     Assembler(&'static assemblers::Assembler),
     Reactor(&'static reactors::Reactor),
@@ -335,6 +338,18 @@ impl ElectricMachine {
                 work_ticks: 0,
                 research: assembler.research,
                 family: RecipeFamily::Assembler(assembler),
+                speed: 1,
+            });
+        }
+        if let Some(machine) = animal_machines::machine(id) {
+            return Some(Self {
+                id: machine.item.id(),
+                carrier: machine.item.material(),
+                title: machine.title,
+                cost: machine.cost,
+                work_ticks: 0,
+                research: machine.research,
+                family: RecipeFamily::AnimalMachine,
                 speed: 1,
             });
         }
@@ -586,7 +601,7 @@ impl ElectricMachine {
         if matches!(self.family, RecipeFamily::ExperienceCollector) {
             return experience_collector::MENU_SLOTS;
         }
-        if matches!(self.family, RecipeFamily::TreeGrowthAccelerator) {
+        if self.feeding_menu() {
             return tree_growth::MENU_SLOTS;
         }
         if self.reactor_menu() {
@@ -613,13 +628,20 @@ impl ElectricMachine {
         ) {
             return false;
         }
-        if matches!(self.family, RecipeFamily::TreeGrowthAccelerator) {
+        if self.feeding_menu() {
             return index < tree_growth::MENU_SLOTS.len();
         }
         if self.reactor_menu() {
             return index < 6;
         }
         !OUTPUT.contains(&index)
+    }
+
+    fn feeding_menu(self) -> bool {
+        matches!(
+            self.family,
+            RecipeFamily::TreeGrowthAccelerator | RecipeFamily::AnimalMachine
+        )
     }
 
     fn slot_keys(self) -> &'static [&'static str] {
@@ -640,6 +662,7 @@ impl ElectricMachine {
 }
 
 pub(crate) fn register(registrar: &mut dyn mod_api::Registrar) {
+    animal_machines::register(registrar);
     tree_growth::register(registrar);
     for material in [
         "minecraft:furnace",
@@ -800,7 +823,9 @@ fn menu_items(
     }
     let small_menu_pane = match furnace.family {
         RecipeFamily::ExperienceCollector => Some("minecraft:purple_stained_glass_pane"),
-        RecipeFamily::TreeGrowthAccelerator => Some("minecraft:cyan_stained_glass_pane"),
+        RecipeFamily::TreeGrowthAccelerator | RecipeFamily::AnimalMachine => {
+            Some("minecraft:cyan_stained_glass_pane")
+        }
         _ => None,
     };
     if let Some(pane) = small_menu_pane {
@@ -914,6 +939,7 @@ fn progress_item(host: &dyn Host, data: &Compound, furnace: ElectricMachine) -> 
                 | RecipeFamily::ReactorPort
                 | RecipeFamily::Assembler(_)
                 | RecipeFamily::TreeGrowthAccelerator
+                | RecipeFamily::AnimalMachine
                 | RecipeFamily::ExperienceCollector => return None,
             };
             let mut bar = display_item(host, icon, &format!("{progress}%"));
@@ -1525,6 +1551,7 @@ fn find_recipe(
         | RecipeFamily::ExperienceCollector
         | RecipeFamily::ProduceCollector
         | RecipeFamily::TreeGrowthAccelerator
+        | RecipeFamily::AnimalMachine
         | RecipeFamily::Assembler(_)
         | RecipeFamily::Reactor(_)
         | RecipeFamily::ReactorPort => None,
@@ -1993,6 +2020,75 @@ pub(crate) fn restore_paper_inventory(
 mod tests {
     use super::*;
     use mod_api::testing::FakeHost;
+
+    #[test]
+    fn animal_machines_keep_the_paper_seven_input_layout_and_crafting() {
+        use crate::{items, networks::Component, recipes};
+
+        let host = recipe_host(["minecraft:cyan_stained_glass_pane"]);
+        for (spec, cost, research, recipe) in [
+            (
+                "AUTO_BREEDER",
+                60,
+                25,
+                [
+                    Some("GOLD_18K"),
+                    Some("CAN"),
+                    Some("GOLD_18K"),
+                    Some("ELECTRIC_MOTOR"),
+                    Some("minecraft:hay_block"),
+                    Some("ELECTRIC_MOTOR"),
+                    Some("LEAD_INGOT"),
+                    Some("FOOD_FABRICATOR"),
+                    Some("LEAD_INGOT"),
+                ],
+            ),
+            (
+                "ANIMAL_GROWTH_ACCELERATOR",
+                14,
+                32,
+                [
+                    None,
+                    Some("BLISTERING_INGOT_3"),
+                    None,
+                    Some("ELECTRIC_MOTOR"),
+                    Some("ORGANIC_FOOD_WHEAT"),
+                    Some("ELECTRIC_MOTOR"),
+                    Some("REINFORCED_ALLOY_INGOT"),
+                    Some("AUTO_BREEDER"),
+                    Some("REINFORCED_ALLOY_INGOT"),
+                ],
+            ),
+        ] {
+            assert!(items::network_item(spec).is_some());
+            assert!(matches!(
+                Component::for_item(spec),
+                Some(Component::ElectricMachine {
+                    capacity: 1024,
+                    carrier: "minecraft:hay_block"
+                })
+            ));
+            let craft = recipes::crafting()
+                .find(|recipe| recipe.output.kind.id() == spec)
+                .unwrap();
+            assert_eq!(craft.inputs.map(|kind| kind.map(Kind::id)), recipe);
+            let machine = ElectricMachine::for_item(spec).unwrap();
+            assert_eq!(machine.cost, cost);
+            assert_eq!(machine.research.cost, research);
+            assert_eq!(machine.menu_slots(), [10, 11, 12, 13, 14, 15, 16]);
+            assert!((0..7).all(|slot| machine.input_slot(slot)));
+            assert!(!machine.input_slot(7));
+            let menu = menu_items(&host, &Compound::new(), machine);
+            assert_eq!(menu.len(), 27);
+            assert_eq!(
+                menu.iter()
+                    .enumerate()
+                    .filter_map(|(slot, item)| item.is_none().then_some(slot))
+                    .collect::<Vec<_>>(),
+                machine.menu_slots(),
+            );
+        }
+    }
 
     #[test]
     fn geo_miner_reads_every_output_without_exposing_an_input() {

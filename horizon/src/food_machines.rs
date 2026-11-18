@@ -102,9 +102,11 @@ macro_rules! produce {
     }};
 }
 
+pub(crate) const WHEAT: Produce = produce!("wheat", ORGANIC_FOOD_WHEAT, FERTILIZER_WHEAT, "Wheat");
+
 // The Fabricator and Composter register the same crops in the same order.
 pub(crate) const PRODUCE: &[Produce] = &[
-    produce!("wheat", ORGANIC_FOOD_WHEAT, FERTILIZER_WHEAT, "Wheat"),
+    WHEAT,
     produce!("carrot", ORGANIC_FOOD_CARROT, FERTILIZER_CARROT, "Carrots"),
     produce!("potato", ORGANIC_FOOD_POTATO, FERTILIZER_POTATO, "Potatoes"),
     produce!("wheat_seeds", ORGANIC_FOOD_SEEDS, FERTILIZER_SEEDS, "Seeds"),

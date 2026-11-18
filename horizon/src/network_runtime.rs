@@ -13,7 +13,9 @@ use mod_api::{
 };
 
 use crate::{
-    factory::{assemblers, experience_collector, fluid_pump, reactors, tree_growth},
+    factory::{
+        animal_machines, assemblers, experience_collector, fluid_pump, reactors, tree_growth,
+    },
     geology,
     items::{item_id, network_item},
     machine::Settings,
@@ -1087,6 +1089,20 @@ pub(crate) fn tick(
                 });
                 if crafted.is_ok() {
                     crate::auto_crafter::complete(host, level, pos);
+                }
+                continue;
+            }
+            if let Some(machine) = animal_machines::machine(&node.id) {
+                let feeding = host.transaction(|host, tx| {
+                    let mut data = block_data(host, level, pos).ok_or(())?;
+                    data.charge = data.charge.checked_sub(machine.cost).ok_or(())?;
+                    let feeding = machine.stage(host, tx, level, pos)?;
+                    write_data(host, pos, data).map_err(|_| ())?;
+                    feeding.apply(host)?;
+                    Ok::<_, ()>(feeding)
+                });
+                if let Ok(feeding) = feeding {
+                    feeding.particles(host, level);
                 }
                 continue;
             }

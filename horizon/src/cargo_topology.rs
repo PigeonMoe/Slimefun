@@ -222,7 +222,7 @@ enum InventoryKind {
     ReactorPort,
     ExperienceCollector,
     GeoMiner,
-    TreeGrowthAccelerator,
+    InputOnly,
     Assembler(&'static crate::factory::assemblers::Assembler),
     Factory { smeltery: bool },
     Smelter(&'static str),
@@ -253,7 +253,7 @@ impl InventoryKind {
             Self::ReactorPort => 6.min(size)..7.min(size),
             Self::ExperienceCollector => 0..3.min(size),
             Self::GeoMiner => 0..size,
-            Self::TreeGrowthAccelerator => 0..0,
+            Self::InputOnly => 0..0,
             Self::Assembler(_) => 0..0,
             Self::Factory { .. } => 2..4.min(size),
             Self::Smelter(_) => 2..3.min(size),
@@ -274,7 +274,7 @@ impl InventoryKind {
                 }
             }
             Self::ExperienceCollector | Self::GeoMiner => 0..0,
-            Self::TreeGrowthAccelerator => 0..size,
+            Self::InputOnly => 0..size,
             Self::Assembler(spec) => {
                 let carrier = stack.item().id(host);
                 let slots = if carrier == spec.head.kind.material() {
@@ -375,8 +375,10 @@ fn attached_inventory(
         if id == crate::geology::GEO_MINER.id() {
             return Some((pos, InventoryKind::GeoMiner));
         }
-        if id == crate::factory::tree_growth::TREE_GROWTH_ACCELERATOR.id() {
-            return Some((pos, InventoryKind::TreeGrowthAccelerator));
+        if id == crate::factory::tree_growth::TREE_GROWTH_ACCELERATOR.id()
+            || crate::factory::animal_machines::machine(&id).is_some()
+        {
+            return Some((pos, InventoryKind::InputOnly));
         }
         if let Some(spec) = crate::factory::assemblers::by_id(&id) {
             return Some((pos, InventoryKind::Assembler(spec)));
