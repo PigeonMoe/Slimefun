@@ -235,6 +235,7 @@ impl Node {
             | Component::EnergyConnector
             | Component::Capacitor(_)
             | Component::ElectricMachine { .. }
+            | Component::FuelGenerator { .. }
             | Component::SolarGenerator { .. } => Network::Energy,
             _ => Network::Cargo,
         }
@@ -261,11 +262,14 @@ impl Node {
         };
         let expected = match self.component {
             Component::SolarGenerator { .. } => ["minecraft:daylight_detector"; 2],
-            Component::ElectricMachine {
-                carrier: "minecraft:player_head",
-                ..
-            } => ["minecraft:player_head", "minecraft:player_wall_head"],
-            Component::ElectricMachine { carrier, .. } => [carrier; 2],
+            Component::ElectricMachine { carrier, .. }
+            | Component::FuelGenerator { carrier, .. } => {
+                if carrier == "minecraft:player_head" {
+                    ["minecraft:player_head", "minecraft:player_wall_head"]
+                } else {
+                    [carrier; 2]
+                }
+            }
             Component::CargoInput | Component::CargoOutput { .. } => {
                 ["minecraft:player_wall_head"; 2]
             }
@@ -416,7 +420,9 @@ fn imported(id: &str, metadata: &toml::Table) -> Result<(Node, BlockData), &'sta
         ..BlockData::default()
     };
     match component {
-        Component::Capacitor(capacity) | Component::ElectricMachine { capacity, .. } => {
+        Component::Capacitor(capacity)
+        | Component::ElectricMachine { capacity, .. }
+        | Component::FuelGenerator { capacity, .. } => {
             data.charge = field("energy-charge")
                 .unwrap_or("0")
                 .parse::<u32>()
@@ -518,7 +524,7 @@ pub(crate) fn factory_identity(
     let data = block_data(host, level, pos)?;
     matches!(
         Component::for_item(&data.id),
-        Some(Component::ElectricMachine { .. })
+        Some(Component::ElectricMachine { .. } | Component::FuelGenerator { .. })
     )
     .then_some(data.id)
 }
@@ -555,7 +561,10 @@ fn write_data(
 }
 
 fn is_plain_machine(component: Component) -> bool {
-    matches!(component, Component::ElectricMachine { carrier, .. } if is_plain_carrier(carrier))
+    matches!(
+        component, Component::ElectricMachine { carrier, .. } | Component::FuelGenerator { carrier, .. }
+            if is_plain_carrier(carrier)
+    )
 }
 
 pub(crate) fn tick(
@@ -664,46 +673,47 @@ fn tick_energy(
     let day = time.is_some_and(|time| !(12_300..=23_850).contains(&time))
         && level.is_raining(host) == Some(false)
         && level.is_thundering(host) == Some(false);
-    let mut available = 0u64;
-    for &pos in group {
-        let (node, charge) = active[&pos];
-        let energy = match node.component {
-            Component::Capacitor(capacity) => charge.min(capacity),
-            Component::SolarGenerator {
-                day: sun,
-                night: moon,
-            } if dimension == "minecraft:overworld"
-                && level.brightness(host, LightLayer::Sky, pos) == Some(15) =>
-            {
-                if day {
-                    sun
-                } else {
-                    moon
+    let _ = host.transaction(|host, tx| {
+        let mut available = 0u64;
+        for &pos in group {
+            let (node, charge) = active[&pos];
+            let energy = match node.component {
+                Component::Capacitor(capacity) => charge.min(capacity),
+                Component::FuelGenerator { capacity, .. } => {
+                    charge.min(capacity)
+                        + crate::factory::generate(host, tx, level, pos, &node.id, charge)?
                 }
-            }
-            _ => 0,
-        };
-        available += u64::from(energy);
-    }
-    let changes = capacity_updates(available, active, group);
-    if !changes.is_empty() {
-        let _ = host.transaction(|host, _| {
-            for (pos, stored) in changes {
-                let mut data = block_data(host, level, pos).ok_or(())?;
-                if data.id != active[&pos].0.id {
-                    return Err(());
-                }
-                if let Component::Capacitor(capacity) = active[&pos].0.component
-                    && capacitor_tier(data.charge, capacity) != capacitor_tier(stored, capacity)
+                Component::SolarGenerator {
+                    day: sun,
+                    night: moon,
+                } if dimension == "minecraft:overworld"
+                    && level.brightness(host, LightLayer::Sky, pos) == Some(15) =>
                 {
-                    set_capacitor_profile(host, level, pos, stored, capacity);
+                    if day {
+                        sun
+                    } else {
+                        moon
+                    }
                 }
-                data.charge = stored;
-                write_data(host, pos, data).map_err(|_| ())?;
+                _ => 0,
+            };
+            available += u64::from(energy);
+        }
+        for (pos, stored) in capacity_updates(available, active, group) {
+            let mut data = block_data(host, level, pos).ok_or(())?;
+            if data.id != active[&pos].0.id {
+                return Err(());
             }
-            Ok::<(), ()>(())
-        });
-    }
+            if let Component::Capacitor(capacity) = active[&pos].0.component
+                && capacitor_tier(data.charge, capacity) != capacitor_tier(stored, capacity)
+            {
+                set_capacitor_profile(host, level, pos, stored, capacity);
+            }
+            data.charge = stored;
+            write_data(host, pos, data).map_err(|_| ())?;
+        }
+        Ok::<(), ()>(())
+    });
 }
 
 fn capacitor_tier(charge: u32, capacity: u32) -> usize {
@@ -762,6 +772,17 @@ fn capacity_updates(
             }
         }
     }
+    // Paper fills generator buffers after capacitors from the same supply.
+    for &pos in group {
+        let (node, previous) = active[&pos];
+        if let Component::FuelGenerator { capacity, .. } = node.component {
+            let stored = available.min(u64::from(capacity)) as u32;
+            available -= u64::from(stored);
+            if stored != previous {
+                updates.push((pos, stored));
+            }
+        }
+    }
     updates
 }
 
@@ -772,6 +793,23 @@ mod tests {
 
     fn node(id: &str) -> Node {
         imported(id, &toml::Table::new()).unwrap().0
+    }
+
+    #[test]
+    fn a_paper_network_fills_consumers_then_capacitors_then_generator_buffers() {
+        let generator = node("LAVA_GENERATOR_2");
+        let machine = node("ELECTRIC_FURNACE");
+        let capacitor = node("SMALL_CAPACITOR");
+        let active = BTreeMap::from([
+            ([0, 70, 0], (&generator, 200)),
+            ([1, 70, 0], (&capacitor, 0)),
+            ([2, 70, 0], (&machine, 0)),
+        ]);
+        let group: Vec<_> = active.keys().copied().collect();
+        assert_eq!(
+            capacity_updates(220, &active, &group),
+            vec![([2, 70, 0], 64), ([1, 70, 0], 128), ([0, 70, 0], 28)]
+        );
     }
 
     #[test]

@@ -18,6 +18,7 @@ use crate::recipes::{
 };
 use crate::{
     electric_processing::{self, Family, MachineSpec},
+    fuel_generators::{self, Generator},
     gold_pan::PANS,
     items::{GOLD_PAN, Kind, PULVERIZED_ORE, PURE_ORE_CLUSTER, SALT, SIFTED_ORE},
     machine::{Settings, makeshift_recipe},
@@ -33,6 +34,7 @@ const OUTPUT: [usize; 2] = [2, 3];
 const PENDING: &str = "pending";
 const REMAINING: &str = "remaining";
 const TOTAL: &str = "total";
+const RETURNS_BUCKET: &str = "returns_bucket";
 const MAX_WORK_TICKS: i32 = 180;
 const IMPORT: &str = "paper_inventory_import";
 const MENU_SLOTS: [usize; 4] = [19, 20, 24, 25];
@@ -100,6 +102,7 @@ enum RecipeFamily {
     IngotPulverizer,
     HeatedPressure,
     Processing(&'static MachineSpec),
+    Fuel(&'static Generator),
 }
 
 #[derive(Clone, Copy)]
@@ -193,6 +196,18 @@ impl FactoryViewers {
 impl ElectricMachine {
     pub fn for_item(id: &str) -> Option<Self> {
         use RecipeFamily::{Furnace, HeatedPressure, IngotPulverizer, OreGrinder};
+        if let Some(spec) = fuel_generators::generator(id) {
+            return Some(Self {
+                id: spec.item.id(),
+                carrier: spec.item.material(),
+                title: spec.title,
+                cost: 0,
+                work_ticks: 0,
+                research: spec.research,
+                family: RecipeFamily::Fuel(spec),
+                speed: 1,
+            });
+        }
         if let Some(spec) = electric_processing::machine(id) {
             return Some(Self {
                 id: spec.item.id(),
@@ -466,6 +481,7 @@ fn menu_items(
                     Family::DustWasher => ("minecraft:golden_shovel", 31),
                     Family::IngotFactory => ("minecraft:flint_and_steel", 63),
                 },
+                RecipeFamily::Fuel(spec) => spec.progress_icon(),
             };
             let mut bar = display_item(host, icon, &format!("{progress}%"));
             if let Some(stack) = &mut bar {
@@ -978,6 +994,7 @@ fn find_recipe(
         RecipeFamily::Processing(spec) => {
             processing_recipe(host, data, &inputs, spec, settings, roll)
         }
+        RecipeFamily::Fuel(_) => None,
     }?;
     fits(host, data, &run.output).then_some(run)
 }
@@ -1052,6 +1069,71 @@ pub(crate) fn tick(
         save(host, storage, next).then_some(charge).ok_or(())
     })
     .ok()
+}
+
+/// Advance one generator when its regulator polls it. The caller journals
+/// both the fuel operation and delivery into the network buffers.
+pub(crate) fn generate(
+    host: &mut dyn ServerHost,
+    tx: &Transaction,
+    level: LevelRef,
+    pos: Position,
+    id: &str,
+    charge: u32,
+) -> Result<u32, ()> {
+    let machine = ElectricMachine::for_item(id).ok_or(())?;
+    let RecipeFamily::Fuel(generator) = machine.family else {
+        return Err(());
+    };
+    let storage = machine.storage(level, pos);
+    let mut data = data_at(host, storage).ok_or(())?;
+    let mut produced = 0;
+    match remaining(&data) {
+        Some(0) => {
+            if matches!(data.get(&RETURNS_BUCKET.into()), Some(Tag::Byte(1))) {
+                let bucket = Kind::Vanilla("minecraft:bucket").stack(host, 1).ok_or(())?;
+                let resource = ItemResource::of(&bucket);
+                // Paper's generator advances even if the output inventory is full.
+                for index in OUTPUT {
+                    if place(level, pos, index).insert(host, tx, &resource, 1) == 1 {
+                        break;
+                    }
+                }
+                data = data_at(host, storage).ok_or(())?;
+            }
+            data.remove(&RETURNS_BUCKET.into());
+            data.remove(&REMAINING.into());
+            data.remove(&TOTAL.into());
+        }
+        Some(remaining) => {
+            if generator.capacity.saturating_sub(charge) < generator.production {
+                return Ok(0);
+            }
+            data.insert(REMAINING.into(), Tag::Int(remaining as i32 - 1));
+            produced = generator.production;
+        }
+        None => {
+            let Some((index, stack, fuel)) = INPUT.into_iter().find_map(|index| {
+                let stack = stack_in(host, &data, index)?;
+                let fuel = generator.fuel(host, &stack)?;
+                Some((index, stack, fuel))
+            }) else {
+                return Ok(0);
+            };
+            if place(level, pos, index).extract(host, tx, &ItemResource::of(&stack), 1) != 1 {
+                return Err(());
+            }
+            data = data_at(host, storage).ok_or(())?;
+            let ticks = i32::try_from(fuel.ticks).map_err(|_| ())?;
+            data.insert(REMAINING.into(), Tag::Int(ticks));
+            data.insert(TOTAL.into(), Tag::Int(ticks));
+            data.insert(
+                RETURNS_BUCKET.into(),
+                Tag::Byte(i8::from(fuel.returns_bucket)),
+            );
+        }
+    }
+    save(host, storage, data).then_some(produced).ok_or(())
 }
 
 pub(crate) fn prepare_paper_inventory(
@@ -1164,6 +1246,32 @@ pub(crate) fn restore_paper_inventory(
 mod tests {
     use super::*;
     use mod_api::testing::FakeHost;
+
+    #[test]
+    fn a_fuel_generator_waits_for_space_without_advancing_its_burn() {
+        let mut host = FakeHost::new();
+        let level = host.level.level();
+        let pos = [3, 64, 2];
+        let id = "LAVA_GENERATOR";
+        let storage = ElectricMachine::for_item(id).unwrap().storage(level, pos);
+        host.level.block_entity(pos);
+        let burn = Compound::from([
+            (REMAINING.into(), Tag::Int(2)),
+            (TOTAL.into(), Tag::Int(80)),
+            (RETURNS_BUCKET.into(), Tag::Byte(1)),
+        ]);
+        assert!(save(&mut host, storage, burn.clone()));
+        let produced = host
+            .transaction(|host, tx| generate(host, tx, level, pos, id, 503))
+            .unwrap();
+        assert_eq!(produced, 0);
+        assert_eq!(data_at(&mut host, storage), Some(burn));
+        let produced = host
+            .transaction(|host, tx| generate(host, tx, level, pos, id, 502))
+            .unwrap();
+        assert_eq!(produced, 10);
+        assert_eq!(remaining(&data_at(&mut host, storage).unwrap()), Some(1));
+    }
 
     #[test]
     fn paper_restore_rolls_back_and_cannot_refill_a_consumed_slot() {

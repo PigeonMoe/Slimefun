@@ -14,6 +14,7 @@ mod circuits;
 mod compressor;
 mod electric_processing;
 mod factory;
+mod fuel_generators;
 mod gold_pan;
 mod hand_machine;
 mod heated_pressure;

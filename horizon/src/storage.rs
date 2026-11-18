@@ -286,6 +286,9 @@ fn at(
                 Component::Capacitor(capacity) => {
                     format!("Active capacitor | {charge} / {capacity} J")
                 }
+                Component::FuelGenerator { capacity, .. } => {
+                    format!("Active generator | {charge} / {capacity} J")
+                }
                 _ => "Network node active".into(),
             });
         }
@@ -302,6 +305,7 @@ fn has_restorable_menu(component: Option<Component>) -> bool {
         component,
         Some(
             Component::ElectricMachine { .. }
+                | Component::FuelGenerator { .. }
                 | Component::CargoInput
                 | Component::CargoOutput { advanced: true }
         )
@@ -338,7 +342,7 @@ fn restore_network(
     let mut networks = networks.lock().unwrap();
     if !matches!(
         Component::for_item(id),
-        Some(Component::ElectricMachine { .. })
+        Some(Component::ElectricMachine { .. } | Component::FuelGenerator { .. })
     ) {
         return networks.restore(host, level, pos, id, metadata, row);
     }
@@ -514,6 +518,8 @@ mod tests {
             "HEATED_PRESSURE_CHAMBER_2",
             "ELECTRIC_FURNACE_2",
             "ELECTRIC_ORE_GRINDER_3",
+            "LAVA_GENERATOR_2",
+            "BIO_REACTOR",
             "CARGO_NODE_INPUT",
             "CARGO_NODE_OUTPUT_ADVANCED",
         ] {

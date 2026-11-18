@@ -853,6 +853,15 @@ pub(crate) fn network_item(id: &str) -> Option<Kind> {
     .or_else(|| crate::network_recipes::network_item(id))
     .or_else(|| crate::heated_pressure::network_item(id))
     .or_else(|| crate::electric_processing::machine(id).map(|spec| spec.item))
+    .or_else(|| crate::fuel_generators::generator(id).map(|spec| spec.item))
+    .or_else(|| {
+        [
+            crate::fuel_generators::BUCKET_OF_FUEL,
+            crate::fuel_generators::STRANGE_NETHER_GOO,
+        ]
+        .into_iter()
+        .find(|item| item.id() == id)
+    })
 }
 
 item!(

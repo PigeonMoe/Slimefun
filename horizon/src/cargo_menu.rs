@@ -38,6 +38,7 @@ pub(crate) fn use_node(
     match component {
         Component::SolarGenerator { .. } => return true,
         Component::ElectricMachine { .. }
+        | Component::FuelGenerator { .. }
         | Component::EnergyRegulator
         | Component::EnergyConnector
         | Component::Capacitor(_)

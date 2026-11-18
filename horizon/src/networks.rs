@@ -10,6 +10,10 @@ pub(crate) enum Component {
         capacity: u32,
         carrier: &'static str,
     },
+    FuelGenerator {
+        capacity: u32,
+        carrier: &'static str,
+    },
     SolarGenerator {
         day: u32,
         night: u32,
@@ -24,6 +28,12 @@ pub(crate) enum Component {
 
 impl Component {
     pub(crate) fn for_item(id: &str) -> Option<Self> {
+        if let Some(generator) = crate::fuel_generators::generator(id) {
+            return Some(Self::FuelGenerator {
+                capacity: generator.capacity,
+                carrier: generator.item.material(),
+            });
+        }
         Some(match id {
             "ENERGY_REGULATOR" => Self::EnergyRegulator,
             "ENERGY_CONNECTOR" => Self::EnergyConnector,
@@ -102,6 +112,9 @@ impl Component {
             }
             Self::ElectricMachine { capacity, .. } => {
                 format!("Electric machine | Paper buffer {capacity} J")
+            }
+            Self::FuelGenerator { capacity, .. } => {
+                format!("Fuel generator | Paper buffer {capacity} J")
             }
             Self::CargoManager => "Cargo manager | Paper connection range 5".into(),
             Self::CargoConnector => "Cargo connector | Paper connection range 5".into(),
