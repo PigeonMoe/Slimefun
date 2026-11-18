@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package moe.pigeon.horizon.migration;
 
+import io.github.thebusybiscuit.slimefun4.core.services.sync.PaperSyncedProfiles;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
@@ -32,7 +33,10 @@ public final class PaperStorageExporter extends JavaPlugin {
             return false;
         }
         try {
-            Path output = exportSnapshot(Path.of(args[0]), Path.of(args[1]));
+            Path source = Path.of(args[0]);
+            Path destination = Path.of(args[1]);
+            Path output = command.getName().equals("sf-export-synced-profiles")
+                    ? exportSyncedProfiles(source, destination) : exportSnapshot(source, destination);
             sender.sendMessage("Exported the Slimefun snapshot to " + output);
         } catch (IOException | RuntimeException failure) {
             sender.sendMessage("Could not export the Slimefun snapshot. " + failure.getMessage());
@@ -41,6 +45,31 @@ public final class PaperStorageExporter extends JavaPlugin {
     }
 
     static Path exportSnapshot(Path sourcePath, Path outputPath) throws IOException {
+        return stageSnapshot(sourcePath, outputPath, (source, stage) -> {
+            if (!Files.isDirectory(source.resolve("stored-blocks"))
+                    && !Files.isDirectory(source.resolve("stored-inventories"))
+                    && !Files.isDirectory(source.resolve("universal-inventories"))
+                    && !Files.isDirectory(source.resolve("stored-chunks"))
+                    && !Files.isDirectory(source.resolve("Players"))) {
+                throw new IOException("The snapshot must include a Slimefun storage directory.");
+            }
+            copyDirectory(source, stage, "stored-blocks");
+            copyDirectory(source, stage, "stored-inventories");
+            copyDirectory(source, stage, "stored-chunks");
+            copyDirectory(source, stage, "universal-inventories");
+            copyDirectory(source, stage, "Players");
+        });
+    }
+
+    static Path exportSyncedProfiles(Path sourcePath, Path outputPath) throws IOException {
+        return stageSnapshot(sourcePath, outputPath, PaperSyncedProfiles::exportRows);
+    }
+
+    private interface SnapshotWriter {
+        void write(Path source, Path stage) throws IOException;
+    }
+
+    private static Path stageSnapshot(Path sourcePath, Path outputPath, SnapshotWriter writer) throws IOException {
         Path source = sourcePath.toRealPath();
         Path absolute = outputPath.toAbsolutePath().normalize();
         if (absolute.getParent() == null) {
@@ -54,19 +83,9 @@ public final class PaperStorageExporter extends JavaPlugin {
         if (Files.exists(output, LinkOption.NOFOLLOW_LINKS)) {
             throw new IOException("Output already exists: " + output);
         }
-        if (!Files.isDirectory(source.resolve("stored-inventories"))
-                && !Files.isDirectory(source.resolve("universal-inventories"))
-                && !Files.isDirectory(source.resolve("stored-chunks"))
-                && !Files.isDirectory(source.resolve("Players"))) {
-            throw new IOException("The snapshot must include a Slimefun inventory, chunk or Players directory.");
-        }
         Path stage = Files.createTempDirectory(parent, ".paper-storage-export-");
         try {
-            copyDirectory(source, stage, "stored-blocks");
-            copyDirectory(source, stage, "stored-inventories");
-            copyDirectory(source, stage, "stored-chunks");
-            copyDirectory(source, stage, "universal-inventories");
-            copyDirectory(source, stage, "Players");
+            writer.write(source, stage);
             return Files.move(stage, output);
         } finally {
             if (Files.exists(stage)) {

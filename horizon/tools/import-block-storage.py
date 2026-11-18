@@ -4,11 +4,15 @@
 
 import argparse
 from collections import defaultdict
+from contextlib import contextmanager
 import json
 from pathlib import Path
 import re
+import shutil
+import stat
 import tempfile
 from uuid import UUID
+from zipfile import BadZipFile, ZipFile
 
 import yaml
 
@@ -22,6 +26,9 @@ DIMENSION = re.compile(r"[a-z0-9_.-]+:[a-z0-9_./-]+\Z")
 COMPONENT = re.compile(r"!?[a-z0-9_.-]+:[a-z0-9_./-]+\Z")
 PAPER_ITEM_CLASS = "org.bukkit.inventory.ItemStack"
 DATA_FILE_MAX = 64 << 20  # Horizon DATA_FILE_MAX
+STORAGE_DIRECTORIES = (
+    "stored-blocks", "stored-inventories", "stored-chunks", "universal-inventories", "Players",
+)
 
 
 class UniqueYamlKeys(yaml.SafeLoader):
@@ -246,9 +253,10 @@ def collect_geo(source, mappings):
     return records
 
 
-def collect_backpacks(source):
+def collect_backpacks(source, profiles=None):
     records = {}
-    for file in sorted((source / "Players").glob("*.yml")):
+    directory = profiles if profiles is not None else source / "Players"
+    for file in sorted(directory.glob("*.yml")):
         try:
             owner = UUID(file.stem).hex
         except ValueError:
@@ -274,7 +282,7 @@ def collect_backpacks(source):
         except (ValueError, TypeError, yaml.YAMLError) as error:
             issues.append(str(error))
         if owner in records:
-            raise ValueError(f"{file.relative_to(source)}: More than one profile has this UUID.")
+            raise ValueError(f"{file}: More than one profile has this UUID.")
         records[owner] = {"paper_profile": raw, "backpacks": bags, "issues": issues}
     return records
 
@@ -407,14 +415,59 @@ def publish(output, records, universal=None, players=None, geo=None):
         stage.rename(output)
 
 
+def paper_backup_file(parts):
+    if len(parts) == 3 and parts[0] == "stored-blocks":
+        return parts[2].endswith(".sfb")
+    if len(parts) == 2 and parts[0] in {"stored-inventories", "universal-inventories"}:
+        return parts[1].endswith(".sfi")
+    return parts == ["stored-chunks", "chunks.sfc"]
+
+
+@contextmanager
+def paper_snapshot(source):
+    if source.is_dir():
+        if not any((source / name).is_dir() for name in STORAGE_DIRECTORIES):
+            raise ValueError("The directory does not contain a Paper Slimefun storage directory.")
+        yield source
+        return
+    if not source.is_file() or source.suffix.lower() != ".zip":
+        raise ValueError("Use a Paper Slimefun storage directory or a block-backups ZIP.")
+    with ZipFile(source) as archive, tempfile.TemporaryDirectory(prefix="slimefun-paper-backup-") as temp:
+        root = Path(temp)
+        paths = set()
+        for entry in archive.infolist():
+            parts = entry.filename.removesuffix("/").split("/")
+            if any(part in ("", ".", "..") or "\\" in part for part in parts):
+                raise ValueError(f"Invalid path in Paper backup: {entry.filename!r}.")
+            if entry.is_dir() or not paper_backup_file(parts):
+                continue
+            if stat.S_IFMT(entry.external_attr >> 16) not in (0, stat.S_IFREG):
+                raise ValueError(f"Nonregular file in Paper backup: {entry.filename!r}.")
+            if entry.flag_bits & 1:
+                raise ValueError(f"Encrypted file in Paper backup: {entry.filename!r}.")
+            path = root.joinpath(*parts)
+            if path in paths:
+                raise ValueError(f"Repeated file in Paper backup: {entry.filename!r}.")
+            paths.add(path)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with archive.open(entry) as src, path.open("xb") as dst:
+                shutil.copyfileobj(src, dst)
+        if not paths:
+            raise ValueError("The ZIP does not contain any Slimefun block backup records.")
+        yield root
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("paper_storage", type=Path)
     parser.add_argument("horizon_import_dir", type=Path)
     parser.add_argument("--map-world", action="append", default=[], metavar="PAPER=DIMENSION")
+    parser.add_argument("--player-profiles", type=Path, metavar="PLAYERS_DIRECTORY",
+                        help="explicitly replace the source Players directory with an exported snapshot")
     args = parser.parse_args()
     source = args.paper_storage.resolve()
     output = args.horizon_import_dir.resolve()
+    profiles = args.player_profiles.resolve() if args.player_profiles is not None else None
     worlds = dict(WORLDS)
     for pair in args.map_world:
         paper, separator, dimension = pair.partition("=")
@@ -422,19 +475,19 @@ def main():
                 or any(part in ("", ".", "..") for part in dimension.partition(":")[2].split("/"))):
             parser.error(f"Invalid world mapping {pair!r}.")
         worlds[paper] = dimension
-    if not any((source / name).is_dir() for name in (
-        "stored-blocks", "stored-inventories", "stored-chunks", "universal-inventories", "Players",
-    )):
-        parser.error("paper_storage must contain a Paper Slimefun storage directory.")
-    if output == source or output.is_relative_to(source) or source.is_relative_to(output):
-        parser.error("The import directory and Paper data must be separate.")
+    if profiles is not None and not profiles.is_dir():
+        parser.error("--player-profiles must point to an exported Players directory.")
+    for original in (source, profiles):
+        if original is not None and (output.is_relative_to(original) or original.is_relative_to(output)):
+            parser.error("The import directory and Paper data must be separate.")
     try:
-        records = collect(source, worlds)
-        universal = collect_universal(source)
-        players = collect_backpacks(source)
-        geo = collect_geo(source, worlds)
+        with paper_snapshot(source) as root:
+            records = collect(root, worlds)
+            universal = collect_universal(root)
+            players = collect_backpacks(root, profiles)
+            geo = collect_geo(root, worlds)
         publish(output, records, universal, players, geo)
-    except (OSError, ValueError) as error:
+    except (OSError, ValueError, BadZipFile) as error:
         parser.error(str(error))
     print(f"Prepared an import with {len(records)} block or inventory locations, "
           f"{len(universal)} universal inventories, {len(players)} backpack profiles, "

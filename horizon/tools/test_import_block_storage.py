@@ -4,9 +4,12 @@
 import importlib.util
 import json
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import tomllib
 import unittest
+from zipfile import ZIP_DEFLATED, ZipFile
 
 import yaml
 
@@ -15,9 +18,83 @@ MODULE_PATH = Path(__file__).with_name("import-block-storage.py")
 SPEC = importlib.util.spec_from_file_location("slimefun_storage_import", MODULE_PATH)
 IMPORT = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(IMPORT)
+RESEARCH_SPEC = importlib.util.spec_from_file_location(
+    "slimefun_research_import", MODULE_PATH.with_name("import-research.py"))
+RESEARCH = importlib.util.module_from_spec(RESEARCH_SPEC)
+RESEARCH_SPEC.loader.exec_module(RESEARCH)
 
 
 class BlockStorageTest(unittest.TestCase):
+    def test_imports_the_paper_backup_zip_with_authoritative_profiles_twice(self):
+        owner = "341da016-f646-4030-af46-6e652265fa34"
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profiles = root / "Players"
+            profiles.mkdir()
+            file = profiles / f"{owner}.yml"
+            file.write_text(yaml.safe_dump({
+                "pm-snapshot-revision": 18,
+                "pm-research-keys": ["addon:research", "slimefun:lumps"],
+                "researches": {31: True},
+                "backpacks": {"14": {"size": 9, "contents": {"7": {
+                    "==": "org.bukkit.inventory.ItemStack", "schema_version": 1,
+                    "id": "minecraft:diamond", "DataVersion": 5013, "count": 3,
+                    "components": {"minecraft:custom_data": '{example:"kept"}'},
+                }}}},
+            }))
+            zipped = root / "paper.zip"
+            with ZipFile(zipped, "w", compression=ZIP_DEFLATED) as archive:
+                archive.writestr("stored-blocks/world/CARGO_NODE_INPUT.sfb", yaml.safe_dump({
+                    "world;3;64;8": '{"id":"CARGO_NODE_INPUT"}',
+                }))
+                archive.writestr("stored-inventories/world;3;64;8.sfi", "preset: CARGO_NODE_INPUT\n")
+                archive.writestr("stored-chunks/chunks.sfc", yaml.safe_dump({
+                    "world;Chunk;0;0": '{"slimefun-oil":"0"}',
+                }))
+            archive_original = zipped.read_bytes()
+            destination = root / "storage-import"
+            command = [sys.executable, MODULE_PATH, zipped, destination, "--player-profiles", profiles]
+            subprocess.run(command, check=True, capture_output=True)
+            subprocess.run(command, check=True, capture_output=True)
+            self.assertEqual(zipped.read_bytes(), archive_original)
+            self.assertEqual(tomllib.loads((destination / "index.toml").read_text()), {
+                "format": 1, "blocks": 1, "inventories": 1, "chunks": 1, "backpacks": 1,
+                "geo_chunks": 1, "oil_reserves": 1,
+            })
+            converted = tomllib.loads((destination / "backpacks" / (owner.replace("-", "") + ".toml")).read_text())
+            self.assertEqual(converted["paper_profile"], file.read_text())
+            stack = converted["backpacks"][0]["paper_items"][0]
+            self.assertEqual((stack["slot"], stack["count"]), (7, 3))
+            research, unknown = RESEARCH.collect(profiles, {3: {"slimefun:lumps"}, 31: {"slimefun:cactus_armor"}})
+            self.assertFalse(unknown)
+            self.assertEqual(research, {owner.replace("-", ""): {"slimefun:lumps", "slimefun:cactus_armor"}})
+            research_output = root / "research-import"
+            RESEARCH.write_imports(research_output, research)
+            RESEARCH.write_imports(research_output, research)
+            player_key = owner.replace("-", "")
+            research_file = research_output / f"{player_key}.txt"
+            old = research_file.read_bytes()
+            another = "0" * 32
+            with self.assertRaisesRegex(ValueError, "Existing research import differs"):
+                RESEARCH.write_imports(research_output, {
+                    another: {"slimefun:lumps"}, player_key: {"slimefun:lumps"},
+                })
+            self.assertFalse((research_output / f"{another}.txt").exists())
+            self.assertEqual(research_file.read_bytes(), old)
+
+    def test_a_paper_backup_with_an_escaping_entry_publishes_nothing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            zipped = root / "paper.zip"
+            with ZipFile(zipped, "w") as archive:
+                archive.writestr("stored-inventories/world;3;64;8.sfi", "preset: CARGO_NODE_INPUT\n")
+                archive.writestr("../bad.sfi", "ignore")
+            output = root / "storage-import"
+            result = subprocess.run([sys.executable, MODULE_PATH, zipped, output], capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Invalid path in Paper backup", result.stderr)
+            self.assertFalse(output.exists())
+
     def test_backpack_archive_preserves_source_and_refuses_ambiguous_numeric_aliases(self):
         owner = "341da016-f646-4030-af46-6e652265fa34"
         original = """backpacks:

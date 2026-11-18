@@ -6,3 +6,6 @@ commands:
   sf-export-inventories:
     description: Normalize a Slimefun storage snapshot for Horizon
     usage: "/sf-export-inventories <source-snapshot> <new-output-directory>"
+  sf-export-synced-profiles:
+    description: Normalize committed PM-Sync Slimefun profiles from an offline SQL export
+    usage: "/sf-export-synced-profiles <exported-rows.tsv> <new-output-directory>"

@@ -1,11 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package moe.pigeon.horizon.migration;
 
+import io.github.thebusybiscuit.slimefun4.core.services.sync.PaperSyncedProfilesFixture;
 import java.io.IOException;
 import java.lang.reflect.Proxy;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.HexFormat;
+import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.logging.Logger;
 import net.minecraft.SharedConstants;
 import net.minecraft.commands.Commands;
@@ -17,12 +21,16 @@ import net.minecraft.server.permissions.LevelBasedPermissionSet;
 import net.minecraft.util.Util;
 import net.minecraft.world.level.WorldDataConfiguration;
 import org.bukkit.Bukkit;
+import org.bukkit.Material;
+import org.bukkit.NamespacedKey;
 import org.bukkit.Server;
 import org.bukkit.configuration.serialization.ConfigurationSerialization;
 import org.bukkit.craftbukkit.CraftRegistry;
 import org.bukkit.craftbukkit.inventory.CraftItemFactory;
 import org.bukkit.craftbukkit.inventory.SerializableMeta;
 import org.bukkit.craftbukkit.util.CraftMagicNumbers;
+import org.bukkit.inventory.ItemStack;
+import org.bukkit.persistence.PersistentDataType;
 import org.yaml.snakeyaml.Yaml;
 
 public final class PaperStorageExporterLegacyTest {
@@ -69,6 +77,66 @@ public final class PaperStorageExporterLegacyTest {
         if (!skull.equals(Files.readString(skullFile)) || !egg.equals(Files.readString(eggFile))) {
             throw new AssertionError("The source snapshot changed during export.");
         }
+
+        verifySyncedProfiles();
+    }
+
+    private static void verifySyncedProfiles() throws Exception {
+        UUID owner = UUID.fromString("8c0e7dd0-005e-48a5-9d49-28afb237bc91");
+        UUID wrong = UUID.fromString("fc514949-28a0-493e-8648-89a247186e15");
+        ItemStack paperItem = new ItemStack(Material.DIAMOND, 3);
+        NamespacedKey marker = new NamespacedKey("migration_fixture", "original");
+        paperItem.editMeta(meta -> meta.getPersistentDataContainer().set(marker, PersistentDataType.STRING, "saved"));
+        byte[] archived = PaperSyncedProfilesFixture.envelope(owner, paperItem.serializeAsBytes());
+        String row = sqlRow(owner, archived);
+        Path source = Path.of("snapshot.tsv");
+        Path output = Path.of("snapshot-exported");
+        Path repeated = Path.of("snapshot-repeated");
+        byte[] corrupt = archived.clone();
+        corrupt[10] ^= 1;
+        byte[] invalidItem = PaperSyncedProfilesFixture.envelope(wrong, new byte[] {1, 2, 3});
+        for (String invalid : List.of(row + sqlRow(owner, archived), sqlRow(wrong, archived),
+                sqlRow(owner, corrupt), row + sqlRow(wrong, invalidItem))) {
+            Files.writeString(source, invalid);
+            try {
+                PaperStorageExporter.exportSyncedProfiles(source, output);
+                throw new AssertionError("Invalid or conflicting SQL rows were published.");
+            } catch (IOException expected) {
+                if (!expected.getMessage().startsWith("PM-Sync row ") || Files.exists(output)
+                        || !invalid.equals(Files.readString(source))) {
+                    throw new AssertionError("The rejected PM-Sync export touched its input or destination.", expected);
+                }
+            }
+        }
+
+        Files.writeString(source, row);
+        PaperStorageExporter.exportSyncedProfiles(source, output);
+        PaperStorageExporter.exportSyncedProfiles(source, repeated);
+        Path profile = Path.of("Players", owner + ".yml");
+        if (Files.mismatch(output.resolve(profile), repeated.resolve(profile)) != -1) {
+            throw new AssertionError("An unchanged PM-Sync export published different bytes.");
+        }
+        Map<?, ?> exported = new Yaml().load(Files.readString(output.resolve(profile)));
+        Map<?, ?> bags = (Map<?, ?>) exported.get("backpacks");
+        Map<?, ?> bag = (Map<?, ?>) bags.get("14");
+        Map<?, ?> slots = (Map<?, ?>) bag.get("contents");
+        if (!row.equals(Files.readString(source)) || !Integer.valueOf(9).equals(bag.get("size"))
+                || !slots.keySet().equals(java.util.Set.of("7"))
+                || !List.of("addon:research", "slimefun:lumps").equals(exported.get("pm-research-keys"))
+                || !Map.of("31", true).equals(exported.get("researches"))) {
+            throw new AssertionError("The SQL export changed the owners, research or slot placement.");
+        }
+        Map<?, ?> stack = (Map<?, ?>) slots.get("7");
+        Map<?, ?> components = (Map<?, ?>) stack.get("components");
+        if (!Integer.valueOf(3).equals(stack.get("count"))
+                || !TagParser.parseCompoundFully((String) components.get("minecraft:custom_data")).equals(
+                        TagParser.parseCompoundFully("{PublicBukkitValues:{\"migration_fixture:original\":\"saved\"}}"))) {
+            throw new AssertionError("Native Paper ItemStack bytes lost their count or persistent data.");
+        }
+    }
+
+    private static String sqlRow(UUID owner, byte[] value) {
+        return owner + "\t18\t" + HexFormat.of().formatHex(value) + "\n";
     }
 
     private static void verifyRefused(Path source, Path result, String error, Path file, String original)

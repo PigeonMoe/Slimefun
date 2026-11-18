@@ -101,7 +101,7 @@ python3 horizon/tools/import-block-storage.py \
   /path/to/horizon-world/horizon-mod-data/slimefun/storage-import
 ```
 
-工具默认识别 `world`、`world_nether` 和 `world_the_end`。使用 `--map-world survival=minecraft:overworld` 指定其他世界名。原始 `.sfb` 和 `.sfi` 保持原样。导入目录已有不同数据时，工具会保留该目录并报错。使用旧版工具生成的目录需要先备份，再用新版工具重新生成。
+工具默认识别 `world`、`world_nether` 和 `world_the_end`。使用 `--map-world survival=minecraft:overworld` 指定其他世界名。也可以直接传入 Paper `block-backups` 生成的 ZIP 作为输入。原始 ZIP、`.sfb` 和 `.sfi` 保持原样。导入目录已有不同数据时，工具会保留该目录并报错。使用旧版工具生成的目录需要先备份，再用新版工具重新生成。
 
 二级及以上 OP 可用 `/sf storage` 查看统计，再使用 `/sf storage inspect minecraft:overworld -1 64 -17` 查看具体位置。对于已迁移且仍是普通箱子的输出箱，使用 `/sf storage restore-output minecraft:overworld -1 64 -17` 恢复路由标记，原有箱内物品保持原样。目标需位于当前维度的已加载区块。
 
@@ -112,6 +112,19 @@ python3 horizon/tools/import-block-storage.py \
 旧式库存可先用 [Paper 存档导出工具](tools/paper-storage-export/build.sh) 转换。用 JDK 25 在临时目录执行 `java -Dpaperclip.patchonly=true -jar /path/to/paper-26.2.jar`，解包 Paper 26.2 及其依赖。将 `versions/26.2/paper-26.2.jar` 与 `libraries/` 内每个 JAR 的绝对路径用冒号连接，填入 `PAPER_EXPORT_CLASSPATH`。执行 `build.sh /path/to/exporter.jar` 构建，或执行 `build.sh --test` 核验历史 ItemMeta 和失败回滚。解包和测试只加载 Paper 的注册表与物品编码器。
 
 将生成的 JAR 装到 Paper 26.2，在本地控制台执行 `sf-export-inventories paper-snapshot normalized-snapshot`。工具保留旧头颅的所有者 UUID 和旧刷怪蛋中的插件 NBT。遇到无法保留的字段会报告文件与槽位，原快照可用于重试。将 `normalized-snapshot` 作为 Horizon 导入脚本的输入。脚本同时归档 `universal-inventories` 和 `Players/*.yml` 中的背包，保留菜单名、背包所有者 UUID、编号和容量。
+
+启用过 PM-Sync 的 Paper 服务器使用 MariaDB/MySQL 中 `pmsync_state` 的已提交档案。停止源端写入并确认备份一致后，从该权威表的只读副本将以下查询导出为无表头、以制表符分隔的 UTF-8 文件 `pm-snapshots.tsv`。
+
+```sql
+SELECT player_uuid, revision, HEX(snapshot)
+FROM pmsync_state
+WHERE snapshot IS NOT NULL
+ORDER BY player_uuid;
+```
+
+在装有同一 Paper 导出工具的本地控制台执行 `sf-export-synced-profiles pm-snapshots.tsv normalized-pm`。工具校验 PM-Sync v2 和 Slimefun SFP1 的 SHA-256，再核对玩家 UUID，逐一用 Paper 恢复原槽物品组件。任意记录损坏会阻止整个新目录写入。此命令只读导出的文件，处理 Slimefun 背包和研究字段。仍需按对应迁移流程处理角色、末影箱及其他同步插件的数据。
+
+给方块导入脚本附加 `--player-profiles normalized-pm/Players`，可从同一时间点的方块快照或 ZIP 导入方块，并使用 PM-Sync 导出的背包。该参数指定唯一的玩家档案来源。研究通过 `import-research.py <Paper 配方目录 JSON> normalized-pm/Players <Horizon 研究导入目录>` 转换，保留原命名空间解锁并按原目录映射历史数字 ID。备份、PM-Sync 快照和导出的 Players 文件都应保留以供核对。
 
 二级及以上 OP 可执行 `/sf storage restore-universal TEST_SHARED` 恢复精确名称的共享库存，再执行 `/sf storage open-universal TEST_SHARED` 打开。相同预设的多个菜单会直接访问同一份存档，支持跨维度和重启，重复恢复不会补回已经取走的物品。扩展模组的物理方块权限、无线终端和装饰交互需由对应扩展定义。
 
