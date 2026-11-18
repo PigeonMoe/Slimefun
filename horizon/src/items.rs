@@ -859,6 +859,10 @@ pub(crate) fn network_item(id: &str) -> Option<Kind> {
     .or_else(|| crate::advanced_processing::machine(id).map(|spec| spec.item))
     .or_else(|| crate::thermal_machines::item(id))
     .or_else(|| crate::geology::network_item(id))
+    .or_else(|| {
+        let pump = crate::factory::fluid_pump::FLUID_PUMP;
+        (pump.id() == id).then_some(pump)
+    })
     .or_else(|| crate::fuel_generators::generator(id).map(|spec| spec.item))
     .or_else(|| {
         [

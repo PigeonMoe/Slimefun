@@ -29,6 +29,9 @@ use crate::{
     research,
 };
 
+#[path = "fluid_pump.rs"]
+pub(crate) mod fluid_pump;
+
 type Position = [i32; 3];
 const SLOTS: [&str; 8] = ["19", "20", "24", "25", "10", "11", "28", "29"];
 const STANDARD_SLOT_COUNT: usize = 4;
@@ -111,6 +114,7 @@ enum RecipeFamily {
     Fuel(&'static Generator),
     Advanced(&'static advanced_processing::Machine),
     OilPump,
+    FluidPump,
 }
 
 #[derive(Clone, Copy)]
@@ -225,6 +229,18 @@ impl ElectricMachine {
                 work_ticks: geology::PUMP_WORK_TICKS,
                 research: &geology::OIL,
                 family: RecipeFamily::OilPump,
+                speed: 1,
+            });
+        }
+        if id == fluid_pump::FLUID_PUMP.id() {
+            return Some(Self {
+                id: fluid_pump::FLUID_PUMP.id(),
+                carrier: fluid_pump::FLUID_PUMP.material(),
+                title: "Fluid Pump",
+                cost: fluid_pump::COST,
+                work_ticks: 0,
+                research: &fluid_pump::RESEARCH,
+                family: RecipeFamily::FluidPump,
                 speed: 1,
             });
         }
@@ -529,6 +545,10 @@ fn menu_items(
     for (index, &menu_slot) in MENU_SLOTS[..furnace.slot_count()].iter().enumerate() {
         items[menu_slot] = stack_in(host, data, index);
     }
+    if matches!(furnace.family, RecipeFamily::FluidPump) {
+        items[22] = display_item(host, "minecraft:gray_stained_glass_pane", " ");
+        return items;
+    }
     items[22] = match remaining(data) {
         Some(remaining) => {
             let total = match data.get(&TOTAL.into()) {
@@ -562,7 +582,9 @@ fn menu_items(
                     advanced_processing::Family::AutoBrewer => ("minecraft:fishing_rod", 63),
                     _ => ("minecraft:flint_and_steel", 63),
                 },
-                RecipeFamily::OilPump => ("minecraft:diamond_shovel", 1560),
+                RecipeFamily::OilPump | RecipeFamily::FluidPump => {
+                    ("minecraft:diamond_shovel", 1560)
+                }
             };
             let mut bar = display_item(host, icon, &format!("{progress}%"));
             if let Some(stack) = &mut bar {
@@ -1151,7 +1173,7 @@ fn find_recipe(
             }),
             false,
         ),
-        RecipeFamily::Fuel(_) | RecipeFamily::Advanced(_) => None,
+        RecipeFamily::Fuel(_) | RecipeFamily::Advanced(_) | RecipeFamily::FluidPump => None,
     }?;
     fits_all(host, data, &run.outputs).then_some(run)
 }

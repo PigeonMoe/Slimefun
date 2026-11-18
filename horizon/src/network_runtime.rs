@@ -13,6 +13,7 @@ use mod_api::{
 };
 
 use crate::{
+    factory::fluid_pump,
     geology,
     items::{item_id, network_item},
     machine::Settings,
@@ -835,8 +836,14 @@ pub(crate) fn tick(
             gps_signals.insert(pos, signal);
         }
         if let Component::ElectricMachine { .. } = node.component {
-            let _ = host.transaction(|host, _| {
+            let _ = host.transaction(|host, tx| {
                 let mut data = block_data(host, level, pos).ok_or(())?;
+                if node.id == fluid_pump::FLUID_PUMP.id() {
+                    data.charge = data.charge.checked_sub(fluid_pump::COST).ok_or(())?;
+                    let drain = fluid_pump::stage(host, tx, level, pos, rolls)?;
+                    write_data(host, pos, data).map_err(|_| ())?;
+                    return drain.map_or(Ok(()), |drain| drain.apply(host, level));
+                }
                 if let Some(charge) =
                     crate::factory::tick(host, level, settings, rolls, pos, &node.id, data.charge)
                 {
