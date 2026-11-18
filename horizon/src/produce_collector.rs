@@ -60,8 +60,7 @@ pub(super) const RECIPES: &[Produce] = &[
     Produce {
         input: BUCKET,
         output: Kind::Vanilla("minecraft:milk_bucket"),
-        // Bukkit MushroomCow also implements Cow.
-        animals: &["minecraft:cow", "minecraft:mooshroom", "minecraft:goat"],
+        animals: &["minecraft:cow", "minecraft:goat"],
     },
     Produce {
         input: Kind::Vanilla("minecraft:bowl"),
