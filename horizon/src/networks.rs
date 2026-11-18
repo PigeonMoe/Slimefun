@@ -67,6 +67,10 @@ impl Component {
                 capacity: crate::factory::fluid_pump::CAPACITY,
                 carrier: crate::factory::fluid_pump::FLUID_PUMP.material(),
             },
+            "XP_COLLECTOR" => Self::ElectricMachine {
+                capacity: crate::factory::experience_collector::CAPACITY,
+                carrier: crate::factory::experience_collector::XP_COLLECTOR.material(),
+            },
             "ENERGY_REGULATOR" => Self::EnergyRegulator,
             "ENERGY_CONNECTOR" => Self::EnergyConnector,
             "SMALL_CAPACITOR" => Self::Capacitor(128),

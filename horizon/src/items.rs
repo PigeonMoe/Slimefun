@@ -868,6 +868,14 @@ pub(crate) fn network_item(id: &str) -> Option<Kind> {
     .or_else(|| crate::advanced_processing::machine(id).map(|spec| spec.item))
     .or_else(|| crate::thermal_machines::item(id))
     .or_else(|| crate::geology::network_item(id))
+    .or_else(|| {
+        use crate::factory::experience_collector::{
+            FILLED_FLASK_OF_KNOWLEDGE, FLASK_OF_KNOWLEDGE, XP_COLLECTOR,
+        };
+        [XP_COLLECTOR, FLASK_OF_KNOWLEDGE, FILLED_FLASK_OF_KNOWLEDGE]
+            .into_iter()
+            .find(|kind| kind.id() == id)
+    })
     .or_else(|| crate::factory::reactors::reactor(id).map(|spec| spec.item))
     .or_else(|| {
         use crate::factory::reactors::{NEPTUNIUM, REACTOR_ACCESS_PORT};

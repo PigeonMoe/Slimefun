@@ -21,6 +21,7 @@ use crate::research;
 pub(crate) enum Machine {
     Grinding,
     Crafting,
+    MagicCrafting { table: [i32; 3] },
     Crushing,
     Compressing,
     Pressing,
@@ -97,6 +98,16 @@ impl Machine {
     pub fn at(host: &dyn Host, level: LevelRef, clicked: [i32; 3]) -> Option<(Self, Dispenser)> {
         let [x, y, z] = clicked;
         let block = level.block_state(host, clicked)?.block().id(host);
+        if block == "minecraft:crafting_table"
+            && let Some(position) = magic_dispenser(clicked, |point, material| {
+                has_block(host, level, point, material)
+            })
+        {
+            return Some((
+                Self::MagicCrafting { table: clicked },
+                Dispenser { level, position },
+            ));
+        }
         if block == "minecraft:cauldron"
             && let Some(dispenser) = pressure_chamber_at(host, level, clicked)
         {
@@ -185,7 +196,14 @@ impl Machine {
         let outcome = self.process(host, player, dispenser, delayed_crafts, settings, rolls);
 
         let message = match outcome {
-            Ok(()) if matches!(self, Self::Compressing | Self::Pressing) => return,
+            Ok(())
+                if matches!(
+                    self,
+                    Self::Compressing | Self::Pressing | Self::MagicCrafting { .. }
+                ) =>
+            {
+                return;
+            }
             Ok(()) => {
                 let sound = match self {
                     Self::Washing | Self::Juicing => "minecraft:entity.player.splash",
@@ -412,18 +430,22 @@ impl Machine {
                     }
                     Ok(())
                 }
-                Self::Crafting => {
-                    let recipe = crafting()
-                        .find(|recipe| {
-                            recipe.inputs.iter().zip(&slots).all(|(input, actual)| {
-                                match (input, actual) {
-                                    (None, None) => true,
-                                    (Some(input), Some(actual)) => input.matches(host, actual),
-                                    _ => false,
-                                }
-                            })
+                Self::Crafting | Self::MagicCrafting { .. } => {
+                    let matches_inputs = |recipe: &&crate::recipes::CraftingRecipe| {
+                        recipe.inputs.iter().zip(&slots).all(|(input, actual)| {
+                            match (input, actual) {
+                                (None, None) => true,
+                                (Some(input), Some(actual)) => input.matches(host, actual),
+                                _ => false,
+                            }
                         })
-                        .ok_or(Refusal::MissingRecipe)?;
+                    };
+                    let recipe = if matches!(self, Self::MagicCrafting { .. }) {
+                        crate::recipes::magic_crafting().find(matches_inputs)
+                    } else {
+                        crafting().find(matches_inputs)
+                    }
+                    .ok_or(Refusal::MissingRecipe)?;
                     if recipe.output.kind == OUTPUT_CHEST && !output_chest::enabled() {
                         return Err(Refusal::Disabled);
                     }
@@ -444,11 +466,37 @@ impl Machine {
                             consume(host, tx, &dispenser.place(slot), item, 1)?;
                         }
                     }
+                    if let Self::MagicCrafting { table } = self {
+                        host.transaction(|host, tx| {
+                            Err::<(), _>(deposit_output(host, tx, dispenser, &output))
+                        })
+                        .expect_err("the capacity check always rolls back")?;
+                        return delayed_crafts
+                            .queue_magic_crafting(host, holder, dispenser, table, output);
+                    }
                     deposit_output(host, tx, dispenser, &output)
                 }
             }
         })
     }
+}
+
+fn magic_dispenser(
+    [x, y, z]: [i32; 3],
+    mut at: impl FnMut([i32; 3], &str) -> bool,
+) -> Option<[i32; 3]> {
+    let mut first = None;
+    for (offset_x, offset_z) in [(1, 0), (0, 1), (-1, 0), (0, -1)] {
+        let input = [x.checked_add(offset_x)?, y, z.checked_add(offset_z)?];
+        let bookshelf = [x.checked_sub(offset_x)?, y, z.checked_sub(offset_z)?];
+        if at(input, "minecraft:dispenser") {
+            first.get_or_insert(input);
+            if at(bookshelf, "minecraft:bookshelf") {
+                return first;
+            }
+        }
+    }
+    None
 }
 
 pub(crate) fn has_block(host: &dyn Host, level: LevelRef, pos: [i32; 3], name: &str) -> bool {
@@ -670,6 +718,24 @@ pub(crate) fn deposit_into(
 mod tests {
     use super::*;
     use crate::items::Kind;
+
+    #[test]
+    fn a_magic_workbench_uses_the_first_neighboring_dispenser_after_structure_detection() {
+        let table = [0, 64, 0];
+        let north = [0, 64, -1];
+        let east = [1, 64, 0];
+        let south = [0, 64, 1];
+        let blocks = |pos: [i32; 3], id: &str| match id {
+            "minecraft:dispenser" => pos == east || pos == south,
+            "minecraft:bookshelf" => pos == north,
+            _ => false,
+        };
+        assert_eq!(magic_dispenser(table, blocks), Some(east));
+        assert_eq!(
+            magic_dispenser(table, |pos, id| pos != north && blocks(pos, id)),
+            None
+        );
+    }
     use crate::recipes::{CRAFTING, SMELTING};
     use mod_api::Identifier;
     use mod_api::testing::FakeHost;

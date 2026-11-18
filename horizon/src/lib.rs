@@ -554,7 +554,8 @@ impl Hooks for Slimefun {
                 Some(GameMode::Survival | GameMode::Creative)
             )
             && (self.backpacks.use_held(host, player, event.click.hand)
-                || network_runtime::trash::portable(host, player, event.click.hand))
+                || network_runtime::trash::portable(host, player, event.click.hand)
+                || factory::experience_collector::use_flask(host, player, event.click.hand))
         {
             *event.cancellation_result = InteractionResult::Consume;
             return Flow::Cancel;
@@ -845,9 +846,12 @@ fn describe_recipe(id: &str, double_ores: bool) -> Vec<String> {
                 .into(),
         );
     }
-    for recipe in crafting().filter(|recipe| outputs(recipe.output.kind.id())) {
+    let workbenches = crafting()
+        .map(|recipe| ("Enhanced Crafting Table", recipe))
+        .chain(recipes::magic_crafting().map(|recipe| ("Magic Workbench", recipe)));
+    for (workbench, recipe) in workbenches.filter(|(_, recipe)| outputs(recipe.output.kind.id())) {
         let mut header = format!(
-            "Enhanced Crafting Table | {} × {}",
+            "{workbench} | {} × {}",
             recipe.output.count,
             recipe.output.kind.id()
         );

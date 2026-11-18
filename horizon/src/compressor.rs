@@ -35,6 +35,11 @@ enum Action {
         position: [i32; 3],
         finish: bool,
     },
+    MagicStep {
+        level: LevelRef,
+        position: [i32; 3],
+        finish: bool,
+    },
     PanStep {
         level: LevelRef,
         cauldron: [i32; 3],
@@ -82,6 +87,32 @@ impl DelayedCrafts {
             (
                 step * 20,
                 Action::PressureStep {
+                    level: dispenser.level,
+                    position,
+                    finish: step == 3,
+                },
+            )
+        });
+        let output = Output {
+            holder,
+            dispenser,
+            stack,
+        };
+        self.queue(host, steps.chain([(60, Action::Output(output))]))
+    }
+
+    pub fn queue_magic_crafting(
+        &self,
+        host: &mut dyn ServerHost,
+        holder: BlockEntityRef,
+        dispenser: Dispenser,
+        position: [i32; 3],
+        stack: ItemStack,
+    ) -> Result<(), Refusal> {
+        let steps = (0..4).map(|step| {
+            (
+                step * 20,
+                Action::MagicStep {
                     level: dispenser.level,
                     position,
                     finish: step == 3,
@@ -163,6 +194,21 @@ impl DelayedCrafts {
                 position,
                 finish,
             }) => pressure_step(host, level, position, finish),
+            Some(Action::MagicStep {
+                level,
+                position,
+                finish,
+            }) => {
+                let _ = level.level_event(host, 2004, position, 0);
+                let _ = level.level_event(host, 2003, position, 0);
+                let sound = if finish {
+                    "minecraft:entity.arrow.hit_player"
+                } else {
+                    "minecraft:block.wooden_button.click_on"
+                };
+                let at = position.map(|axis| f64::from(axis) + 0.5);
+                let _ = level.play_sound(host, sound, at, SoundSource::Blocks, 1.0, 1.0);
+            }
             Some(Action::PanStep {
                 level,
                 cauldron,

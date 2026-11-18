@@ -31,6 +31,8 @@ use crate::{
 
 #[path = "charging_bench.rs"]
 pub(crate) mod charging_bench;
+#[path = "experience_collector.rs"]
+pub(crate) mod experience_collector;
 #[path = "fluid_pump.rs"]
 pub(crate) mod fluid_pump;
 #[path = "reactors.rs"]
@@ -118,6 +120,7 @@ enum RecipeFamily {
     Advanced(&'static advanced_processing::Machine),
     OilPump,
     FluidPump,
+    ExperienceCollector,
     Reactor(&'static reactors::Reactor),
     ReactorPort,
 }
@@ -295,6 +298,18 @@ impl FactoryViewers {
 impl ElectricMachine {
     pub fn for_item(id: &str) -> Option<Self> {
         use RecipeFamily::{Furnace, HeatedPressure, IngotPulverizer, OreGrinder};
+        if id == experience_collector::XP_COLLECTOR.id() {
+            return Some(Self {
+                id: experience_collector::XP_COLLECTOR.id(),
+                carrier: experience_collector::XP_COLLECTOR.material(),
+                title: "EXP Collector",
+                cost: experience_collector::COST,
+                work_ticks: 0,
+                research: &experience_collector::RESEARCH,
+                family: RecipeFamily::ExperienceCollector,
+                speed: 1,
+            });
+        }
         if let Some(spec) = reactors::reactor(id) {
             return Some(Self {
                 id: spec.item.id(),
@@ -489,6 +504,9 @@ impl ElectricMachine {
     }
 
     fn menu_slots(self) -> &'static [usize] {
+        if matches!(self.family, RecipeFamily::ExperienceCollector) {
+            return experience_collector::MENU_SLOTS;
+        }
         if self.reactor_menu() {
             return reactors::SLOTS;
         }
@@ -501,6 +519,9 @@ impl ElectricMachine {
     }
 
     fn input_slot(self, index: usize) -> bool {
+        if matches!(self.family, RecipeFamily::ExperienceCollector) {
+            return false;
+        }
         if self.reactor_menu() {
             return index < 6;
         }
@@ -670,6 +691,13 @@ fn menu_items(
     if furnace.reactor_menu() {
         return reactors::menu_items(host, data, furnace);
     }
+    if matches!(furnace.family, RecipeFamily::ExperienceCollector) {
+        let mut items = vec![display_item(host, "minecraft:purple_stained_glass_pane", " "); 27];
+        for (index, &slot) in experience_collector::MENU_SLOTS.iter().enumerate() {
+            items[slot] = stack_in(host, data, index);
+        }
+        return items;
+    }
     let mut items = vec![None; 45];
     let (background, input_border) = if furnace.is_smeltery() {
         (SMELTERY_BACKGROUND, SMELTERY_INPUT_BORDER)
@@ -736,7 +764,9 @@ fn menu_items(
                 RecipeFamily::OilPump | RecipeFamily::FluidPump => {
                     ("minecraft:diamond_shovel", 1560)
                 }
-                RecipeFamily::Reactor(_) | RecipeFamily::ReactorPort => return items,
+                RecipeFamily::Reactor(_)
+                | RecipeFamily::ReactorPort
+                | RecipeFamily::ExperienceCollector => return items,
             };
             let mut bar = display_item(host, icon, &format!("{progress}%"));
             if let Some(stack) = &mut bar {
@@ -1328,6 +1358,7 @@ fn find_recipe(
         RecipeFamily::Fuel(_)
         | RecipeFamily::Advanced(_)
         | RecipeFamily::FluidPump
+        | RecipeFamily::ExperienceCollector
         | RecipeFamily::Reactor(_)
         | RecipeFamily::ReactorPort => None,
     }?;

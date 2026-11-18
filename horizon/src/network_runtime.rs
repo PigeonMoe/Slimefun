@@ -13,7 +13,7 @@ use mod_api::{
 };
 
 use crate::{
-    factory::{fluid_pump, reactors},
+    factory::{experience_collector, fluid_pump, reactors},
     geology,
     items::{item_id, network_item},
     machine::Settings,
@@ -51,6 +51,7 @@ struct BlockData {
     cargo: Option<CargoSettings>,
     cargo_visualizer_disabled: bool,
     reactor_production: bool,
+    stored_experience: i32,
     gps_owner: Option<u128>,
 }
 
@@ -75,6 +76,9 @@ static NETWORK_STATE: AttachmentType<BlockData> = AttachmentType {
             }
             if value.reactor_production {
                 data.insert("reactor_production".into(), Tag::Byte(1));
+            }
+            if value.stored_experience != 0 {
+                data.insert("stored_exp".into(), Tag::Int(value.stored_experience));
             }
             if let Some(owner) = value.gps_owner {
                 data.insert(
@@ -105,6 +109,11 @@ static NETWORK_STATE: AttachmentType<BlockData> = AttachmentType {
                     data.get(&"reactor_production".into()),
                     Some(Tag::Byte(1))
                 ),
+                stored_experience: match data.get(&"stored_exp".into()) {
+                    None => 0,
+                    Some(Tag::Int(points)) => *points,
+                    _ => return Err(AttachmentError::Decode),
+                },
                 gps_owner: match data.get(&"owner".into()) {
                     None => None,
                     Some(Tag::String(owner)) => Some(
@@ -578,6 +587,12 @@ fn imported(id: &str, metadata: &toml::Table) -> Result<(Node, BlockData), &'sta
                     _ => return Err("Invalid Paper reactor mode."),
                 };
             }
+            if id == experience_collector::XP_COLLECTOR.id() {
+                data.stored_experience = field("stored-exp")
+                    .unwrap_or("0")
+                    .parse()
+                    .map_err(|_| "Invalid Paper stored experience.")?;
+            }
         }
         Component::CargoInput | Component::CargoOutput { .. } => {
             data.cargo = Some(CargoSettings::from_paper(metadata, node.filters_items())?);
@@ -993,6 +1008,20 @@ pub(crate) fn tick(
                     let drain = fluid_pump::stage(host, tx, level, pos, rolls)?;
                     write_data(host, pos, data).map_err(|_| ())?;
                     return drain.map_or(Ok(()), |drain| drain.apply(host, level));
+                }
+                if node.id == experience_collector::XP_COLLECTOR.id() {
+                    data.charge = data
+                        .charge
+                        .checked_sub(experience_collector::COST)
+                        .ok_or(())?;
+                    data.stored_experience = experience_collector::collect(
+                        host,
+                        tx,
+                        level,
+                        pos,
+                        data.stored_experience,
+                    )?;
+                    return write_data(host, pos, data).map_err(|_| ());
                 }
                 if let Some(charge) =
                     crate::factory::tick(host, level, settings, rolls, pos, &node.id, data.charge)
