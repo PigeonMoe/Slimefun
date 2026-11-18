@@ -17,6 +17,7 @@ mod circuits;
 mod compressor;
 mod crucible;
 mod electric_processing;
+mod enchantment_machines;
 mod factory;
 mod food_machines;
 mod fuel_generators;
@@ -180,6 +181,7 @@ impl Hooks for Slimefun {
             "minecraft:daylight_detector",
             "minecraft:furnace",
             "minecraft:smoker",
+            "minecraft:enchanting_table",
         ]
         .into_iter()
         .chain(network_runtime::PLAIN_CARRIERS.iter().copied())
@@ -246,6 +248,33 @@ impl Hooks for Slimefun {
         let settings = *self.settings.lock().unwrap();
         circuits::add_golem_drop(host, event, settings, &self.rolls);
         Flow::Continue
+    }
+
+    fn living_destroy_block(
+        &self,
+        host: &mut dyn ServerHost,
+        event: &mut mod_api::LivingDestroyBlockEvent<'_>,
+    ) -> Flow {
+        if event.kind == "minecraft:wither"
+            && let Some(level) = host.level(host.dimension())
+            && network_runtime::wither_proof_obsidian_at(host, level, event.pos)
+        {
+            Flow::Cancel
+        } else {
+            Flow::Continue
+        }
+    }
+
+    fn explosion_detonate(
+        &self,
+        host: &mut dyn ServerHost,
+        event: &mut mod_api::ExplosionDetonateEvent<'_>,
+    ) {
+        if let Some(level) = host.level(event.dimension) {
+            event
+                .blocks
+                .retain(|pos| !network_runtime::wither_proof_obsidian_at(host, level, *pos));
+        }
     }
 
     fn register_commands(&self, _: &mut dyn ServerHost, event: &mut RegisterCommandsEvent<'_>) {

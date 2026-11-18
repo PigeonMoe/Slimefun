@@ -80,6 +80,8 @@ pub(crate) enum Family {
     FoodComposter,
     AutoBrewer,
     ChargingBench,
+    AutoEnchanter,
+    AutoDisenchanter,
 }
 
 pub(crate) struct Machine {
@@ -154,6 +156,7 @@ pub(crate) fn machine(id: &str) -> Option<&'static Machine> {
         .iter()
         .chain(crate::thermal_machines::MACHINES)
         .chain(crate::food_machines::MACHINES)
+        .chain(crate::enchantment_machines::MACHINES)
         .chain([
             &crate::auto_brewer::MACHINE,
             &crate::factory::charging_bench::MACHINE,
@@ -554,6 +557,9 @@ pub(crate) fn next(
         }
         Family::AutoBrewer => crate::auto_brewer::next(host, inputs),
         Family::ChargingBench => None,
+        Family::AutoEnchanter | Family::AutoDisenchanter => {
+            crate::enchantment_machines::next(host, machine, inputs)
+        }
         Family::CarbonPress | Family::Freezer | Family::AutoDrier => {
             use crate::thermal_machines as thermal;
             let ratios =

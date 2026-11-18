@@ -326,6 +326,7 @@ impl Node {
             Component::GeoScanner
             | Component::TrashCan
             | Component::ManualCrucible
+            | Component::WitherProofObsidian
             | Component::ReactorPort => Network::Independent,
             _ => Network::Cargo,
         }
@@ -358,6 +359,9 @@ fn accepts_carrier(component: Component, actual: &str) -> bool {
     let expected = match component {
         Component::ManualCrucible => return crate::crucible::carrier(actual),
         Component::ReactorPort => return actual == reactors::REACTOR_ACCESS_PORT.material(),
+        Component::WitherProofObsidian => {
+            return actual == crate::enchantment_machines::WITHER_PROOF_OBSIDIAN.material();
+        }
         Component::SolarGenerator { .. } => ["minecraft:daylight_detector"; 2],
         Component::ElectricMachine { carrier, .. } | Component::FuelGenerator { carrier, .. } => {
             if carrier == "minecraft:player_head" {
@@ -776,6 +780,18 @@ pub(crate) fn manual_crucible_at(
         && block_data(host, level, pos).is_some_and(|data| data.id == "CRUCIBLE")
 }
 
+pub(crate) fn wither_proof_obsidian_at(
+    host: &mut dyn ServerHost,
+    level: LevelRef,
+    pos: Position,
+) -> bool {
+    let obsidian = crate::enchantment_machines::WITHER_PROOF_OBSIDIAN;
+    level
+        .block(host, pos)
+        .is_some_and(|block| block.id(host) == obsidian.material())
+        && plain_network::read(host, level, pos).is_some_and(|data| data.id == obsidian.id())
+}
+
 fn block_data(host: &mut dyn ServerHost, level: LevelRef, pos: Position) -> Option<BlockData> {
     if !level.in_place(host) {
         return None;
@@ -810,7 +826,7 @@ fn write_data(
 fn is_plain_node(component: Component) -> bool {
     if matches!(
         component,
-        Component::ManualCrucible | Component::ReactorPort
+        Component::ManualCrucible | Component::ReactorPort | Component::WitherProofObsidian
     ) {
         return true;
     }

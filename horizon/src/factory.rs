@@ -46,7 +46,6 @@ const PENDING: &str = "pending";
 const REMAINING: &str = "remaining";
 const TOTAL: &str = "total";
 const RETURNS_BUCKET: &str = "returns_bucket";
-const MAX_WORK_TICKS: i32 = 360;
 const IMPORT: &str = "paper_inventory_import";
 const MENU_SLOTS: [usize; 8] = [19, 20, 24, 25, 10, 11, 28, 29];
 const BACKGROUND: &[usize] = &[
@@ -521,6 +520,7 @@ pub(crate) fn register(registrar: &mut dyn mod_api::Registrar) {
     for material in [
         "minecraft:furnace",
         "minecraft:smoker",
+        "minecraft:enchanting_table",
         "minecraft:player_head",
         "minecraft:player_wall_head",
     ]
@@ -657,7 +657,7 @@ pub(crate) fn open(
 
 fn remaining(data: &Compound) -> Option<u32> {
     match data.get(&REMAINING.into()) {
-        Some(Tag::Int(value @ 0..=MAX_WORK_TICKS)) => Some(*value as u32),
+        Some(Tag::Int(value @ 0..)) => Some(*value as u32),
         _ => None,
     }
 }
@@ -696,13 +696,13 @@ fn menu_items(
     items[22] = match remaining(data) {
         Some(remaining) => {
             let total = match data.get(&TOTAL.into()) {
-                Some(Tag::Int(total @ 0..=MAX_WORK_TICKS)) => *total as u32,
+                Some(Tag::Int(total @ 0..)) => *total as u32,
                 _ => furnace.work_ticks,
             };
             let progress = if total == 0 {
                 100
             } else {
-                100 - (remaining + 1).min(total) * 100 / total
+                100 - (u64::from((remaining + 1).min(total)) * 100 / u64::from(total)) as u32
             };
             let (icon, damage) = match furnace.family {
                 RecipeFamily::Furnace | RecipeFamily::HeatedPressure => {
@@ -725,6 +725,12 @@ fn menu_items(
                     | advanced_processing::Family::FoodComposter => ("minecraft:golden_hoe", 31),
                     advanced_processing::Family::AutoBrewer => ("minecraft:fishing_rod", 63),
                     advanced_processing::Family::ChargingBench => ("minecraft:golden_pickaxe", 31),
+                    advanced_processing::Family::AutoEnchanter => {
+                        ("minecraft:golden_chestplate", 112)
+                    }
+                    advanced_processing::Family::AutoDisenchanter => {
+                        ("minecraft:diamond_chestplate", 528)
+                    }
                     _ => ("minecraft:flint_and_steel", 63),
                 },
                 RecipeFamily::OilPump | RecipeFamily::FluidPump => {
@@ -1420,7 +1426,7 @@ pub(crate) fn tick(
         return move_input_to_output(host, level, pos, index, bucket).then_some(charge);
     }
     let saved_result = encode_pending(host, &outputs)?;
-    let work_ticks = work_override.unwrap_or(furnace.work_ticks) as i32;
+    let work_ticks = i32::try_from(work_override.unwrap_or(furnace.work_ticks)).ok()?;
     host.transaction(|host, tx| {
         if pumping_oil {
             geology::reserve_one(host, level, pos)?;
@@ -1954,6 +1960,149 @@ mod tests {
             settings,
             roll,
         )
+    }
+
+    #[test]
+    fn auto_enchanter_transfers_supported_levels_and_reserves_both_outputs() {
+        let mut host = recipe_host([
+            "minecraft:diamond_sword",
+            "minecraft:enchanted_book",
+            "minecraft:book",
+        ]);
+        let sword_id = "minecraft:diamond_sword";
+        for enchantment in [
+            "minecraft:sharpness",
+            "minecraft:smite",
+            "minecraft:vanishing_curse",
+        ] {
+            host.registries.allow_enchantment(enchantment, sword_id);
+        }
+        let mut sword = Kind::Vanilla(sword_id).stack(&host, 1).unwrap();
+        sword.set_damage(37);
+        let identity = Tag::String("Keep this blade".into());
+        sword
+            .apply_components(&Compound::from([
+                ("minecraft:custom_name".into(), identity.clone()),
+                ("minecraft:repair_cost".into(), Tag::Int(17)),
+                (
+                    "minecraft:enchantments".into(),
+                    Tag::compound([("minecraft:sharpness", Tag::Int(6))]),
+                ),
+            ]))
+            .unwrap();
+        let mut book = Kind::Vanilla("minecraft:enchanted_book")
+            .stack(&host, 1)
+            .unwrap();
+        book.apply_components(&Compound::from([(
+            "minecraft:stored_enchantments".into(),
+            Tag::compound([
+                ("minecraft:sharpness", Tag::Int(7)),
+                ("minecraft:smite", Tag::Int(4)),
+                ("minecraft:vanishing_curse", Tag::Int(1)),
+                ("minecraft:efficiency", Tag::Int(3)),
+            ]),
+        )]))
+        .unwrap();
+        let mut data = Compound::new();
+        assert!(write_stack(&host, &mut data, 0, Some(sword.clone())));
+        assert!(write_stack(&host, &mut data, 1, Some(book.clone())));
+        let run = |id, data: &Compound| {
+            test_recipe(&host, id, data, Settings::default(), |_| unreachable!())
+        };
+        let first = run("AUTO_ENCHANTER", &data).unwrap();
+        let second = run("AUTO_ENCHANTER_2", &data).unwrap();
+        assert_eq!(
+            (first.work_override, second.work_override),
+            (Some(450), Some(150))
+        );
+        assert_eq!(
+            remaining(&Compound::from([(REMAINING.into(), Tag::Int(450))])),
+            Some(450)
+        );
+        assert_eq!(first.quantity(), 2);
+        let enchanted = &first.outputs[0];
+        let patch = enchanted.components().unwrap().as_nbt();
+        assert_eq!(enchanted.damage_component(), Some(37));
+        assert_eq!(patch.get(&"minecraft:custom_name".into()), Some(&identity));
+        assert_eq!(
+            patch.get(&"minecraft:repair_cost".into()),
+            Some(&Tag::Int(17))
+        );
+        assert_eq!(
+            patch.get(&"minecraft:enchantments".into()),
+            Some(&Tag::compound([
+                ("minecraft:sharpness", Tag::Int(7)),
+                ("minecraft:smite", Tag::Int(4)),
+                ("minecraft:vanishing_curse", Tag::Int(1)),
+            ])),
+        );
+        assert!(Kind::Vanilla("minecraft:book").matches(&host, &first.outputs[1]));
+
+        // An existing output blocks the two-product operation, even with one free slot.
+        assert!(write_stack(&host, &mut data, 2, Some(book.clone())));
+        assert!(run("AUTO_ENCHANTER", &data).is_none());
+        assert_eq!(stack_in(&host, &data, 0), Some(sword));
+        assert_eq!(stack_in(&host, &data, 1), Some(book.clone()));
+
+        assert!(write_stack(&host, &mut data, 2, None));
+        // The same book would have nothing to improve on the result.
+        assert!(write_stack(&host, &mut data, 0, Some(enchanted.clone())));
+        assert!(run("AUTO_ENCHANTER", &data).is_none());
+        assert!(write_stack(&host, &mut data, 0, Some(book)));
+        assert!(write_stack(
+            &host,
+            &mut data,
+            1,
+            Some(Kind::Vanilla(sword_id).stack(&host, 1).unwrap())
+        ));
+        assert!(run("AUTO_ENCHANTER", &data).is_some());
+    }
+
+    #[test]
+    fn auto_disenchanter_moves_repair_cost_and_direct_levels_to_a_new_book() {
+        let host = recipe_host([
+            "minecraft:diamond_sword",
+            "minecraft:enchanted_book",
+            "minecraft:book",
+        ]);
+        let mut sword = Kind::Vanilla("minecraft:diamond_sword")
+            .stack(&host, 1)
+            .unwrap();
+        sword.set_damage(37);
+        let enchantments = Tag::compound([
+            ("minecraft:sharpness", Tag::Int(7)),
+            ("minecraft:smite", Tag::Int(4)),
+            ("minecraft:vanishing_curse", Tag::Int(1)),
+        ]);
+        sword
+            .apply_components(&Compound::from([
+                ("minecraft:enchantments".into(), enchantments.clone()),
+                ("minecraft:repair_cost".into(), Tag::Int(17)),
+            ]))
+            .unwrap();
+        let book = Kind::Vanilla("minecraft:book").stack(&host, 12).unwrap();
+        let mut data = Compound::new();
+        assert!(write_stack(&host, &mut data, 0, Some(book)));
+        assert!(write_stack(&host, &mut data, 1, Some(sword)));
+        let run =
+            |id| test_recipe(&host, id, &data, Settings::default(), |_| unreachable!()).unwrap();
+        let first = run("AUTO_DISENCHANTER");
+        let second = run("AUTO_DISENCHANTER_2");
+        assert_eq!(
+            (first.work_override, second.work_override),
+            (Some(540), Some(180))
+        );
+        assert_eq!(first.quantity(), 2);
+        assert_eq!(first.outputs[0].damage_component(), Some(37));
+        assert!(first.outputs[0].components().is_none());
+        assert_eq!(
+            first.outputs[1].components().unwrap().as_nbt(),
+            &Compound::from([
+                ("minecraft:stored_enchantments".into(), enchantments),
+                ("minecraft:repair_cost".into(), Tag::Int(17)),
+            ]),
+        );
+        assert_eq!(first.outputs[1].count(), 1);
     }
 
     #[test]

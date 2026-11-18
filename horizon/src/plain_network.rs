@@ -24,6 +24,7 @@ pub(crate) const CARRIERS: &[&str] = &[
     "minecraft:red_terracotta",
     "minecraft:blue_terracotta",
     "minecraft:cyan_terracotta",
+    "minecraft:obsidian",
 ];
 
 pub(crate) fn is_carrier(block: &str) -> bool {

@@ -122,6 +122,7 @@ impl SlimefunItem {
         if let Some(lore) = crate::network_runtime::trash::lore(self.id) {
             components.insert("minecraft:lore".into(), lore);
         }
+        crate::enchantment_machines::decorate(self.id, &mut components);
         if let Some(texture) = &self.texture {
             components.insert(
                 "minecraft:profile".into(),
@@ -204,7 +205,7 @@ fn string(value: &str) -> Tag {
     Tag::String(value.into())
 }
 
-fn text(value: &str, color: &str, italic: bool) -> Tag {
+pub(crate) fn text(value: &str, color: &str, italic: bool) -> Tag {
     Tag::compound([
         ("text", string(value)),
         ("color", string(color)),
@@ -850,6 +851,7 @@ pub(crate) fn network_item(id: &str) -> Option<Kind> {
         SMALL_CAPACITOR,
         SOLAR_GENERATOR,
         crate::advanced_processing::CRUCIBLE,
+        crate::enchantment_machines::WITHER_PROOF_OBSIDIAN,
         ELECTRIC_FURNACE,
         ELECTRIC_FURNACE_2,
         ELECTRIC_FURNACE_3,
