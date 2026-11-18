@@ -658,6 +658,8 @@ mod tests {
             "BIO_REACTOR",
             "AUTO_BREEDER",
             "ANIMAL_GROWTH_ACCELERATOR",
+            "CROP_GROWTH_ACCELERATOR",
+            "CROP_GROWTH_ACCELERATOR_2",
             "CARGO_NODE_INPUT",
             "CARGO_NODE_OUTPUT_ADVANCED",
         ] {

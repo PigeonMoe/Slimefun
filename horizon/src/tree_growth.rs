@@ -72,7 +72,7 @@ pub(crate) fn stage(
             .filter(|stack| is_fertilizer(host, stack))?;
         Some((place, stack))
     })?;
-    let sapling = horizontal_square(machine).find(|&target| {
+    let sapling = horizontal_square(machine, RADIUS).find(|&target| {
         is_sapling(host, level, target)
             && level.allow_inventory_transfer(host, machine, target, &fertilizer)
             && is_sapling(host, level, target)
@@ -85,6 +85,10 @@ pub(crate) fn grow(host: &mut dyn ServerHost, level: LevelRef, pos: [i32; 3]) {
         return;
     }
     let _ = level.bone_meal(host, pos);
+    particles(host, level, pos);
+}
+
+pub(super) fn particles(host: &mut dyn ServerHost, level: LevelRef, pos: [i32; 3]) {
     if let Some(&particle) = HAPPY_VILLAGER.get() {
         level.send_particles(
             host,
@@ -104,15 +108,18 @@ fn is_sapling(host: &dyn ServerHost, level: LevelRef, pos: [i32; 3]) -> bool {
         .is_some_and(|block| host.block_in_tag(block, "minecraft:saplings") == Some(true))
 }
 
-fn horizontal_square([x, y, z]: [i32; 3]) -> impl Iterator<Item = [i32; 3]> {
-    (-RADIUS..=RADIUS)
+pub(super) fn horizontal_square(
+    [x, y, z]: [i32; 3],
+    radius: i32,
+) -> impl Iterator<Item = [i32; 3]> {
+    (-radius..=radius)
         .filter_map(move |offset| x.checked_add(offset))
         .flat_map(move |x| {
-            (-RADIUS..=RADIUS).filter_map(move |offset| Some([x, y, z.checked_add(offset)?]))
+            (-radius..=radius).filter_map(move |offset| Some([x, y, z.checked_add(offset)?]))
         })
 }
 
-fn is_fertilizer(host: &dyn ServerHost, stack: &ItemStack) -> bool {
+pub(super) fn is_fertilizer(host: &dyn ServerHost, stack: &ItemStack) -> bool {
     PRODUCE
         .iter()
         .any(|produce| produce.fertilizer.matches(host, stack))
@@ -124,7 +131,7 @@ mod tests {
 
     #[test]
     fn tree_growth_targets_the_first_sapling_on_the_paper_horizontal_square() {
-        let positions = horizontal_square([0, 67, 0]).collect::<Vec<_>>();
+        let positions = horizontal_square([0, 67, 0], RADIUS).collect::<Vec<_>>();
         assert_eq!(positions.len(), 361);
         assert_eq!(positions.first(), Some(&[-9, 67, -9]));
         assert_eq!(positions[18..20], [[-9, 67, 9], [-8, 67, -9]]);

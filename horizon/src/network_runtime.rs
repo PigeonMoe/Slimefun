@@ -14,7 +14,8 @@ use mod_api::{
 
 use crate::{
     factory::{
-        animal_machines, assemblers, experience_collector, fluid_pump, reactors, tree_growth,
+        animal_machines, assemblers, crop_growth, experience_collector, fluid_pump, reactors,
+        tree_growth,
     },
     geology,
     items::{item_id, network_item},
@@ -202,6 +203,8 @@ impl ItemPart for NetworkPlacement {
                 crate::heated_pressure::NETHER_ICE_COOLANT_CELL,
                 reactors::NEPTUNIUM,
                 crate::network_recipes::ANDROID_MEMORY_CORE,
+                crate::android_items::PROGRAMMABLE_ANDROID,
+                crate::android_items::PROGRAMMABLE_ANDROID_FARMER,
                 trash::PORTABLE_DUSTBIN,
             ]
             .iter()
@@ -1100,6 +1103,20 @@ pub(crate) fn tick(
                 });
                 if let Ok(feeding) = feeding {
                     feeding.particles(host, level);
+                }
+                continue;
+            }
+            if let Some(machine) = crop_growth::machine(&node.id) {
+                let growth = host.transaction(|host, tx| {
+                    let mut data = block_data(host, level, pos).ok_or(())?;
+                    data.charge = data.charge.checked_sub(machine.cost).ok_or(())?;
+                    let growth = machine.stage(host, tx, level, pos)?;
+                    write_data(host, pos, data).map_err(|_| ())?;
+                    growth.apply(host, level)?;
+                    Ok::<_, ()>(growth)
+                });
+                if let Ok(growth) = growth {
+                    growth.particles(host, level);
                 }
                 continue;
             }

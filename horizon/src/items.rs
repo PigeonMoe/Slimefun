@@ -106,6 +106,12 @@ impl SlimefunItem {
                 )]),
             ),
         ]);
+        if let Some(lore) = crate::android_items::lore(self.id) {
+            components.insert("minecraft:lore".into(), lore);
+        }
+        if let Some(lore) = crate::factory::crop_growth::lore(self.id) {
+            components.insert("minecraft:lore".into(), lore);
+        }
         if let Some(lore) = crate::factory::animal_machines::lore(self.id) {
             components.insert("minecraft:lore".into(), lore);
         }
@@ -903,6 +909,8 @@ pub(crate) fn network_item(id: &str) -> Option<Kind> {
     .or_else(|| crate::enhanced_furnaces::by_id(id).map(|furnace| furnace.item))
     .or_else(|| crate::thermal_machines::item(id))
     .or_else(|| crate::geology::network_item(id))
+    .or_else(|| crate::android_items::item(id))
+    .or_else(|| crate::factory::crop_growth::machine(id).map(|machine| machine.item))
     .or_else(|| crate::factory::animal_machines::machine(id).map(|machine| machine.item))
     .or_else(|| {
         use crate::factory::experience_collector::{

@@ -36,6 +36,8 @@ pub(crate) mod animal_machines;
 pub(crate) mod assemblers;
 #[path = "charging_bench.rs"]
 pub(crate) mod charging_bench;
+#[path = "crop_growth.rs"]
+pub(crate) mod crop_growth;
 #[path = "experience_collector.rs"]
 pub(crate) mod experience_collector;
 #[path = "fluid_pump.rs"]
@@ -132,8 +134,7 @@ enum RecipeFamily {
     FluidPump,
     ExperienceCollector,
     ProduceCollector,
-    AnimalMachine,
-    TreeGrowthAccelerator,
+    FeedingMachine,
     Assembler(&'static assemblers::Assembler),
     Reactor(&'static reactors::Reactor),
     ReactorPort,
@@ -349,7 +350,19 @@ impl ElectricMachine {
                 cost: machine.cost,
                 work_ticks: 0,
                 research: machine.research,
-                family: RecipeFamily::AnimalMachine,
+                family: RecipeFamily::FeedingMachine,
+                speed: 1,
+            });
+        }
+        if let Some(machine) = crop_growth::machine(id) {
+            return Some(Self {
+                id: machine.item.id(),
+                carrier: machine.item.material(),
+                title: machine.title,
+                cost: machine.cost,
+                work_ticks: 0,
+                research: machine.research,
+                family: RecipeFamily::FeedingMachine,
                 speed: 1,
             });
         }
@@ -361,7 +374,7 @@ impl ElectricMachine {
                 cost: tree_growth::COST,
                 work_ticks: 0,
                 research: &tree_growth::RESEARCH,
-                family: RecipeFamily::TreeGrowthAccelerator,
+                family: RecipeFamily::FeedingMachine,
                 speed: 1,
             });
         }
@@ -638,10 +651,7 @@ impl ElectricMachine {
     }
 
     fn feeding_menu(self) -> bool {
-        matches!(
-            self.family,
-            RecipeFamily::TreeGrowthAccelerator | RecipeFamily::AnimalMachine
-        )
+        matches!(self.family, RecipeFamily::FeedingMachine)
     }
 
     fn slot_keys(self) -> &'static [&'static str] {
@@ -823,9 +833,7 @@ fn menu_items(
     }
     let small_menu_pane = match furnace.family {
         RecipeFamily::ExperienceCollector => Some("minecraft:purple_stained_glass_pane"),
-        RecipeFamily::TreeGrowthAccelerator | RecipeFamily::AnimalMachine => {
-            Some("minecraft:cyan_stained_glass_pane")
-        }
+        RecipeFamily::FeedingMachine => Some("minecraft:cyan_stained_glass_pane"),
         _ => None,
     };
     if let Some(pane) = small_menu_pane {
@@ -938,8 +946,7 @@ fn progress_item(host: &dyn Host, data: &Compound, furnace: ElectricMachine) -> 
                 RecipeFamily::Reactor(_)
                 | RecipeFamily::ReactorPort
                 | RecipeFamily::Assembler(_)
-                | RecipeFamily::TreeGrowthAccelerator
-                | RecipeFamily::AnimalMachine
+                | RecipeFamily::FeedingMachine
                 | RecipeFamily::ExperienceCollector => return None,
             };
             let mut bar = display_item(host, icon, &format!("{progress}%"));
@@ -1550,8 +1557,7 @@ fn find_recipe(
         | RecipeFamily::GeoMiner
         | RecipeFamily::ExperienceCollector
         | RecipeFamily::ProduceCollector
-        | RecipeFamily::TreeGrowthAccelerator
-        | RecipeFamily::AnimalMachine
+        | RecipeFamily::FeedingMachine
         | RecipeFamily::Assembler(_)
         | RecipeFamily::Reactor(_)
         | RecipeFamily::ReactorPort => None,

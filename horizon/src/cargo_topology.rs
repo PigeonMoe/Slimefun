@@ -377,6 +377,7 @@ fn attached_inventory(
         }
         if id == crate::factory::tree_growth::TREE_GROWTH_ACCELERATOR.id()
             || crate::factory::animal_machines::machine(&id).is_some()
+            || crate::factory::crop_growth::machine(&id).is_some()
         {
             return Some((pos, InventoryKind::InputOnly));
         }

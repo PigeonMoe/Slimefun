@@ -12,6 +12,7 @@ use mod_api::{
 
 mod advanced_processing;
 mod ancient_altar;
+mod android_items;
 mod armor_forge;
 mod auto_anvil;
 mod auto_brewer;

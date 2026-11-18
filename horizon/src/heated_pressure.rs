@@ -3,7 +3,7 @@
 use crate::{
     items::{CARBONADO, GOLD_24K, HeadTexture, Kind, MAGNESIUM_DUST, SALT, item},
     network_recipes::BLISTERING_INGOT_3,
-    recipes::Stack,
+    recipes::{Research, Stack},
 };
 
 item!(
@@ -145,6 +145,12 @@ pub(crate) fn network_item(id: &str) -> Option<Kind> {
         .into_iter()
         .find(|item| item.id() == id)
 }
+
+pub(crate) const PLASTIC_RESEARCH: Research = Research {
+    id: "plastic_sheet",
+    name: "Plastic",
+    cost: 25,
+};
 
 pub(crate) struct HeatedRecipe {
     pub seconds: u32,

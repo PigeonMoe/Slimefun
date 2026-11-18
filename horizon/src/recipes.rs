@@ -120,6 +120,8 @@ pub(crate) fn crafting() -> impl Iterator<Item = &'static CraftingRecipe> {
         .chain([&crate::factory::produce_collector::CRAFTING])
         .chain([&crate::factory::tree_growth::CRAFTING])
         .chain(crate::factory::animal_machines::CRAFTING)
+        .chain(crate::android_items::CRAFTING)
+        .chain(crate::factory::crop_growth::CRAFTING)
         .chain(crate::factory::assemblers::CRAFTING)
         .chain(crate::network_runtime::trash::CRAFTING)
         .chain(crate::factory::reactors::CRAFTING)
@@ -149,6 +151,11 @@ pub(crate) fn researches() -> impl Iterator<Item = &'static Research> {
         .chain([&crate::factory::produce_collector::RESEARCH])
         .chain([&crate::factory::tree_growth::RESEARCH])
         .chain(crate::factory::animal_machines::RESEARCHES)
+        .chain([
+            &crate::android_items::RESEARCH,
+            &crate::heated_pressure::PLASTIC_RESEARCH,
+        ])
+        .chain(crate::factory::crop_growth::RESEARCHES)
         .chain(crate::factory::assemblers::RESEARCHES)
         .chain(crate::backpacks::RESEARCHES)
         .chain([
@@ -788,6 +795,7 @@ pub(crate) const ORE_PURIFICATION: Research = Research {
 pub(crate) fn output_research(kind: Kind) -> Option<&'static Research> {
     match kind {
         SULFATE => Some(&POWER_ITEMS),
+        crate::heated_pressure::PLASTIC_SHEET => Some(&crate::heated_pressure::PLASTIC_RESEARCH),
         crate::heated_pressure::TINY_URANIUM => Some(&URANIUM_RESEARCH),
         CRUSHED_ORE | PULVERIZED_ORE | PURE_ORE_CLUSTER => Some(&ORE_PURIFICATION),
         SALT => Some(&INGREDIENTS_AND_CHEESE),
