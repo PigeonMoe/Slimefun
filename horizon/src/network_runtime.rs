@@ -377,10 +377,25 @@ pub(crate) struct Networks {
     levels: BTreeMap<String, Arc<Nodes>>,
     menus: BTreeMap<u128, cargo_menu::Session>,
     round_robin: HashMap<(LevelRef, Position), usize>,
+    cargo_ticks: HashMap<(LevelRef, Position), u32>,
     gps_signals: BTreeMap<String, BTreeMap<Position, (u128, u32)>>,
 }
 
 impl Networks {
+    fn cargo_due(&mut self, level: LevelRef, pos: Position, delay: u32) -> bool {
+        if delay == 0 {
+            self.cargo_ticks.remove(&(level, pos));
+            return true;
+        }
+        let elapsed = self.cargo_ticks.entry((level, pos)).or_default();
+        if *elapsed < delay {
+            *elapsed += 1;
+            return false;
+        }
+        *elapsed = 0;
+        true
+    }
+
     fn gps_complexity(&self, player: u128) -> u32 {
         self.gps_signals
             .values()
@@ -402,6 +417,7 @@ impl Networks {
         self.levels.clear();
         self.menus.clear();
         self.round_robin.clear();
+        self.cargo_ticks.clear();
         self.gps_signals.clear();
         plain_network::clear();
     }
@@ -858,6 +874,16 @@ pub(crate) fn tick(
         .collect();
     let mut claimed = BTreeSet::new();
     let mut labels = BTreeMap::new();
+    networks
+        .lock()
+        .unwrap()
+        .cargo_ticks
+        .retain(|(held_level, pos), _| {
+            *held_level != level
+                || active
+                    .get(pos)
+                    .is_some_and(|(node, _)| node.component == Component::CargoManager)
+        });
     for (&pos, &(node, _)) in &active {
         if node.component == Component::TrashCan {
             trash::clear(host, pos);
@@ -886,12 +912,20 @@ pub(crate) fn tick(
                     .copied()
                     .filter(|pos| !active[pos].0.regulator());
                 let status = if terminals.clone().next().is_some() {
-                    if block_data(host, level, start)
-                        .is_some_and(|data| !data.cargo_visualizer_disabled)
-                    {
-                        network_visuals::cargo_particles(host, level, terminals);
+                    let due =
+                        networks
+                            .lock()
+                            .unwrap()
+                            .cargo_due(level, start, settings.cargo_tick_delay);
+                    if due {
+                        if settings.cargo_visualizer
+                            && block_data(host, level, start)
+                                .is_some_and(|data| !data.cargo_visualizer_disabled)
+                        {
+                            network_visuals::cargo_particles(host, level, terminals);
+                        }
+                        cargo_topology::tick(networks, host, level, &active, &group);
                     }
-                    cargo_topology::tick(networks, host, level, &active, &group);
                     Status::CargoOnline
                 } else {
                     Status::CargoEmpty
@@ -1164,6 +1198,21 @@ mod tests {
 
     fn node(id: &str) -> Node {
         imported(id, &toml::Table::new()).unwrap().0
+    }
+
+    #[test]
+    fn each_cargo_regulator_skips_its_own_configured_number_of_ticks() {
+        let level = FakeHost::new().level.level();
+        let a = [0, 65, 0];
+        let b = [1, 65, 0];
+        let mut networks = Networks::default();
+        assert!(!networks.cargo_due(level, a, 2));
+        assert!(!networks.cargo_due(level, b, 2));
+        assert!(!networks.cargo_due(level, a, 2));
+        assert!(networks.cargo_due(level, a, 2));
+        assert!(!networks.cargo_due(level, b, 2));
+        assert!(networks.cargo_due(level, b, 0));
+        assert!(!networks.cargo_due(level, b, 2));
     }
 
     #[test]

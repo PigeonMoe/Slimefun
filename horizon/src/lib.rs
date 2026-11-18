@@ -151,6 +151,21 @@ impl Slimefun {
         {
             settings.golem_drop_chance = value;
         }
+        if let Some(network) = table.get("networks").and_then(toml::Value::as_table) {
+            if let Some(value) = network
+                .get("enable-visualizer")
+                .and_then(toml::Value::as_bool)
+            {
+                settings.cargo_visualizer = value;
+            }
+            if let Some(value) = network
+                .get("cargo-ticker-delay")
+                .and_then(toml::Value::as_integer)
+                && let Ok(delay) = u32::try_from(value.max(0))
+            {
+                settings.cargo_tick_delay = delay;
+            }
+        }
     }
 }
 
@@ -187,7 +202,7 @@ impl Hooks for Slimefun {
         event.configs.push(Config::new(
             "slimefun",
             ConfigKind::Server,
-            "double-ores = true\ncrucible-allow-water-in-nether = false\nlegacy-ore-washer = false\nlegacy-dust-washer = false\nlegacy-ore-grinder = true\nelectric-gold-pan-override-output-limit = [false, false, false]\nfreezer-use-vanilla-ratios = [false, false, false]\nfire-breaking-chance = 34\noutput-chest-enabled = true\ndrop-from-golems = true\ngolem-drop-chance = 75\n",
+            "double-ores = true\ncrucible-allow-water-in-nether = false\nlegacy-ore-washer = false\nlegacy-dust-washer = false\nlegacy-ore-grinder = true\nelectric-gold-pan-override-output-limit = [false, false, false]\nfreezer-use-vanilla-ratios = [false, false, false]\nfire-breaking-chance = 34\noutput-chest-enabled = true\ndrop-from-golems = true\ngolem-drop-chance = 75\n\n[networks]\nenable-visualizer = true\ncargo-ticker-delay = 0\n",
         ));
     }
 

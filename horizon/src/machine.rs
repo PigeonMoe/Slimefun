@@ -46,6 +46,8 @@ pub(crate) struct Settings {
     pub fire_breaking_chance: u32,
     pub drop_from_golems: bool,
     pub golem_drop_chance: u32,
+    pub cargo_visualizer: bool,
+    pub cargo_tick_delay: u32,
 }
 
 impl Default for Settings {
@@ -60,6 +62,8 @@ impl Default for Settings {
             fire_breaking_chance: 34,
             drop_from_golems: true,
             golem_drop_chance: 75,
+            cargo_visualizer: true,
+            cargo_tick_delay: 0,
         }
     }
 }
