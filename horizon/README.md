@@ -4,7 +4,7 @@
 
 ## 安装
 
-1. 自行构建，或下载本仓库预发布中的 `slimefun.hmod`。运行使用相同 Mod API 布局的 Horizon 26.3 服务端。
+1. 下载本仓库预发布中的 `slimefun.hmod` 和 `horizon-wasm-std.wasm`，使用 `SHA256SUMS` 核对文件。服务端使用与 `dc215e79e27d1cf55bb041a2c1bf2c02a701cd74` 一致的 Mod API 布局，并将编译工具链为 Rust 1.99.1 的 `horizon-wasm-std.wasm` 放在游戏引擎可执行文件旁。这个版本使用普通 Mod API hooks，支持常规服务端引擎构建。
 2. 将文件放进服务端游戏目录的 `horizon-mods/`，在该游戏目录的 `horizon-mods.txt` 添加 `mod.slimefun:true`，然后重启。
 3. 如使用 PigeonMoe Horizon Panel，将 [slimefun.toml](panel-plugins/slimefun.toml) 放进服务端实例目录的 `panel-plugins/`。启用面板后，该条目调用固定的 `slimefun status` 查询命令。
 
@@ -39,4 +39,11 @@ Horizon 的直接 JAR 引用只加载资源和数据。完整 Java 附属插件�
 ./horizon/build.sh ../horizon build
 ```
 
-构建产物位于 `horizon/target/horizon-mod/slimefun.hmod`。Java 版源码和原有构建指令位于仓库根目录。
+构建产物位于 `horizon/target/horizon-mod/slimefun.hmod`。如需自行生成匹配的 Wasm 标准库，在 Horizon 服务端源码目录用该目录的打包工具运行以下指令。预发布中的标准库也使用这条命令生成。
+
+```sh
+cargo build --locked -p cargo-horizon-mod
+target/debug/cargo-horizon-mod wasm-std target/horizon-wasm-std.wasm
+```
+
+Java 版源码和原有构建指令位于仓库根目录。
