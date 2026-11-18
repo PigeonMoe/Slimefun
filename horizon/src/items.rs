@@ -106,6 +106,9 @@ impl SlimefunItem {
                 )]),
             ),
         ]);
+        if let Some(lore) = crate::food_machines::lore(self.id) {
+            components.insert("minecraft:lore".into(), lore);
+        }
         if let Some(tier) = self.tier {
             let line = format!("Tier: {tier}");
             components.insert(

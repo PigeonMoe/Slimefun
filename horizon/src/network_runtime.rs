@@ -627,7 +627,12 @@ fn protected_block(
     let id = if is_plain_carrier(material) {
         plain_network::saved_at(level, dimension, pos)
     } else if let Some(entity) = level.block_entity_at(pos) {
-        if material == "minecraft:chest" && crate::output_chest::marked(level, entity) {
+        if material == "minecraft:chest" && crate::output_chest::marked(level, entity)
+            || matches!(
+                material,
+                "minecraft:player_head" | "minecraft:player_wall_head"
+            ) && crate::food_machines::marked(level, entity)
+        {
             return true;
         }
         level

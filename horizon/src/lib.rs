@@ -11,11 +11,13 @@ use mod_api::{
 };
 
 mod advanced_processing;
+mod auto_brewer;
 mod backpacks;
 mod circuits;
 mod compressor;
 mod electric_processing;
 mod factory;
+mod food_machines;
 mod fuel_generators;
 mod geology;
 mod gold_pan;
@@ -163,6 +165,8 @@ impl Hooks for Slimefun {
                 network_runtime::NetworkPlacement(self.networks.clone()),
             );
         }
+        let skull = registrar.item_key("minecraft:player_head");
+        registrar.item_part(skull, food_machines::Placement);
         network_runtime::register_cargo(registrar);
         factory::register(registrar);
         backpacks::register(registrar);
@@ -190,6 +194,7 @@ impl Hooks for Slimefun {
         }
         network_runtime::restore_drop(level, event);
         factory::restore_drops(level, event);
+        food_machines::restore_drop(level, event);
         Flow::Continue
     }
 
@@ -361,6 +366,8 @@ impl Hooks for Slimefun {
                 "The Heated Pressure Chamber uses two input slots to refine uranium, blistering ingots, and fuel ingredients. Use /sf recipe to find its inputs.".into(),
                 "Wash Sifted Ore by placing a dispenser on a wooden fence with an empty cauldron below it and right-clicking the fence.".into(),
                 "For a Makeshift Smeltery use a wooden fence above a dispenser, bricks on opposite sides of the dispenser, and fire below it. Use a nether brick fence and nether bricks for the regular Smeltery.".into(),
+                "An Electric Food Fabricator cans crops using Tin Cans. A Food Composter turns the canned food into fertilizer.".into(),
+                "Load the Auto Brewer with a potion and one brewing ingredient. It accepts regular, splash and lingering bottles.".into(),
                 "Use /sf recipe <item> to read a supported recipe, /sf research <key> to unlock research, and /sf status to view coverage.".into(),
             ],
             _ => return Flow::Continue,
@@ -711,6 +718,30 @@ fn describe_recipe(id: &str, double_ores: bool) -> Vec<String> {
     }
     if outputs(fuel_generators::BUCKET_OF_FUEL.id()) {
         lines.push("Refinery | 1 × BUCKET_OF_OIL -> 1 × BUCKET_OF_FUEL".into());
+    }
+
+    for crop in food_machines::PRODUCE {
+        if outputs(crop.food.id()) {
+            lines.push(format!(
+                "Food Fabricator | 1 × CAN + 1 × {} -> 2 × {}",
+                crop.crop.id(),
+                crop.food.id()
+            ));
+        }
+        if outputs(crop.fertilizer.id()) {
+            lines.push(format!(
+                "Food Composter | 1 × {} -> 2 × {}",
+                crop.food.id(),
+                crop.fertilizer.id()
+            ));
+        }
+    }
+    for &(ingredient, potion) in auto_brewer::AWKWARD_RECIPES {
+        if outputs(potion) {
+            lines.push(format!(
+                "Auto Brewer | 1 × awkward potion + 1 × {ingredient} -> 1 × potion of {potion}"
+            ));
+        }
     }
 
     if outputs(items::BASIC_CIRCUIT_BOARD.id()) {

@@ -557,6 +557,9 @@ fn menu_items(
                 RecipeFamily::Advanced(spec) => match spec.family {
                     advanced_processing::Family::CarbonPress => ("minecraft:diamond_pickaxe", 1560),
                     advanced_processing::Family::Freezer => ("minecraft:golden_pickaxe", 31),
+                    advanced_processing::Family::FoodFabricator
+                    | advanced_processing::Family::FoodComposter => ("minecraft:golden_hoe", 31),
+                    advanced_processing::Family::AutoBrewer => ("minecraft:fishing_rod", 63),
                     _ => ("minecraft:flint_and_steel", 63),
                 },
                 RecipeFamily::OilPump => ("minecraft:diamond_shovel", 1560),
