@@ -181,7 +181,7 @@ const BETTER_ELECTRIC_CRUCIBLES: Research = Research {
     name: "Hot Crucibles",
     cost: 30,
 };
-const BASIC_CRUCIBLE: Research = Research {
+pub(crate) const BASIC_CRUCIBLE: Research = Research {
     id: "crucible",
     name: "Crucible",
     cost: 13,
@@ -450,7 +450,7 @@ pub(crate) const LAVA_INPUTS: &[Meltable] = &[
     melt("minecraft:tuff", 8, 10),
 ];
 
-fn can_melt_leaves(host: &dyn Host, item: &ItemStack) -> bool {
+pub(crate) fn can_melt_leaves(host: &dyn Host, item: &ItemStack) -> bool {
     item.count() >= 16
         && item.components().is_none()
         && item.damage_component().is_none()

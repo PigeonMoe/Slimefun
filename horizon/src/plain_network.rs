@@ -7,7 +7,7 @@ use mod_api::{
     Holder, LevelDimension, LevelHost, LevelRef, ServerHost, Tag,
 };
 
-use super::{BlockData, Position, saved_id};
+use super::{BlockData, Position, accepts_carrier, saved_id};
 
 pub(crate) const CARRIERS: &[&str] = &[
     "minecraft:light_gray_stained_glass",
@@ -19,13 +19,14 @@ pub(crate) const CARRIERS: &[&str] = &[
     "minecraft:green_stained_glass",
     "minecraft:green_terracotta",
     "minecraft:crafting_table",
+    "minecraft:cauldron",
     "minecraft:piston",
     "minecraft:red_terracotta",
     "minecraft:blue_terracotta",
 ];
 
 pub(crate) fn is_carrier(block: &str) -> bool {
-    CARRIERS.contains(&block)
+    CARRIERS.contains(&block) || crate::crucible::carrier(block)
 }
 
 static NODES: AttachmentType<Compound> = AttachmentType {
@@ -51,7 +52,7 @@ enum Change {
 // attachment remains available to the synchronous drop hook until the next writable phase.
 static RETIRED: Mutex<BTreeMap<(String, Position), Change>> = Mutex::new(BTreeMap::new());
 
-pub(super) fn dimension(dimension: &LevelDimension) -> &str {
+pub(crate) fn dimension(dimension: &LevelDimension) -> &str {
     match dimension {
         LevelDimension::Overworld => "minecraft:overworld",
         LevelDimension::Nether => "minecraft:the_nether",
@@ -73,7 +74,10 @@ pub(crate) fn observe_plain_change(level: &dyn LevelHost, event: &BlockChangedEv
     let new = level.state_block(event.new);
     let replaced_carrier = old.is_some_and(is_carrier);
     let placed_carrier = new.is_some_and(is_carrier);
-    if old == new || !(replaced_carrier || placed_carrier) {
+    if old == new
+        || !(replaced_carrier || placed_carrier)
+        || old.is_some_and(crate::crucible::carrier) && new.is_some_and(crate::crucible::carrier)
+    {
         return;
     }
     let address = (
@@ -211,7 +215,9 @@ pub(super) fn take_drop(level: &dyn LevelHost, event: &BlockDropsEvent<'_>) -> O
         return None;
     };
     let id = saved_id(node)?;
-    if crate::items::network_item(&id)?.material() != carrier {
+    if !crate::networks::Component::for_item(&id)
+        .is_some_and(|component| accepts_carrier(component, carrier))
+    {
         return None;
     }
     let address = (dimension(&event.dimension).to_owned(), pos);

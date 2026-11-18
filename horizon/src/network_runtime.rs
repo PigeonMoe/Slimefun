@@ -37,7 +37,8 @@ pub(crate) use cargo_menu::{menu_click, menu_closed, register as register_cargo,
 use cargo_topology::{CargoSettings, FILTER_SLOTS};
 use network_visuals::Status;
 pub(crate) use plain_network::{
-    CARRIERS as PLAIN_CARRIERS, is_carrier as is_plain_carrier, observe_plain_change,
+    CARRIERS as PLAIN_CARRIERS, dimension as dimension_name, is_carrier as is_plain_carrier,
+    observe_plain_change,
 };
 
 type Position = [i32; 3];
@@ -172,7 +173,14 @@ impl ItemPart for NetworkPlacement {
         {
             return Some(InteractionResult::Fail);
         }
-        cargo_topology::block_invalid_placement(host, event).then_some(InteractionResult::Fail)
+        if let HostSide::Server(host) = host {
+            if crate::crucible::refuses_placement(host, event)
+                || cargo_topology::block_invalid_placement(HostSide::Server(host), event)
+            {
+                return Some(InteractionResult::Fail);
+            }
+        }
+        None
     }
 
     fn on_block_placed_by(&self, host: &mut dyn ServerHost, event: &mut OnBlockPlacedByEvent<'_>) {
@@ -300,7 +308,9 @@ impl Node {
             | Component::GpsTransmitter { .. }
             | Component::FuelGenerator { .. }
             | Component::SolarGenerator { .. } => Network::Energy,
-            Component::GeoScanner | Component::TrashCan => Network::Independent,
+            Component::GeoScanner | Component::TrashCan | Component::ManualCrucible => {
+                Network::Independent
+            }
             _ => Network::Cargo,
         }
     }
@@ -330,6 +340,7 @@ impl Node {
 
 fn accepts_carrier(component: Component, actual: &str) -> bool {
     let expected = match component {
+        Component::ManualCrucible => return crate::crucible::carrier(actual),
         Component::SolarGenerator { .. } => ["minecraft:daylight_detector"; 2],
         Component::ElectricMachine { carrier, .. } | Component::FuelGenerator { carrier, .. } => {
             if carrier == "minecraft:player_head" {
@@ -434,7 +445,7 @@ impl Networks {
             return Err("Load the matching Paper network block in the active dimension.".into());
         }
         let component = node.component;
-        if is_plain_machine(component) {
+        if is_plain_node(component) {
             plain_network::prepare_placement(host, level, pos)
                 .map_err(|_| "The block's previous machine state could not be cleared.")?;
         }
@@ -710,6 +721,17 @@ pub(crate) fn factory_identity(
     .then_some(data.id)
 }
 
+pub(crate) fn manual_crucible_at(
+    host: &mut dyn ServerHost,
+    level: LevelRef,
+    pos: Position,
+) -> bool {
+    level
+        .block(host, pos)
+        .is_some_and(|block| crate::crucible::carrier(&block.id(host)))
+        && block_data(host, level, pos).is_some_and(|data| data.id == "CRUCIBLE")
+}
+
 fn block_data(host: &mut dyn ServerHost, level: LevelRef, pos: Position) -> Option<BlockData> {
     if !level.in_place(host) {
         return None;
@@ -734,14 +756,17 @@ fn write_data(
     pos: Position,
     data: BlockData,
 ) -> Result<(), AttachmentError> {
-    if Component::for_item(&data.id).is_some_and(is_plain_machine) {
+    if Component::for_item(&data.id).is_some_and(is_plain_node) {
         plain_network::write(host, pos, &data)
     } else {
         NETWORK_STATE.set(host, Holder::BlockEntity(pos), data)
     }
 }
 
-fn is_plain_machine(component: Component) -> bool {
+fn is_plain_node(component: Component) -> bool {
+    if component == Component::ManualCrucible {
+        return true;
+    }
     matches!(
         component, Component::ElectricMachine { carrier, .. } | Component::FuelGenerator { carrier, .. }
             if is_plain_carrier(carrier)

@@ -849,6 +849,7 @@ pub(crate) fn network_item(id: &str) -> Option<Kind> {
         ENERGY_CONNECTOR,
         SMALL_CAPACITOR,
         SOLAR_GENERATOR,
+        crate::advanced_processing::CRUCIBLE,
         ELECTRIC_FURNACE,
         ELECTRIC_FURNACE_2,
         ELECTRIC_FURNACE_3,

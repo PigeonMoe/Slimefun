@@ -15,6 +15,7 @@ mod auto_brewer;
 mod backpacks;
 mod circuits;
 mod compressor;
+mod crucible;
 mod electric_processing;
 mod factory;
 mod food_machines;
@@ -46,6 +47,7 @@ use recipes::{
 
 struct Slimefun {
     delayed_crafts: DelayedCrafts,
+    crucibles: crucible::Crucibles,
     settings: Mutex<Settings>,
     rolls: Rolls,
     chest: Mutex<Option<ItemKey>>,
@@ -57,6 +59,7 @@ impl Default for Slimefun {
     fn default() -> Self {
         Self {
             delayed_crafts: DelayedCrafts::default(),
+            crucibles: crucible::Crucibles::default(),
             settings: Mutex::new(Settings::default()),
             rolls: Rolls::default(),
             chest: Mutex::new(None),
@@ -75,10 +78,17 @@ impl Slimefun {
         if fresh {
             *settings = Settings::default();
             output_chest::set_enabled(true);
+            self.crucibles.configure(false);
         }
         let Ok(table) = config.text.parse::<toml::Table>() else {
             return;
         };
+        if let Some(value) = table
+            .get("crucible-allow-water-in-nether")
+            .and_then(toml::Value::as_bool)
+        {
+            self.crucibles.configure(value);
+        }
         if let Some(value) = table.get("double-ores").and_then(toml::Value::as_bool) {
             settings.double_ores = value;
         }
@@ -168,6 +178,7 @@ impl Hooks for Slimefun {
         let skull = registrar.item_key("minecraft:player_head");
         registrar.item_part(skull, food_machines::Placement);
         network_runtime::register_cargo(registrar);
+        crucible::register(registrar);
         factory::register(registrar);
         backpacks::register(registrar);
     }
@@ -176,7 +187,7 @@ impl Hooks for Slimefun {
         event.configs.push(Config::new(
             "slimefun",
             ConfigKind::Server,
-            "double-ores = true\nlegacy-ore-washer = false\nlegacy-dust-washer = false\nlegacy-ore-grinder = true\nelectric-gold-pan-override-output-limit = [false, false, false]\nfreezer-use-vanilla-ratios = [false, false, false]\nfire-breaking-chance = 34\noutput-chest-enabled = true\ndrop-from-golems = true\ngolem-drop-chance = 75\n",
+            "double-ores = true\ncrucible-allow-water-in-nether = false\nlegacy-ore-washer = false\nlegacy-dust-washer = false\nlegacy-ore-grinder = true\nelectric-gold-pan-override-output-limit = [false, false, false]\nfreezer-use-vanilla-ratios = [false, false, false]\nfire-breaking-chance = 34\noutput-chest-enabled = true\ndrop-from-golems = true\ngolem-drop-chance = 75\n",
         ));
     }
 
@@ -200,6 +211,7 @@ impl Hooks for Slimefun {
 
     fn block_changed(&self, level: &dyn LevelHost, event: &mut mod_api::BlockChangedEvent) {
         network_runtime::observe_plain_change(level, event);
+        self.crucibles.anchor_changed(level, event);
         network_runtime::observe_gps_change(&self.networks, level, event);
     }
 
@@ -362,6 +374,7 @@ impl Hooks for Slimefun {
                 "The Electric Ore Grinder uses Grind Stone and Ore Crusher recipes. The Electric Ingot Pulverizer reverses single-dust smeltery recipes.".into(),
                 "Power an Electric Gold Pan, Electric Dust Washer and Electric Ingot Factory to turn gravel into sifted ore, dust and ingots. The Electric Press compacts materials and parts.".into(),
                 "Place and power your GPS Transmitters to reach 600 complexity. Use a GPS Geo-Scanner and an Oil Pump in the same chunk to extract oil.".into(),
+                "Use a placed Slimefun Crucible while holding stone or leaves to fill the block above with lava or water.".into(),
                 "The Electric Smeltery processes multi-ingredient recipes. The Electrified Crucible fills empty buckets with water or lava, and the Refinery turns buckets of oil into fuel.".into(),
                 "The Heated Pressure Chamber uses two input slots to refine uranium, blistering ingots, and fuel ingredients. Use /sf recipe to find its inputs.".into(),
                 "Wash Sifted Ore by placing a dispenser on a wooden fence with an empty cauldron below it and right-clicking the fence.".into(),
@@ -410,6 +423,16 @@ impl Hooks for Slimefun {
         let Some(level) = player.entity().level(host) else {
             return Flow::Continue;
         };
+        if self.crucibles.use_at(
+            host,
+            player,
+            level,
+            event.click.pos,
+            *event.use_item != TriState::False,
+        ) {
+            *event.cancellation_result = InteractionResult::Consume;
+            return Flow::Cancel;
+        }
         if network_runtime::open_scanner(
             &self.networks,
             host,
@@ -537,6 +560,7 @@ impl Hooks for Slimefun {
             let settings = *self.settings.lock().unwrap();
             network_runtime::tick(&self.networks, host, event.level, settings, &self.rolls);
             factory::VIEWERS.refresh(host, event.level);
+            self.crucibles.tick(host, event.level);
         }
     }
 
@@ -549,6 +573,7 @@ impl Hooks for Slimefun {
         factory::VIEWERS.clear();
         self.networks.lock().unwrap().clear();
         self.delayed_crafts.clear();
+        self.crucibles.clear();
         self.rolls.clear();
     }
 }
