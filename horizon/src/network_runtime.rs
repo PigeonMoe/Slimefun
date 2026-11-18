@@ -1077,13 +1077,10 @@ pub(crate) fn tick(
                 }
                 continue;
             }
-            if crate::auto_crafter::is_machine(&node.id) {
+            if let Some(cost) = crate::auto_crafter::operation_cost(&node.id) {
                 let crafted = host.transaction(|host, tx| {
                     let mut data = block_data(host, level, pos).ok_or(())?;
-                    data.charge = data
-                        .charge
-                        .checked_sub(crate::auto_crafter::COST)
-                        .ok_or(())?;
+                    data.charge = data.charge.checked_sub(cost).ok_or(())?;
                     crate::auto_crafter::stage(host, tx, level, pos, &node.id)?;
                     write_data(host, pos, data).map_err(|_| ())
                 });

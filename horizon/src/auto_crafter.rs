@@ -56,11 +56,23 @@ item!(
         value: "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHBzOi8vdGV4dHVyZXMubWluZWNyYWZ0Lm5ldC90ZXh0dXJlLzgwYTQzMzRmNmE2MWU0MGMwYzYzZGViNjY1ZmE3YjU4MWU2ZWIyNTlmN2EzMjA3Y2VkN2ExZmY4YmRjOGE5ZjkifX19",
     })
 );
+item!(
+    ARMOR_AUTO_CRAFTER,
+    "player_head",
+    "Auto-Crafter (Armor Forge)",
+    "dark_green",
+    None,
+    Some(HeadTexture {
+        profile: [-1063345249, -607178630, -1706725876, -302181572],
+        value: "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHBzOi8vdGV4dHVyZXMubWluZWNyYWZ0Lm5ldC90ZXh0dXJlLzVjYmQ5ZjVlYzFlZDAwNzI1OTk5NjQ5MWU2OWZmNjQ5YTMxMDZjZjkyMDIyN2IxYmIzYTcxZWU3YTg5ODYzZiJ9fX0=",
+    })
+);
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Variant {
     Enhanced,
     Vanilla,
+    Armor,
 }
 
 impl Variant {
@@ -69,6 +81,8 @@ impl Variant {
             Some(Self::Enhanced)
         } else if id == VANILLA_AUTO_CRAFTER.id() {
             Some(Self::Vanilla)
+        } else if id == ARMOR_AUTO_CRAFTER.id() {
+            Some(Self::Armor)
         } else {
             None
         }
@@ -78,6 +92,7 @@ impl Variant {
         match self {
             Self::Enhanced => "Enhanced Crafting Table",
             Self::Vanilla => "Crafting Table",
+            Self::Armor => "Armor Forge",
         }
     }
 
@@ -85,12 +100,29 @@ impl Variant {
         match self {
             Self::Enhanced => "Auto-Crafter (Enhanced)",
             Self::Vanilla => "Auto-Crafter (Vanilla)",
+            Self::Armor => "Auto-Crafter (Armor Forge)",
+        }
+    }
+
+    fn cost(self) -> u32 {
+        match self {
+            Self::Enhanced | Self::Vanilla => 16,
+            Self::Armor => 32,
+        }
+    }
+
+    fn static_recipe(self, id: &str) -> Option<&'static CraftingRecipe> {
+        match self {
+            Self::Enhanced => recipe(id),
+            Self::Vanilla => None,
+            Self::Armor => crate::armor_forge::RECIPES
+                .iter()
+                .find(|recipe| crate::armor_forge::paper_id(recipe.output.kind) == id),
         }
     }
 }
 
 pub(crate) const CAPACITY: u32 = 256;
-pub(crate) const COST: u32 = 16;
 pub(crate) const RESEARCH: Research = Research {
     id: "auto_crafting",
     name: "Automatic Crafting",
@@ -98,6 +130,7 @@ pub(crate) const RESEARCH: Research = Research {
 };
 
 const TABLE: Option<Kind> = Some(Kind::Vanilla("minecraft:crafting_table"));
+const DISPENSER: Option<Kind> = Some(Kind::Vanilla("minecraft:dispenser"));
 pub(crate) const CRAFTING: &[CraftingRecipe] = &[
     CraftingRecipe {
         inputs: [
@@ -123,7 +156,7 @@ pub(crate) const CRAFTING: &[CraftingRecipe] = &[
             Some(CRAFTING_MOTOR),
             None,
             TABLE,
-            Some(Kind::Vanilla("minecraft:dispenser")),
+            DISPENSER,
             TABLE,
             None,
             Some(CARGO_MOTOR),
@@ -153,6 +186,24 @@ pub(crate) const CRAFTING: &[CraftingRecipe] = &[
         },
         research: &RESEARCH,
     },
+    CraftingRecipe {
+        inputs: [
+            None,
+            Some(CRAFTING_MOTOR),
+            None,
+            DISPENSER,
+            Some(Kind::Vanilla("minecraft:anvil")),
+            DISPENSER,
+            TABLE,
+            Some(ELECTRIC_MOTOR),
+            TABLE,
+        ],
+        output: Stack {
+            kind: ARMOR_AUTO_CRAFTER,
+            count: 1,
+        },
+        research: &RESEARCH,
+    },
 ];
 
 const PREVIEW_SLOTS: [usize; 9] = [11, 12, 13, 20, 21, 22, 29, 30, 31];
@@ -174,9 +225,13 @@ pub(crate) fn refuses_placement(
     if CRAFTING_MOTOR.matches(host, event.stack) {
         return true;
     }
-    if ![ENHANCED_AUTO_CRAFTER, VANILLA_AUTO_CRAFTER]
-        .into_iter()
-        .any(|item| item.matches(host, event.stack))
+    if ![
+        ENHANCED_AUTO_CRAFTER,
+        VANILLA_AUTO_CRAFTER,
+        ARMOR_AUTO_CRAFTER,
+    ]
+    .into_iter()
+    .any(|item| item.matches(host, event.stack))
     {
         return false;
     }
@@ -195,13 +250,22 @@ pub(crate) fn refuses_placement(
 }
 
 pub(crate) fn item_by_id(id: &str) -> Option<Kind> {
-    [CRAFTING_MOTOR, ENHANCED_AUTO_CRAFTER, VANILLA_AUTO_CRAFTER]
-        .into_iter()
-        .find(|kind| kind.id() == id)
+    [
+        CRAFTING_MOTOR,
+        ENHANCED_AUTO_CRAFTER,
+        VANILLA_AUTO_CRAFTER,
+        ARMOR_AUTO_CRAFTER,
+    ]
+    .into_iter()
+    .find(|kind| kind.id() == id)
 }
 
 pub(crate) fn is_machine(id: &str) -> bool {
     Variant::from_item(id).is_some()
+}
+
+pub(crate) fn operation_cost(id: &str) -> Option<u32> {
+    Variant::from_item(id).map(Variant::cost)
 }
 
 pub(crate) fn decorate(id: &str, components: &mut Compound) {
@@ -222,7 +286,9 @@ pub(crate) fn decorate(id: &str, components: &mut Compound) {
                 text("chest or similar and make it craft", "white", false),
                 text(
                     match variant {
-                        Variant::Enhanced => "anything that can be crafted using an",
+                        Variant::Enhanced | Variant::Armor => {
+                            "anything that can be crafted using an"
+                        }
                         Variant::Vanilla => "anything that can be crafted using a",
                     },
                     "white",
@@ -231,7 +297,7 @@ pub(crate) fn decorate(id: &str, components: &mut Compound) {
                 text(variant.station(), "yellow", false),
                 Tag::String("".into()),
                 text("Advanced Machine", "red", true),
-                text("⇨ ⚡ 16 J/Item", "gray", false),
+                text(&format!("⇨ ⚡ {} J/Item", variant.cost()), "gray", false),
             ]),
         );
     }
@@ -354,7 +420,7 @@ pub(crate) fn restore_paper(
         .recipe
         .as_deref()
         .is_some_and(|recipe| !match variant {
-            Variant::Enhanced => enhanced_key(recipe),
+            Variant::Enhanced | Variant::Armor => enhanced_key(recipe),
             Variant::Vanilla => vanilla_key(recipe),
         })
     {
@@ -417,28 +483,28 @@ impl IngredientKind<'_> {
 }
 
 enum RecipeView<'a> {
-    Enhanced(&'a CraftingRecipe),
+    Slimefun(&'a CraftingRecipe),
     Vanilla(std::sync::Arc<vanilla::VanillaRecipe>),
 }
 
 fn selected_recipe(host: &dyn Host, variant: Variant, id: &str) -> Option<RecipeView<'static>> {
     match variant {
-        Variant::Enhanced => recipe(id).map(RecipeView::Enhanced),
         Variant::Vanilla => vanilla::find(host, id).map(RecipeView::Vanilla),
+        _ => variant.static_recipe(id).map(RecipeView::Slimefun),
     }
 }
 
 impl RecipeView<'_> {
     fn input(&self) -> [Option<IngredientKind<'_>>; 9] {
         match self {
-            Self::Enhanced(recipe) => recipe.inputs.map(|kind| kind.map(IngredientKind::Slimefun)),
+            Self::Slimefun(recipe) => recipe.inputs.map(|kind| kind.map(IngredientKind::Slimefun)),
             Self::Vanilla(recipe) => recipe.input().map(|kind| kind.map(IngredientKind::Vanilla)),
         }
     }
 
     fn icons(&self, host: &dyn Host, frame: usize) -> ([Option<ItemStack>; 9], Option<ItemStack>) {
         match self {
-            Self::Enhanced(recipe) => (
+            Self::Slimefun(recipe) => (
                 recipe
                     .inputs
                     .map(|kind| kind.and_then(|kind| kind.stack(host, 1))),
@@ -604,7 +670,7 @@ fn run(
         .collect();
     let plan = payments(host, recipe.input(), slots).ok_or(())?;
     let mut output = match recipe {
-        RecipeView::Enhanced(recipe) => recipe.output.kind.stack(host, recipe.output.count),
+        RecipeView::Slimefun(recipe) => recipe.output.kind.stack(host, recipe.output.count),
         RecipeView::Vanilla(recipe) => recipe.assemble(host, level, plan.grid),
     }
     .ok_or(())?;
@@ -821,7 +887,7 @@ fn check_candidate(
     key: &str,
 ) -> Result<(), &'static str> {
     match recipe {
-        RecipeView::Enhanced(recipe)
+        RecipeView::Slimefun(recipe)
             if !recipe.research.id.is_empty()
                 && !research::can_use(host, player, recipe.research) =>
         {
@@ -905,11 +971,26 @@ fn candidates(
     item: &ItemStack,
 ) -> Result<Pages, &'static str> {
     let recipes = match variant {
-        Variant::Enhanced => item_id(item)
-            .filter(|id| recipe(id).is_some_and(|recipe| recipe.output.kind.matches(host, item)))
-            .map(|id| vec![id])
-            .ok_or("Hold an item made by the Enhanced Crafting Table to set its recipe.")?,
         Variant::Vanilla => vanilla::candidates(host, level, player, item)?,
+        _ => vec![
+            item_id(item)
+                .filter(|id| {
+                    variant.static_recipe(id).is_some_and(|recipe| {
+                        // Paper's vanilla chainmail has no Slimefun ID when crafted. Older tagged
+                        // stacks can still select a recipe and receive the normal vanilla output.
+                        match recipe.output.kind {
+                            Kind::Vanilla(material) => item.item().id(host) == material,
+                            kind => kind.matches(host, item),
+                        }
+                    })
+                })
+                .ok_or_else(|| match variant {
+                    Variant::Armor => {
+                        "Hold a Slimefun item made by the Armor Forge to set its recipe."
+                    }
+                    _ => "Hold an item made by the Enhanced Crafting Table to set its recipe.",
+                })?,
+        ],
     };
     if recipes.is_empty() {
         Err("No available Crafting Table recipe produces the item in your hand.")
@@ -1180,7 +1261,7 @@ mod tests {
                     tx,
                     level,
                     &storage,
-                    RecipeView::Enhanced(&recipe),
+                    RecipeView::Slimefun(&recipe),
                     |_, _, from_chest| output_allowed || from_chest,
                 )
             });
@@ -1223,7 +1304,7 @@ mod tests {
         };
         let first = stone.stack(&host, 1);
         let next = stone.stack(&host, 9);
-        let view = RecipeView::Enhanced(&recipe);
+        let view = RecipeView::Slimefun(&recipe);
         let inputs = view.input();
         assert!(payments(&host, inputs, vec![first.clone(), next.clone()]).is_none());
         let raw = payments(&host, inputs, vec![first, None, next]).unwrap();
@@ -1234,6 +1315,62 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![(0, 1), (2, 2)]
         );
+    }
+
+    #[test]
+    fn armor_crafter_restores_the_paper_key_and_produces_untagged_chainmail() {
+        let mut host = FakeHost::new();
+        let chain = crate::armor_forge::CHAIN;
+        let boots = Kind::Vanilla("minecraft:chainmail_boots");
+        let boots_id = "CHAIN_BOOTS";
+        let saved = paper_selection(&Compound::from([(
+            "PublicBukkitValues".into(),
+            Tag::compound([
+                ("slimefun:recipe_key", Tag::String(boots_id.into())),
+                ("slimefun:recipe_enabled", Tag::Byte(1)),
+            ]),
+        )]))
+        .unwrap();
+        assert!(saved.disabled);
+        let id = ARMOR_AUTO_CRAFTER.id();
+        assert_eq!(operation_cost(id), Some(32));
+        assert_eq!(operation_cost(VANILLA_AUTO_CRAFTER.id()), Some(16));
+        assert!(Variant::Enhanced.static_recipe(boots_id).is_none());
+        assert_eq!(
+            recipe(id).unwrap().inputs[4],
+            Some(Kind::Vanilla("minecraft:anvil"))
+        );
+        let armor = Variant::from_item(id).unwrap();
+        let recipe = selected_recipe(&host, armor, saved.recipe.as_deref().unwrap()).unwrap();
+
+        host.registries
+            .resolve_items([chain, boots].map(|kind| Identifier::parse(kind.material()).unwrap()))
+            .unwrap();
+        let raw = chain.stack(&host, 4).unwrap();
+        let chest = [0, 65, 0];
+        let level = host.level.level();
+        let container = host
+            .level
+            .block_entity(chest)
+            .with_items(2)
+            .items
+            .as_mut()
+            .unwrap();
+        container.slots[0] = Some(raw);
+        host.transaction(|host, tx| {
+            let storage = level.capability(host, &ITEMS, chest, None).unwrap();
+            run(host, tx, level, &storage, recipe, |_, _, _| true)
+        })
+        .unwrap();
+        let contents = host
+            .level
+            .block_entity_at(chest)
+            .unwrap()
+            .items
+            .as_ref()
+            .unwrap();
+        assert_eq!(contents.slots[0].as_ref(), boots.stack(&host, 1).as_ref());
+        assert!(contents.slots[1].is_none());
     }
 
     #[test]
