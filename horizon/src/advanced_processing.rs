@@ -73,6 +73,9 @@ pub(crate) enum Family {
     Smeltery,
     Crucible,
     Refinery,
+    CarbonPress,
+    Freezer,
+    AutoDrier,
 }
 
 pub(crate) struct Machine {
@@ -143,7 +146,10 @@ const MACHINES: &[Machine] = &[
 ];
 
 pub(crate) fn machine(id: &str) -> Option<&'static Machine> {
-    MACHINES.iter().find(|machine| machine.item.id() == id)
+    MACHINES
+        .iter()
+        .chain(crate::thermal_machines::MACHINES)
+        .find(|machine| machine.item.id() == id)
 }
 
 const SMELTERY: Research = Research {
@@ -446,7 +452,7 @@ fn can_melt_leaves(host: &dyn Host, item: &ItemStack) -> bool {
 
 pub(crate) struct Plan {
     pub consumed: Vec<(usize, ItemStack, u32)>,
-    pub output: ItemStack,
+    pub outputs: Vec<ItemStack>,
     pub work_ticks: u32,
 }
 
@@ -454,7 +460,7 @@ fn plan(
     host: &dyn Host,
     slots: &[Option<ItemStack>],
     ingredients: &[Stack],
-    output: Stack,
+    outputs: &[Stack],
     work_ticks: u32,
 ) -> Option<Plan> {
     let mut consumed = Vec::with_capacity(ingredients.len());
@@ -470,7 +476,10 @@ fn plan(
     }
     Some(Plan {
         consumed,
-        output: output.kind.stack(host, output.count)?,
+        outputs: outputs
+            .iter()
+            .map(|output| output.kind.stack(host, output.count))
+            .collect::<Option<_>>()?,
         work_ticks,
     })
 }
@@ -483,7 +492,7 @@ fn crucible(host: &dyn Host, inputs: &[Option<ItemStack>], speed: u32) -> Option
                 host,
                 inputs,
                 &[stack(EMPTY_BUCKET, 1), recipe.input],
-                stack(LAVA_BUCKET, 1),
+                &[stack(LAVA_BUCKET, 1)],
                 recipe.seconds * 2 / speed,
             )
         })
@@ -501,7 +510,7 @@ fn crucible(host: &dyn Host, inputs: &[Option<ItemStack>], speed: u32) -> Option
                     (bucket_slot, bucket.clone(), 1),
                     (leaf_slot, leaves.clone(), 16),
                 ],
-                output: WATER_BUCKET.stack(host, 1)?,
+                outputs: vec![WATER_BUCKET.stack(host, 1)?],
                 work_ticks: 20 / speed,
             })
         })
@@ -511,6 +520,7 @@ pub(crate) fn next(
     host: &dyn Host,
     machine: &Machine,
     inputs: &[Option<ItemStack>],
+    freezer_ratios: [bool; 3],
 ) -> Option<Plan> {
     match machine.family {
         Family::Smeltery => smeltery_recipes().iter().find_map(|recipe| {
@@ -518,7 +528,7 @@ pub(crate) fn next(
                 host,
                 inputs,
                 recipe.inputs,
-                recipe.output,
+                &[recipe.output],
                 24 / machine.speed,
             )
         }),
@@ -527,8 +537,28 @@ pub(crate) fn next(
             host,
             inputs,
             &[stack(BUCKET_OF_OIL, 1)],
-            stack(BUCKET_OF_FUEL, 1),
+            &[stack(BUCKET_OF_FUEL, 1)],
             80 / machine.speed,
         ),
+        Family::CarbonPress | Family::Freezer | Family::AutoDrier => {
+            use crate::thermal_machines as thermal;
+            let ratios =
+                machine.family == Family::Freezer && freezer_ratios[(machine.speed - 1) as usize];
+            thermal::recipes(machine.family, ratios)
+                .find_map(|recipe| {
+                    plan(
+                        host,
+                        inputs,
+                        recipe.inputs,
+                        recipe.outputs,
+                        recipe.seconds * 2 / machine.speed,
+                    )
+                })
+                .or_else(|| {
+                    (machine.family == Family::AutoDrier)
+                        .then(|| thermal::dry_plant(host, inputs))
+                        .flatten()
+                })
+        }
     }
 }

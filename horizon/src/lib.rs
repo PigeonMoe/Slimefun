@@ -31,6 +31,7 @@ mod random;
 mod recipes;
 mod research;
 mod storage;
+mod thermal_machines;
 
 use compressor::DelayedCrafts;
 use machine::{Machine, Settings};
@@ -103,6 +104,15 @@ impl Slimefun {
         {
             settings.gold_pan_override_output_limit = [first, second, third];
         }
+        if let Some(values) = table
+            .get("freezer-use-vanilla-ratios")
+            .and_then(toml::Value::as_array)
+            && let [first, second, third] = values.as_slice()
+            && let (Some(first), Some(second), Some(third)) =
+                (first.as_bool(), second.as_bool(), third.as_bool())
+        {
+            settings.freezer_use_vanilla_ratios = [first, second, third];
+        }
         if let Some(value) = table
             .get("fire-breaking-chance")
             .and_then(toml::Value::as_integer)
@@ -139,6 +149,7 @@ impl Hooks for Slimefun {
             "minecraft:player_head",
             "minecraft:daylight_detector",
             "minecraft:furnace",
+            "minecraft:smoker",
         ]
         .into_iter()
         .chain(network_runtime::PLAIN_CARRIERS.iter().copied())
@@ -157,7 +168,7 @@ impl Hooks for Slimefun {
         event.configs.push(Config::new(
             "slimefun",
             ConfigKind::Server,
-            "double-ores = true\nlegacy-ore-washer = false\nlegacy-dust-washer = false\nlegacy-ore-grinder = true\nelectric-gold-pan-override-output-limit = [false, false, false]\nfire-breaking-chance = 34\noutput-chest-enabled = true\ndrop-from-golems = true\ngolem-drop-chance = 75\n",
+            "double-ores = true\nlegacy-ore-washer = false\nlegacy-dust-washer = false\nlegacy-ore-grinder = true\nelectric-gold-pan-override-output-limit = [false, false, false]\nfreezer-use-vanilla-ratios = [false, false, false]\nfire-breaking-chance = 34\noutput-chest-enabled = true\ndrop-from-golems = true\ngolem-drop-chance = 75\n",
         ));
     }
 
@@ -439,7 +450,14 @@ impl Hooks for Slimefun {
         event: &mut mod_api::LivingEntityUseItemStartEvent<'_>,
     ) -> Flow {
         match host {
-            HostSide::Server(host) => juice::start(host, event),
+            HostSide::Server(host) => {
+                let result = thermal_machines::start_eating_jerky(host, event);
+                if result == Flow::Continue {
+                    juice::start(host, event)
+                } else {
+                    result
+                }
+            }
             _ => Flow::Continue,
         }
     }
@@ -451,6 +469,7 @@ impl Hooks for Slimefun {
     ) {
         if let HostSide::Server(host) = host {
             juice::finish(host, event);
+            thermal_machines::finish_eating_jerky(host, event);
         }
     }
 

@@ -12,6 +12,8 @@ use super::{BlockData, Position, saved_id};
 pub(crate) const CARRIERS: &[&str] = &[
     "minecraft:light_gray_stained_glass",
     "minecraft:blue_stained_glass",
+    "minecraft:black_stained_glass",
+    "minecraft:light_blue_stained_glass",
     "minecraft:brown_terracotta",
     "minecraft:lime_terracotta",
     "minecraft:piston",

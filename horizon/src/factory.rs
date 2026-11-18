@@ -39,7 +39,7 @@ const PENDING: &str = "pending";
 const REMAINING: &str = "remaining";
 const TOTAL: &str = "total";
 const RETURNS_BUCKET: &str = "returns_bucket";
-const MAX_WORK_TICKS: i32 = 180;
+const MAX_WORK_TICKS: i32 = 360;
 const IMPORT: &str = "paper_inventory_import";
 const MENU_SLOTS: [usize; 8] = [19, 20, 24, 25, 10, 11, 28, 29];
 const BACKGROUND: &[usize] = &[
@@ -370,6 +370,7 @@ impl ElectricMachine {
 pub(crate) fn register(registrar: &mut dyn mod_api::Registrar) {
     for material in [
         "minecraft:furnace",
+        "minecraft:smoker",
         "minecraft:player_head",
         "minecraft:player_wall_head",
     ]
@@ -553,7 +554,11 @@ fn menu_items(
                     Family::IngotFactory => ("minecraft:flint_and_steel", 63),
                 },
                 RecipeFamily::Fuel(spec) => spec.progress_icon(),
-                RecipeFamily::Advanced(_) => ("minecraft:flint_and_steel", 63),
+                RecipeFamily::Advanced(spec) => match spec.family {
+                    advanced_processing::Family::CarbonPress => ("minecraft:diamond_pickaxe", 1560),
+                    advanced_processing::Family::Freezer => ("minecraft:golden_pickaxe", 31),
+                    _ => ("minecraft:flint_and_steel", 63),
+                },
                 RecipeFamily::OilPump => ("minecraft:diamond_shovel", 1560),
             };
             let mut bar = display_item(host, icon, &format!("{progress}%"));
@@ -834,9 +839,45 @@ fn fits(host: &dyn Host, data: &Compound, output: &ItemStack) -> bool {
         >= output.count()
 }
 
+fn fits_all(host: &dyn Host, data: &Compound, outputs: &[ItemStack]) -> bool {
+    if let [output] = outputs {
+        return fits(host, data, output);
+    }
+    let mut slots = OUTPUT.map(|index| stack_in(host, data, index));
+    for output in outputs {
+        let resource = ItemResource::of(output);
+        let limit = max_stack(host, &resource);
+        let mut left = output.count();
+        for slot in &mut slots {
+            let count = match slot.as_ref() {
+                Some(current) if resource.matches(current) => current.count(),
+                None => 0,
+                _ => continue,
+            };
+            let amount = left.min(limit.saturating_sub(count));
+            if amount == 0 {
+                continue;
+            }
+            let mut placed = output.clone();
+            if placed.set_count(count + amount).is_err() {
+                return false;
+            }
+            *slot = Some(placed);
+            left -= amount;
+            if left == 0 {
+                break;
+            }
+        }
+        if left != 0 {
+            return false;
+        }
+    }
+    !outputs.is_empty()
+}
+
 struct RecipeRun {
     inputs: [Option<(ItemStack, u32)>; SLOTS.len()],
-    output: ItemStack,
+    outputs: Vec<ItemStack>,
     work_override: Option<u32>,
 }
 
@@ -846,7 +887,7 @@ impl RecipeRun {
         inputs[index] = Some((input, amount));
         Self {
             inputs,
-            output,
+            outputs: vec![output],
             work_override: None,
         }
     }
@@ -957,7 +998,7 @@ fn heated_recipe(
         }
         Some(RecipeRun {
             inputs: consumed,
-            output: recipe.output.kind.stack(host, recipe.output.count)?,
+            outputs: vec![recipe.output.kind.stack(host, recipe.output.count)?],
             work_override: Some(recipe.seconds * 2 / speed),
         })
     })
@@ -1052,8 +1093,9 @@ fn find_recipe(
             .iter()
             .map(|&index| stack_in(host, data, index))
             .collect();
-        let plan = advanced_processing::next(host, spec, &stored)?;
-        if !fits(host, data, &plan.output) {
+        let plan =
+            advanced_processing::next(host, spec, &stored, settings.freezer_use_vanilla_ratios)?;
+        if !fits_all(host, data, &plan.outputs) {
             return None;
         }
         let mut inputs = std::array::from_fn(|_| None);
@@ -1062,7 +1104,7 @@ fn find_recipe(
         }
         return Some(RecipeRun {
             inputs,
-            output: plan.output,
+            outputs: plan.outputs,
             work_override: Some(plan.work_ticks),
         });
     }
@@ -1108,7 +1150,32 @@ fn find_recipe(
         ),
         RecipeFamily::Fuel(_) | RecipeFamily::Advanced(_) => None,
     }?;
-    fits(host, data, &run.output).then_some(run)
+    fits_all(host, data, &run.outputs).then_some(run)
+}
+
+fn encode_pending(host: &dyn Host, outputs: &[ItemStack]) -> Option<Tag> {
+    if let [output] = outputs {
+        return Some(Tag::Compound(output.to_nbt(host)?));
+    }
+    let stacks = outputs
+        .iter()
+        .map(|output| output.to_nbt(host).map(Tag::Compound))
+        .collect::<Option<_>>()?;
+    Some(Tag::List(stacks))
+}
+
+fn decode_pending(host: &dyn Host, saved: &Tag) -> Option<Vec<ItemStack>> {
+    match saved {
+        Tag::Compound(stack) => Some(vec![ItemStack::from_nbt(host, stack)?]),
+        Tag::List(stacks) if (1..=OUTPUT.len()).contains(&stacks.len()) => stacks
+            .iter()
+            .map(|tag| match tag {
+                Tag::Compound(stack) => ItemStack::from_nbt(host, stack),
+                _ => None,
+            })
+            .collect(),
+        _ => None,
+    }
 }
 
 /// Runs one Paper machine tick, after power allocation. Caller journals the
@@ -1125,7 +1192,7 @@ pub(crate) fn tick(
     let furnace = ElectricMachine::for_item(id)?;
     let storage = furnace.storage(level, pos);
     let data = data_at(host, storage)?;
-    if let Some(Tag::Compound(saved)) = data.get(&PENDING.into()) {
+    if let Some(saved) = data.get(&PENDING.into()) {
         let next_charge = charge.checked_sub(furnace.cost)?;
         let remaining = remaining(&data)?;
         if remaining > 0 {
@@ -1133,19 +1200,21 @@ pub(crate) fn tick(
             next.insert(REMAINING.into(), Tag::Int(remaining as i32 - 1));
             return save(host, storage, next).then_some(next_charge);
         }
-        let output = ItemStack::from_nbt(host, saved)?;
+        let outputs = decode_pending(host, saved)?;
         return host
             .transaction(|host, tx| {
-                let resource = ItemResource::of(&output);
-                let mut left = output.count();
-                for index in OUTPUT {
-                    left -= place(level, pos, index).insert(host, tx, &resource, left);
-                    if left == 0 {
-                        break;
+                for output in outputs {
+                    let resource = ItemResource::of(&output);
+                    let mut left = output.count();
+                    for index in OUTPUT {
+                        left -= place(level, pos, index).insert(host, tx, &resource, left);
+                        if left == 0 {
+                            break;
+                        }
                     }
-                }
-                if left != 0 {
-                    return Err(());
+                    if left != 0 {
+                        return Err(());
+                    }
                 }
                 let mut next = data_at(host, storage).ok_or(())?;
                 next.remove(&PENDING.into());
@@ -1158,7 +1227,7 @@ pub(crate) fn tick(
 
     let RecipeRun {
         inputs,
-        output,
+        outputs,
         work_override,
     } = find_recipe(host, &data, furnace, settings, |bound| {
         rolls.next(host, level, bound)
@@ -1171,7 +1240,7 @@ pub(crate) fn tick(
             .find_map(|(index, input)| input.as_ref().map(|input| (index, input)))?;
         return move_empty_buckets(host, level, pos, index, bucket).then_some(charge);
     }
-    let saved_result = output.to_nbt(host)?;
+    let saved_result = encode_pending(host, &outputs)?;
     let work_ticks = work_override.unwrap_or(furnace.work_ticks) as i32;
     host.transaction(|host, tx| {
         if pumping_oil {
@@ -1186,7 +1255,7 @@ pub(crate) fn tick(
             }
         }
         let mut next = data_at(host, storage).ok_or(())?;
-        next.insert(PENDING.into(), Tag::Compound(saved_result));
+        next.insert(PENDING.into(), saved_result);
         next.insert(REMAINING.into(), Tag::Int(work_ticks));
         next.insert(TOTAL.into(), Tag::Int(work_ticks));
         save(host, storage, next).then_some(charge).ok_or(())
@@ -1321,7 +1390,7 @@ pub(crate) fn prepare_paper_inventory(
             {
                 return Err("Load the original, unextended Paper refinery block first.".into());
             }
-            if machine.carrier == "minecraft:furnace" {
+            if matches!(machine.carrier, "minecraft:furnace" | "minecraft:smoker") {
                 if level.block_property(host, pos, "lit").as_deref() != Some("false") {
                     return Err("Load the original, unlit Paper furnace block first.".into());
                 }
@@ -1402,6 +1471,73 @@ pub(crate) fn restore_paper_inventory(
 mod tests {
     use super::*;
     use mod_api::testing::FakeHost;
+
+    #[test]
+    fn freezer_checks_both_outputs_and_reads_the_legacy_single_product_format() {
+        let mut host = FakeHost::new();
+        host.registries
+            .resolve_items(
+                ["water_bucket", "bucket", "ice", "packed_ice", "stone"]
+                    .map(|id| Identifier::parse(&format!("minecraft:{id}")).unwrap()),
+            )
+            .unwrap();
+        let water = Kind::Vanilla("minecraft:water_bucket")
+            .stack(&host, 1)
+            .unwrap();
+        let stone = Kind::Vanilla("minecraft:stone").stack(&host, 1).unwrap();
+        let mut data = Compound::new();
+        assert!(write_stack(&host, &mut data, INPUT[0], Some(water)));
+        let freezer = ElectricMachine::for_item("FREEZER").unwrap();
+        let run = find_recipe(&host, &data, freezer, Settings::default(), |_| None).unwrap();
+        let [bucket, ice] = run.outputs.as_slice() else {
+            panic!("Paper's freezer returns both its bucket and ice");
+        };
+        assert!(Kind::Vanilla("minecraft:bucket").matches(&host, bucket));
+        assert!(Kind::Vanilla("minecraft:ice").matches(&host, ice));
+        assert_eq!(run.work_override, Some(4));
+        assert_eq!(
+            decode_pending(&host, &encode_pending(&host, &run.outputs).unwrap()),
+            Some(run.outputs.clone())
+        );
+        let saved = Tag::Compound(ice.to_nbt(&host).unwrap());
+        assert_eq!(decode_pending(&host, &saved), Some(vec![ice.clone()]));
+        assert!(write_stack(&host, &mut data, OUTPUT[1], Some(stone)));
+        assert!(find_recipe(&host, &data, freezer, Settings::default(), |_| None).is_none());
+        assert!(write_stack(&host, &mut data, OUTPUT[1], Some(ice.clone())));
+        assert!(find_recipe(&host, &data, freezer, Settings::default(), |_| None).is_some());
+    }
+
+    #[test]
+    fn carbon_press_preserves_recipe_priority_and_long_operations() {
+        let mut host = FakeHost::new();
+        host.registries
+            .resolve_items(
+                ["coal_block", "diamond", "charcoal", "flint", "player_head"]
+                    .map(|id| Identifier::parse(&format!("minecraft:{id}")).unwrap()),
+            )
+            .unwrap();
+        let mut data = Compound::new();
+        let coal = Kind::Vanilla("minecraft:coal_block")
+            .stack(&host, 8)
+            .unwrap();
+        assert!(write_stack(&host, &mut data, INPUT[0], Some(coal)));
+        let press = ElectricMachine::for_item("CARBON_PRESS").unwrap();
+        let run = find_recipe(&host, &data, press, Settings::default(), |_| None).unwrap();
+        assert_eq!(run.quantity(), 8);
+        assert_eq!(run.outputs[0].count(), 9);
+        assert_eq!(run.work_override, Some(360));
+        data.insert(REMAINING.into(), Tag::Int(360));
+        assert_eq!(remaining(&data), Some(360));
+
+        let chunk = crate::items::CARBON_CHUNK.stack(&host, 1).unwrap();
+        let diamond = crate::items::SYNTHETIC_DIAMOND.stack(&host, 1).unwrap();
+        assert!(write_stack(&host, &mut data, INPUT[0], Some(chunk)));
+        assert!(write_stack(&host, &mut data, INPUT[1], Some(diamond)));
+        let press = ElectricMachine::for_item("CARBON_PRESS_3").unwrap();
+        let run = find_recipe(&host, &data, press, Settings::default(), |_| None).unwrap();
+        assert!(crate::items::RAW_CARBONADO.matches(&host, &run.outputs[0]));
+        assert_eq!(run.work_override, Some(8));
+    }
 
     #[test]
     fn a_fuel_generator_waits_for_space_without_advancing_its_burn() {
@@ -1546,12 +1682,12 @@ mod tests {
         let settings = Settings::default();
         let legacy = single_recipe(&host, &input, grinder_recipes(settings), false).unwrap();
         assert_eq!(
-            (legacy.quantity(), legacy.output.item().id(&host)),
+            (legacy.quantity(), legacy.outputs[0].item().id(&host)),
             (1, "minecraft:gravel".into())
         );
         let sorted = single_recipe(&host, &input, grinder_recipes(settings), true).unwrap();
         assert_eq!(
-            (sorted.quantity(), sorted.output.item().id(&host)),
+            (sorted.quantity(), sorted.outputs[0].item().id(&host)),
             (8, "minecraft:sand".into())
         );
         let max_tier = ElectricMachine::for_item("ELECTRIC_ORE_GRINDER_3").unwrap();
@@ -1579,7 +1715,7 @@ mod tests {
         let standard = heated_recipe(&host, &inputs, 1).unwrap();
         assert_eq!(standard.quantity(), 2);
         assert_eq!(standard.work_override, Some(60));
-        assert!(BLISTERING_INGOT.matches(&host, &standard.output));
+        assert!(BLISTERING_INGOT.matches(&host, &standard.outputs[0]));
         let upgraded = heated_recipe(&host, &inputs, 5).unwrap();
         assert_eq!(upgraded.work_override, Some(12));
     }
@@ -1643,11 +1779,11 @@ mod tests {
             flint.stack(&host, 6)
         ));
         let cobble = run(&data).unwrap();
-        assert!(Kind::Vanilla("minecraft:cobblestone").matches(&host, &cobble.output));
+        assert!(Kind::Vanilla("minecraft:cobblestone").matches(&host, &cobble.outputs[0]));
         assert_eq!(
             (
                 cobble.quantity(),
-                cobble.output.count(),
+                cobble.outputs[0].count(),
                 cobble.work_override
             ),
             (6, 1, Some(2))
@@ -1660,9 +1796,13 @@ mod tests {
             flint.stack(&host, 5)
         ));
         let panes = run(&data).unwrap();
-        assert!(Kind::Vanilla("minecraft:glass_pane").matches(&host, &panes.output));
+        assert!(Kind::Vanilla("minecraft:glass_pane").matches(&host, &panes.outputs[0]));
         assert_eq!(
-            (panes.quantity(), panes.output.count(), panes.work_override),
+            (
+                panes.quantity(),
+                panes.outputs[0].count(),
+                panes.work_override
+            ),
             (1, 3, Some(3))
         );
     }
@@ -1711,7 +1851,7 @@ mod tests {
         })
         .unwrap();
         assert_eq!((rolled.quantity(), rolled.work_override), (1, Some(2)));
-        assert!(flint.matches(&host, &rolled.output));
+        assert!(flint.matches(&host, &rolled.outputs[0]));
 
         assert!(write_stack(&host, &mut data, OUTPUT[1], None));
         assert!(write_stack(
@@ -1734,7 +1874,7 @@ mod tests {
         .unwrap();
         assert_eq!(calls, 1);
         assert!(nether.inputs[0].is_none());
-        assert!(Kind::Vanilla("minecraft:quartz").matches(&host, &nether.output));
+        assert!(Kind::Vanilla("minecraft:quartz").matches(&host, &nether.outputs[0]));
         assert_eq!(nether.work_override, Some(0));
     }
 
@@ -1756,10 +1896,15 @@ mod tests {
         assert!(write_stack(&host, &mut data, INPUT[0], gravel));
         let sifted =
             test_recipe(&host, "ELECTRIC_GOLD_PAN", &data, settings, |_| Some(60)).unwrap();
-        assert!(SIFTED_ORE.matches(&host, &sifted.output));
+        assert!(SIFTED_ORE.matches(&host, &sifted.outputs[0]));
 
         let washer = "ELECTRIC_DUST_WASHER_2";
-        assert!(write_stack(&host, &mut data, INPUT[0], Some(sifted.output)));
+        assert!(write_stack(
+            &host,
+            &mut data,
+            INPUT[0],
+            Some(sifted.outputs[0].clone())
+        ));
         assert!(write_stack(
             &host,
             &mut data,
@@ -1790,7 +1935,7 @@ mod tests {
             Some(7)
         })
         .unwrap();
-        assert!(LEAD_DUST.matches(&host, &dust.output));
+        assert!(LEAD_DUST.matches(&host, &dust.outputs[0]));
         assert_eq!(dust.work_override, Some(4));
 
         assert!(write_stack(&host, &mut data, INPUT[0], None));
@@ -1802,18 +1947,23 @@ mod tests {
             |_| unreachable!(),
         )
         .unwrap();
-        assert_eq!((salt.quantity(), salt.output.count()), (1, 1));
-        assert!(SALT.matches(&host, &salt.output));
+        assert_eq!((salt.quantity(), salt.outputs[0].count()), (1, 1));
+        assert!(SALT.matches(&host, &salt.outputs[0]));
 
         data.clear();
-        assert!(write_stack(&host, &mut data, INPUT[0], Some(dust.output)));
+        assert!(write_stack(
+            &host,
+            &mut data,
+            INPUT[0],
+            Some(dust.outputs[0].clone())
+        ));
         let factory = ElectricMachine::for_item("ELECTRIC_INGOT_FACTORY_3").unwrap();
         let ingot = find_recipe(&host, &data, factory, settings, |_| unreachable!()).unwrap();
-        assert!(LEAD_INGOT.matches(&host, &ingot.output));
+        assert!(LEAD_INGOT.matches(&host, &ingot.outputs[0]));
         assert_eq!(
             (
                 ingot.quantity(),
-                ingot.output.count(),
+                ingot.outputs[0].count(),
                 factory.work_ticks,
                 factory.cost
             ),
@@ -1858,7 +2008,7 @@ mod tests {
             |_| unreachable!(),
         )
         .unwrap();
-        assert!(reinforced.output.kind.matches(&host, &recipe.output));
+        assert!(reinforced.output.kind.matches(&host, &recipe.outputs[0]));
         assert_eq!((recipe.quantity(), recipe.work_override), (6, Some(8)));
         for (slot, input) in recipe.inputs.iter().enumerate() {
             assert_eq!(input.is_some(), SMELTERY_INPUT.contains(&slot));
@@ -1943,14 +2093,14 @@ mod tests {
             |_| unreachable!(),
         )
         .unwrap();
-        assert!(LAVA_BUCKET.matches(&host, &melt.output));
+        assert!(LAVA_BUCKET.matches(&host, &melt.outputs[0]));
         assert_eq!(
             (melt.quantity(), melt.work_override, machine.cost),
             (13, Some(4), 60)
         );
         let fuel = fuel_generators::generator("LAVA_GENERATOR")
             .unwrap()
-            .fuel(&host, &melt.output)
+            .fuel(&host, &melt.outputs[0])
             .unwrap();
         assert_eq!(fuel.ticks, 80);
         assert!(fuel.returns_bucket);
@@ -1983,14 +2133,14 @@ mod tests {
             |_| unreachable!(),
         )
         .unwrap();
-        assert!(fuel_generators::BUCKET_OF_FUEL.matches(&host, &refined.output));
+        assert!(fuel_generators::BUCKET_OF_FUEL.matches(&host, &refined.outputs[0]));
         assert_eq!(
             (refined.quantity(), refined.work_override, machine.cost),
             (1, Some(80), 16)
         );
         let fuel = fuel_generators::generator("COMBUSTION_REACTOR")
             .unwrap()
-            .fuel(&host, &refined.output)
+            .fuel(&host, &refined.outputs[0])
             .unwrap();
         assert_eq!(fuel.ticks, 180);
         assert!(fuel.returns_bucket);
@@ -2031,7 +2181,7 @@ mod tests {
         assert!(write_stack(&host, &mut data, INPUT[0], Some(buckets)));
         let pump = ElectricMachine::for_item("OIL_PUMP").unwrap();
         let run = find_recipe(&host, &data, pump, Settings::default(), |_| unreachable!()).unwrap();
-        assert!(crate::heated_pressure::BUCKET_OF_OIL.matches(&host, &run.output));
+        assert!(crate::heated_pressure::BUCKET_OF_OIL.matches(&host, &run.outputs[0]));
         assert_eq!((run.quantity(), pump.work_ticks, pump.cost), (1, 52, 14));
         use crate::networks::Component;
         assert_eq!(

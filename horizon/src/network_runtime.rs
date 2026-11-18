@@ -147,6 +147,16 @@ pub(crate) struct NetworkPlacement(pub Arc<Mutex<Networks>>);
 #[mod_api::horizon_part]
 impl ItemPart for NetworkPlacement {
     fn use_on(&self, host: HostSide<'_>, event: &mut UseOnEvent<'_>) -> Option<InteractionResult> {
+        if let HostSide::Server(server) = &host
+            && [
+                crate::thermal_machines::COOLING_UNIT,
+                crate::thermal_machines::REACTOR_COLLANT_CELL,
+            ]
+            .iter()
+            .any(|item| item.matches(*server, event.stack))
+        {
+            return Some(InteractionResult::Fail);
+        }
         cargo_topology::block_invalid_placement(host, event).then_some(InteractionResult::Fail)
     }
 
