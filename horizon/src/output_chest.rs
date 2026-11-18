@@ -105,6 +105,72 @@ pub(crate) fn try_deposit_with_extra(
     extra: Option<&ItemStack>,
     require_empty: bool,
 ) -> bool {
+    try_deposit_matching(
+        host,
+        level,
+        dispenser,
+        stack,
+        extra,
+        require_empty,
+        |_, _| true,
+    )
+}
+
+pub(crate) fn try_deposit_checked(
+    host: &mut dyn ServerHost,
+    level: LevelRef,
+    origin: [i32; 3],
+    stack: &ItemStack,
+) -> bool {
+    try_deposit_matching(host, level, origin, stack, None, false, |host, target| {
+        if !level.allow_inventory_transfer(host, origin, target, stack) {
+            return false;
+        }
+        let Some(items) = level.capability(host, &ITEMS, target, None) else {
+            return false;
+        };
+        if items.size(host) <= 27 {
+            return true;
+        }
+        // A capability can write slots from either half of a joined chest.
+        // Both coordinates must permit the transfer before passing it to the inventory.
+        double_chest_partner(
+            target,
+            level.block_property(host, target, "facing").as_deref(),
+            level.block_property(host, target, "type").as_deref(),
+        )
+        .is_some_and(|other| level.allow_inventory_transfer(host, origin, other, stack))
+    })
+}
+
+fn double_chest_partner(
+    [x, y, z]: [i32; 3],
+    facing: Option<&str>,
+    side: Option<&str>,
+) -> Option<[i32; 3]> {
+    let (dx, dz): (i32, i32) = match facing? {
+        "north" => (0, -1),
+        "east" => (1, 0),
+        "south" => (0, 1),
+        "west" => (-1, 0),
+        _ => return None,
+    };
+    match side? {
+        "left" => Some([x.checked_sub(dz)?, y, z.checked_add(dx)?]),
+        "right" => Some([x.checked_add(dz)?, y, z.checked_sub(dx)?]),
+        _ => None,
+    }
+}
+
+fn try_deposit_matching(
+    host: &mut dyn ServerHost,
+    level: LevelRef,
+    dispenser: [i32; 3],
+    stack: &ItemStack,
+    extra: Option<&ItemStack>,
+    require_empty: bool,
+    mut allowed: impl FnMut(&mut dyn ServerHost, [i32; 3]) -> bool,
+) -> bool {
     if !enabled() {
         return false;
     }
@@ -127,7 +193,7 @@ pub(crate) fn try_deposit_with_extra(
         ) {
             continue;
         }
-        if try_store(host, level, pos, stack, extra, require_empty) {
+        if allowed(host, pos) && try_store(host, level, pos, stack, extra, require_empty) {
             return true;
         }
     }
@@ -247,6 +313,30 @@ mod tests {
                 [6, 64, -2],
                 [5, 64, -3]
             ],
+        );
+    }
+
+    #[test]
+    fn guarded_output_resolves_the_other_physical_half_of_a_joined_chest() {
+        let at = [15, 64, 0];
+        for (facing, left, right) in [
+            ("north", [16, 64, 0], [14, 64, 0]),
+            ("east", [15, 64, 1], [15, 64, -1]),
+            ("south", [14, 64, 0], [16, 64, 0]),
+            ("west", [15, 64, -1], [15, 64, 1]),
+        ] {
+            assert_eq!(
+                double_chest_partner(at, Some(facing), Some("left")),
+                Some(left)
+            );
+            assert_eq!(
+                double_chest_partner(at, Some(facing), Some("right")),
+                Some(right)
+            );
+        }
+        assert_eq!(
+            double_chest_partner(at, Some("north"), Some("single")),
+            None
         );
     }
 }

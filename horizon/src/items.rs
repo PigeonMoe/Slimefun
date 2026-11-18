@@ -109,6 +109,9 @@ impl SlimefunItem {
         if let Some(lore) = crate::food_machines::lore(self.id) {
             components.insert("minecraft:lore".into(), lore);
         }
+        if let Some(lore) = crate::composter::lore(self.id) {
+            components.insert("minecraft:lore".into(), lore);
+        }
         if let Some(tier) = self.tier {
             let line = format!("Tier: {tier}");
             components.insert(
@@ -871,6 +874,7 @@ pub(crate) fn network_item(id: &str) -> Option<Kind> {
         crate::factory::produce_collector::PRODUCE_COLLECTOR,
         crate::factory::tree_growth::TREE_GROWTH_ACCELERATOR,
         crate::advanced_processing::CRUCIBLE,
+        crate::composter::COMPOSTER,
         crate::auto_anvil::DUCT_TAPE,
         crate::enchantment_machines::WITHER_PROOF_OBSIDIAN,
         ELECTRIC_FURNACE,

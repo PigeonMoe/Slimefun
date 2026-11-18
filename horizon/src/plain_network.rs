@@ -120,6 +120,10 @@ pub(super) fn read(host: &mut dyn ServerHost, level: LevelRef, pos: Position) ->
     if RETIRED.lock().unwrap().contains_key(&address) {
         return None;
     }
+    read_persisted(host, pos)
+}
+
+pub(super) fn read_persisted(host: &mut dyn ServerHost, pos: Position) -> Option<BlockData> {
     let saved = NODES
         .get_existing(host, Holder::Chunk(chunk(pos)))
         .ok()

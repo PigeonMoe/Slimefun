@@ -9,6 +9,7 @@ pub(crate) enum Component {
     },
     GeoScanner,
     ManualCrucible,
+    ManualComposter,
     IgnitionChamber,
     EnhancedFurnace,
     EnergyConnector,
@@ -66,6 +67,7 @@ impl Component {
             "TRASH_CAN_BLOCK" => Self::TrashCan,
             "GPS_GEO_SCANNER" => Self::GeoScanner,
             "CRUCIBLE" => Self::ManualCrucible,
+            "COMPOSTER" => Self::ManualComposter,
             "IGNITION_CHAMBER" => Self::IgnitionChamber,
             "OIL_PUMP" => Self::ElectricMachine {
                 capacity: crate::geology::PUMP_CAPACITY,
@@ -156,6 +158,7 @@ impl Component {
                 format!("GPS transmitter | Paper buffer {capacity} J")
             }
             Self::ManualCrucible => "Manual Crucible".into(),
+            Self::ManualComposter => "Manual Composter".into(),
             Self::IgnitionChamber => "Automatic Ignition Chamber".into(),
             Self::EnhancedFurnace => {
                 "Enhanced furnace | Native input, fuel and output slots".into()

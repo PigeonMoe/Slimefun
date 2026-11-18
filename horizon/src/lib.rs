@@ -17,6 +17,7 @@ mod auto_brewer;
 mod backpacks;
 mod book_binder;
 mod circuits;
+mod composter;
 mod compressor;
 mod crucible;
 mod electric_processing;
@@ -54,6 +55,7 @@ use recipes::{
 
 struct Slimefun {
     delayed_crafts: DelayedCrafts,
+    composters: composter::Composters,
     crucibles: crucible::Crucibles,
     settings: Mutex<Settings>,
     rolls: Rolls,
@@ -67,6 +69,7 @@ impl Default for Slimefun {
     fn default() -> Self {
         Self {
             delayed_crafts: DelayedCrafts::default(),
+            composters: composter::Composters::default(),
             crucibles: crucible::Crucibles::default(),
             settings: Mutex::new(Settings::default()),
             rolls: Rolls::default(),
@@ -574,7 +577,13 @@ impl Hooks for Slimefun {
         let Some(level) = player.entity().level(host) else {
             return Flow::Continue;
         };
-        if self.crucibles.use_at(
+        if self.composters.use_at(
+            host,
+            player,
+            level,
+            event.click.pos,
+            *event.use_item != TriState::False,
+        ) || self.crucibles.use_at(
             host,
             player,
             level,
@@ -727,6 +736,7 @@ impl Hooks for Slimefun {
             network_runtime::tick(&self.networks, host, event.level, settings, &self.rolls);
             factory::VIEWERS.refresh(host, event.level);
             self.crucibles.tick(host, event.level);
+            self.composters.tick(host, event.level, &self.rolls);
             ancient_altar::tick(host, event.level);
         }
     }
@@ -749,6 +759,7 @@ impl Hooks for Slimefun {
         factory::VIEWERS.clear();
         self.networks.lock().unwrap().clear();
         self.delayed_crafts.clear();
+        self.composters.clear();
         self.crucibles.clear();
         self.rolls.clear();
     }

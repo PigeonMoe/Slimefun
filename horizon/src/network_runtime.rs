@@ -208,6 +208,7 @@ impl ItemPart for NetworkPlacement {
         }
         if let HostSide::Server(host) = host {
             if crate::crucible::refuses_placement(host, event)
+                || crate::composter::refuses_placement(host, event)
                 || cargo_topology::block_invalid_placement(HostSide::Server(host), event)
             {
                 return Some(InteractionResult::Fail);
@@ -344,6 +345,7 @@ impl Node {
             Component::GeoScanner
             | Component::TrashCan
             | Component::ManualCrucible
+            | Component::ManualComposter
             | Component::IgnitionChamber
             | Component::EnhancedFurnace
             | Component::DuctTape
@@ -378,7 +380,9 @@ impl Node {
 
 fn accepts_carrier(component: Component, actual: &str) -> bool {
     let expected = match component {
-        Component::ManualCrucible => return crate::crucible::carrier(actual),
+        Component::ManualCrucible | Component::ManualComposter => {
+            return crate::crucible::carrier(actual);
+        }
         Component::IgnitionChamber => return actual == crate::items::IGNITION_CHAMBER.material(),
         Component::EnhancedFurnace => return actual == "minecraft:furnace",
         Component::ReactorPort => return actual == reactors::REACTOR_ACCESS_PORT.material(),
@@ -809,6 +813,18 @@ pub(crate) fn manual_crucible_at(
         && block_data(host, level, pos).is_some_and(|data| data.id == "CRUCIBLE")
 }
 
+pub(crate) fn manual_composter_at(
+    host: &mut dyn ServerHost,
+    level: LevelRef,
+    pos: Position,
+) -> Option<mod_api::BlockState> {
+    let state = level.block_state(host, pos)?;
+    if !accepts_carrier(Component::ManualComposter, &state.block().id(host)) {
+        return None;
+    }
+    (block_data(host, level, pos)?.id == crate::composter::COMPOSTER.id()).then_some(state)
+}
+
 pub(crate) fn wither_proof_obsidian_at(
     host: &mut dyn ServerHost,
     level: LevelRef,
@@ -867,7 +883,10 @@ fn write_data(
 fn is_plain_node(component: Component) -> bool {
     if matches!(
         component,
-        Component::ManualCrucible | Component::ReactorPort | Component::WitherProofObsidian
+        Component::ManualCrucible
+            | Component::ManualComposter
+            | Component::ReactorPort
+            | Component::WitherProofObsidian
     ) {
         return true;
     }
@@ -1282,6 +1301,28 @@ mod tests {
 
     fn node(id: &str) -> Node {
         imported(id, &toml::Table::new()).unwrap().0
+    }
+
+    #[test]
+    fn the_paper_composter_restores_its_identity_from_the_saved_chunk_marker() {
+        let (node, data) = imported("COMPOSTER", &toml::Table::new()).unwrap();
+        assert_eq!(node.component, Component::ManualComposter);
+        assert!(is_plain_node(node.component));
+        assert!(accepts_carrier(node.component, "minecraft:cauldron"));
+        assert!(accepts_carrier(node.component, "minecraft:water_cauldron"));
+        assert!(!accepts_carrier(node.component, "minecraft:composter"));
+
+        let mut host = FakeHost::new();
+        let position = [-1, 63, 18];
+        plain_network::write(&mut host, position, &data).unwrap();
+        let saved = host.attachments.to_nbt();
+        assert!(!saved.is_empty());
+
+        let mut reopened = FakeHost::new();
+        reopened.attachments = mod_api::Attachments::from_nbt(saved);
+        let record = plain_network::read_persisted(&mut reopened, position).unwrap();
+        assert_eq!(record.id, "COMPOSTER");
+        assert!(plain_network::read_persisted(&mut reopened, [0, 63, 18]).is_none());
     }
 
     #[test]
