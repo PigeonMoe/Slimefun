@@ -9,6 +9,7 @@ pub(crate) enum Component {
     },
     GeoScanner,
     ManualCrucible,
+    IgnitionChamber,
     EnergyConnector,
     Capacitor(u32),
     ElectricMachine {
@@ -61,6 +62,7 @@ impl Component {
             "TRASH_CAN_BLOCK" => Self::TrashCan,
             "GPS_GEO_SCANNER" => Self::GeoScanner,
             "CRUCIBLE" => Self::ManualCrucible,
+            "IGNITION_CHAMBER" => Self::IgnitionChamber,
             "OIL_PUMP" => Self::ElectricMachine {
                 capacity: crate::geology::PUMP_CAPACITY,
                 carrier: "minecraft:player_head",
@@ -142,6 +144,7 @@ impl Component {
                 format!("GPS transmitter | Paper buffer {capacity} J")
             }
             Self::ManualCrucible => "Manual Crucible".into(),
+            Self::IgnitionChamber => "Automatic Ignition Chamber".into(),
             Self::GeoScanner => "GPS Geo-Scanner | Requires 600 GPS complexity".into(),
             Self::EnergyRegulator => "Energy regulator | Paper connection range 6".into(),
             Self::EnergyConnector => "Energy connector | Paper connection range 6".into(),

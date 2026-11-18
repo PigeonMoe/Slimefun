@@ -211,9 +211,10 @@ impl Machine {
                     Self::Washing | Self::Juicing => "minecraft:entity.player.splash",
                     Self::Smelting { heat, makeshift } => {
                         if makeshift
-                            || rolls
+                            || (rolls
                                 .next(host, dispenser.level, 100)
                                 .is_some_and(|roll| roll < settings.fire_breaking_chance)
+                                && !crate::ignition_chamber::retain_fire(host, player, dispenser))
                         {
                             exhaust_fire(host, dispenser.level, heat);
                         }

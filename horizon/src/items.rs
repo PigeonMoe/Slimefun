@@ -128,6 +128,9 @@ impl SlimefunItem {
         if let Some(lore) = crate::book_binder::lore(self.id) {
             components.insert("minecraft:lore".into(), lore);
         }
+        if self.id == IGNITION_CHAMBER.id() {
+            components.insert("minecraft:lore".into(), crate::ignition_chamber::lore());
+        }
         crate::enchantment_machines::decorate(self.id, &mut components);
         if let Some(texture) = &self.texture {
             components.insert(
@@ -856,6 +859,7 @@ pub(crate) fn network_item(id: &str) -> Option<Kind> {
         ENERGY_CONNECTOR,
         SMALL_CAPACITOR,
         SOLAR_GENERATOR,
+        IGNITION_CHAMBER,
         crate::advanced_processing::CRUCIBLE,
         crate::auto_anvil::DUCT_TAPE,
         crate::enchantment_machines::WITHER_PROOF_OBSIDIAN,

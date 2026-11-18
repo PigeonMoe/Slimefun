@@ -27,6 +27,7 @@ mod geology;
 mod gold_pan;
 mod hand_machine;
 mod heated_pressure;
+mod ignition_chamber;
 mod items;
 mod juice;
 mod machine;
@@ -188,6 +189,7 @@ impl Hooks for Slimefun {
             "minecraft:furnace",
             "minecraft:smoker",
             "minecraft:enchanting_table",
+            "minecraft:dropper",
         ]
         .into_iter()
         .chain(network_runtime::PLAIN_CARRIERS.iter().copied())

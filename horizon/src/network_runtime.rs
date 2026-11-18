@@ -335,6 +335,7 @@ impl Node {
             Component::GeoScanner
             | Component::TrashCan
             | Component::ManualCrucible
+            | Component::IgnitionChamber
             | Component::DuctTape
             | Component::WitherProofObsidian
             | Component::ReactorPort => Network::Independent,
@@ -368,6 +369,7 @@ impl Node {
 fn accepts_carrier(component: Component, actual: &str) -> bool {
     let expected = match component {
         Component::ManualCrucible => return crate::crucible::carrier(actual),
+        Component::IgnitionChamber => return actual == crate::items::IGNITION_CHAMBER.material(),
         Component::ReactorPort => return actual == reactors::REACTOR_ACCESS_PORT.material(),
         Component::WitherProofObsidian => {
             return actual == crate::enchantment_machines::WITHER_PROOF_OBSIDIAN.material();
@@ -806,6 +808,18 @@ pub(crate) fn wither_proof_obsidian_at(
         .block(host, pos)
         .is_some_and(|block| block.id(host) == obsidian.material())
         && plain_network::read(host, level, pos).is_some_and(|data| data.id == obsidian.id())
+}
+
+pub(crate) fn ignition_chamber_at(
+    host: &mut dyn ServerHost,
+    level: LevelRef,
+    pos: Position,
+) -> bool {
+    let chamber = crate::items::IGNITION_CHAMBER;
+    level
+        .block(host, pos)
+        .is_some_and(|block| block.id(host) == chamber.material())
+        && block_data(host, level, pos).is_some_and(|data| data.id == chamber.id())
 }
 
 fn block_data(host: &mut dyn ServerHost, level: LevelRef, pos: Position) -> Option<BlockData> {
