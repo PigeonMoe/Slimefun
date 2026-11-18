@@ -13,7 +13,7 @@ use mod_api::{
 };
 
 use crate::{
-    factory::{experience_collector, fluid_pump, reactors, tree_growth},
+    factory::{assemblers, experience_collector, fluid_pump, reactors, tree_growth},
     geology,
     items::{item_id, network_item},
     machine::Settings,
@@ -199,6 +199,7 @@ impl ItemPart for NetworkPlacement {
                 crate::heated_pressure::ENRICHED_NETHER_ICE,
                 crate::heated_pressure::NETHER_ICE_COOLANT_CELL,
                 reactors::NEPTUNIUM,
+                assemblers::ANDROID_MEMORY_CORE,
                 trash::PORTABLE_DUSTBIN,
             ]
             .iter()
@@ -1052,6 +1053,19 @@ pub(crate) fn tick(
             gps_signals.insert(pos, signal);
         }
         if let Component::ElectricMachine { .. } = node.component {
+            if let Some(spec) = assemblers::by_id(&node.id) {
+                let spawn = host.transaction(|host, tx| {
+                    let mut data = block_data(host, level, pos).ok_or(())?;
+                    data.charge = data.charge.checked_sub(spec.cost).ok_or(())?;
+                    let spawn = assemblers::stage(host, tx, level, pos, spec).ok_or(())?;
+                    write_data(host, pos, data).map_err(|_| ())?;
+                    Ok::<_, ()>(spawn)
+                });
+                if let Ok(spawn) = spawn {
+                    spawn.apply(host, level, pos);
+                }
+                continue;
+            }
             if crate::auto_crafter::is_machine(&node.id) {
                 let crafted = host.transaction(|host, tx| {
                     let mut data = block_data(host, level, pos).ok_or(())?;

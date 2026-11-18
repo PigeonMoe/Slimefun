@@ -29,6 +29,8 @@ use crate::{
     research,
 };
 
+#[path = "assemblers.rs"]
+pub(crate) mod assemblers;
 #[path = "charging_bench.rs"]
 pub(crate) mod charging_bench;
 #[path = "experience_collector.rs"]
@@ -127,6 +129,7 @@ enum RecipeFamily {
     ExperienceCollector,
     ProduceCollector,
     TreeGrowthAccelerator,
+    Assembler(&'static assemblers::Assembler),
     Reactor(&'static reactors::Reactor),
     ReactorPort,
 }
@@ -145,6 +148,7 @@ struct ViewState {
     progress: Option<u32>,
     production: bool,
     link: Option<Position>,
+    assembler: Option<assemblers::Controls>,
 }
 
 impl ViewState {
@@ -158,6 +162,8 @@ impl ViewState {
             progress: remaining(data),
             production: false,
             link: None,
+            assembler: matches!(machine.family, RecipeFamily::Assembler(_))
+                .then(|| assemblers::Controls::read(data)),
         };
         if machine.reactor_menu() {
             view.link = reactors::link(host, storage.level, storage.pos, machine);
@@ -198,13 +204,18 @@ pub(crate) static VIEWERS: FactoryViewers = FactoryViewers(Mutex::new(BTreeMap::
 
 impl FactoryViewers {
     pub fn clicked(&self, host: &mut dyn ServerHost, event: &mod_api::MenuClickedEvent) {
-        if event.mode != 0 || !matches!(event.button, 0 | 1) || !matches!(event.slot, 4 | 49) {
+        if event.mode != 0
+            || !matches!(event.button, 0 | 1)
+            || !matches!(event.slot, 4 | 22 | 31 | 49)
+        {
             return;
         }
         let viewer = self.0.lock().unwrap().get(&event.uuid).copied();
-        let Some(viewer) =
-            viewer.filter(|viewer| viewer.window == event.window && viewer.furnace.reactor_menu())
-        else {
+        let Some(viewer) = viewer.filter(|viewer| {
+            viewer.window == event.window
+                && (viewer.furnace.reactor_menu()
+                    || matches!(viewer.furnace.family, RecipeFamily::Assembler(_)))
+        }) else {
             return;
         };
         let Some(player) = host.player(event.uuid) else {
@@ -219,11 +230,20 @@ impl FactoryViewers {
             host.close_menu(event.uuid);
             return;
         }
-        if event.slot == 49 {
+        if matches!(viewer.furnace.family, RecipeFamily::Assembler(_)) {
+            let _ = host.transaction(|host, _| {
+                let mut current = data_at(host, viewer.storage).ok_or(())?;
+                let next = assemblers::Controls::read(&current)
+                    .click(event.slot.into(), event.button.into())
+                    .ok_or(())?;
+                next.write(&mut current);
+                save(host, viewer.storage, current).then_some(()).ok_or(())
+            });
+        } else if event.slot == 49 {
             if let Some(link) = reactors::link(host, level, pos, viewer.furnace) {
                 open(host, player, level, link);
             }
-        } else if matches!(viewer.furnace.family, RecipeFamily::Reactor(_)) {
+        } else if event.slot == 4 && matches!(viewer.furnace.family, RecipeFamily::Reactor(_)) {
             network_runtime::toggle_reactor_focus(host, level, pos);
         }
     }
@@ -304,6 +324,18 @@ impl FactoryViewers {
 impl ElectricMachine {
     pub fn for_item(id: &str) -> Option<Self> {
         use RecipeFamily::{Furnace, HeatedPressure, IngotPulverizer, OreGrinder};
+        if let Some(assembler) = assemblers::by_id(id) {
+            return Some(Self {
+                id: assembler.item.id(),
+                carrier: assembler.item.material(),
+                title: assembler.title,
+                cost: assembler.cost,
+                work_ticks: 0,
+                research: assembler.research,
+                family: RecipeFamily::Assembler(assembler),
+                speed: 1,
+            });
+        }
         if id == tree_growth::TREE_GROWTH_ACCELERATOR.id() {
             return Some(Self {
                 id: tree_growth::TREE_GROWTH_ACCELERATOR.id(),
@@ -534,6 +566,9 @@ impl ElectricMachine {
     }
 
     fn menu_slots(self) -> &'static [usize] {
+        if matches!(self.family, RecipeFamily::Assembler(_)) {
+            return assemblers::MENU_SLOTS;
+        }
         if matches!(self.family, RecipeFamily::ExperienceCollector) {
             return experience_collector::MENU_SLOTS;
         }
@@ -552,6 +587,9 @@ impl ElectricMachine {
     }
 
     fn input_slot(self, index: usize) -> bool {
+        if matches!(self.family, RecipeFamily::Assembler(_)) {
+            return index < assemblers::MENU_SLOTS.len();
+        }
         if matches!(self.family, RecipeFamily::ExperienceCollector) {
             return false;
         }
@@ -728,6 +766,9 @@ fn menu_items(
     if furnace.reactor_menu() {
         return reactors::menu_items(host, data, furnace);
     }
+    if let RecipeFamily::Assembler(spec) = furnace.family {
+        return assemblers::menu(host, data, spec);
+    }
     let small_menu_pane = match furnace.family {
         RecipeFamily::ExperienceCollector => Some("minecraft:purple_stained_glass_pane"),
         RecipeFamily::TreeGrowthAccelerator => Some("minecraft:cyan_stained_glass_pane"),
@@ -811,6 +852,7 @@ fn menu_items(
                 }
                 RecipeFamily::Reactor(_)
                 | RecipeFamily::ReactorPort
+                | RecipeFamily::Assembler(_)
                 | RecipeFamily::TreeGrowthAccelerator
                 | RecipeFamily::ExperienceCollector => return items,
             };
@@ -1406,6 +1448,7 @@ fn find_recipe(
         | RecipeFamily::ExperienceCollector
         | RecipeFamily::ProduceCollector
         | RecipeFamily::TreeGrowthAccelerator
+        | RecipeFamily::Assembler(_)
         | RecipeFamily::Reactor(_)
         | RecipeFamily::ReactorPort => None,
     }?;
@@ -1759,12 +1802,36 @@ fn check_import(data: &Compound, restored: &Compound) -> Result<bool, String> {
             Err("A different Paper inventory was restored here already.".into())
         };
     }
-    if !data.is_empty() {
+    if !assemblers::only_controls(data) {
         return Err(
             "The electric machine already holds local inventory or processing state.".into(),
         );
     }
     Ok(false)
+}
+
+pub(crate) fn restore_paper_assembler_controls(
+    host: &mut dyn ServerHost,
+    level: LevelRef,
+    pos: Position,
+    id: &str,
+    metadata: &toml::Table,
+) -> Result<(), String> {
+    if assemblers::by_id(id).is_none()
+        || !(metadata.contains_key("enabled") || metadata.contains_key("offset"))
+    {
+        return Ok(());
+    }
+    let controls = assemblers::Controls::from_paper(metadata)?;
+    let storage = ElectricMachine::for_item(id)
+        .ok_or("Unknown entity assembler.")?
+        .storage(level, pos);
+    let mut data = data_at(host, storage).ok_or("Could not read the entity assembler.")?;
+    if !controls.restore(&mut data) || save(host, storage, data) {
+        Ok(())
+    } else {
+        Err("Could not save the entity assembler controls.".into())
+    }
 }
 
 pub(crate) fn restore_paper_inventory(

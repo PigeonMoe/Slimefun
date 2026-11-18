@@ -222,6 +222,7 @@ enum InventoryKind {
     ReactorPort,
     ExperienceCollector,
     TreeGrowthAccelerator,
+    Assembler(&'static crate::factory::assemblers::Assembler),
     Factory { smeltery: bool },
     Smelter(&'static str),
     Brewer,
@@ -251,6 +252,7 @@ impl InventoryKind {
             Self::ReactorPort => 6.min(size)..7.min(size),
             Self::ExperienceCollector => 0..3.min(size),
             Self::TreeGrowthAccelerator => 0..0,
+            Self::Assembler(_) => 0..0,
             Self::Factory { .. } => 2..4.min(size),
             Self::Smelter(_) => 2..3.min(size),
             Self::Brewer => 0..3.min(size),
@@ -271,6 +273,17 @@ impl InventoryKind {
             }
             Self::ExperienceCollector => 0..0,
             Self::TreeGrowthAccelerator => 0..size,
+            Self::Assembler(spec) => {
+                let carrier = stack.item().id(host);
+                let slots = if carrier == spec.head.kind.material() {
+                    crate::factory::assemblers::HEAD
+                } else if carrier == spec.body.kind.material() {
+                    crate::factory::assemblers::BODY
+                } else {
+                    0..0
+                };
+                slots.start.min(size)..slots.end.min(size)
+            }
             Self::Smelter(recipe) => {
                 let fuel = host
                     .item_burn_time(stack.item())
@@ -359,6 +372,9 @@ fn attached_inventory(
         }
         if id == crate::factory::tree_growth::TREE_GROWTH_ACCELERATOR.id() {
             return Some((pos, InventoryKind::TreeGrowthAccelerator));
+        }
+        if let Some(spec) = crate::factory::assemblers::by_id(&id) {
+            return Some((pos, InventoryKind::Assembler(spec)));
         }
         if id == crate::factory::reactors::REACTOR_ACCESS_PORT.id() {
             return Some((pos, InventoryKind::ReactorPort));

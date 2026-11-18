@@ -874,6 +874,8 @@ pub(crate) fn network_item(id: &str) -> Option<Kind> {
         IGNITION_CHAMBER,
         crate::factory::produce_collector::PRODUCE_COLLECTOR,
         crate::factory::tree_growth::TREE_GROWTH_ACCELERATOR,
+        crate::factory::assemblers::IRON_GOLEM_ASSEMBLER,
+        crate::factory::assemblers::WITHER_ASSEMBLER,
         crate::advanced_processing::CRUCIBLE,
         crate::composter::COMPOSTER,
         crate::auto_anvil::DUCT_TAPE,

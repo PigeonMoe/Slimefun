@@ -455,6 +455,7 @@ fn restore_network(
     )?;
     host.transaction(|host, _| {
         let restored = networks.restore(host, level, pos, id, metadata, row)?;
+        crate::factory::restore_paper_assembler_controls(host, level, pos, id, metadata)?;
         if has_archive {
             crate::factory::restore_paper_inventory(host, level, pos, id, prepared)?;
             Ok(format!(

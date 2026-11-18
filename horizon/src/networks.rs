@@ -40,6 +40,12 @@ pub(crate) enum Component {
 
 impl Component {
     pub(crate) fn for_item(id: &str) -> Option<Self> {
+        if let Some(assembler) = crate::factory::assemblers::by_id(id) {
+            return Some(Self::ElectricMachine {
+                capacity: crate::factory::assemblers::CAPACITY,
+                carrier: assembler.item.material(),
+            });
+        }
         if crate::auto_crafter::is_machine(id) {
             return Some(Self::ElectricMachine {
                 capacity: crate::auto_crafter::CAPACITY,
