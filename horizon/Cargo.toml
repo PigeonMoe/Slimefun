@@ -1,0 +1,20 @@
+[package]
+name = "slimefun-horizon"
+version = "0.1.0-preview.1"
+edition = "2024"
+license = "GPL-3.0-only"
+publish = false
+
+[package.metadata.horizon]
+sdk = "dc215e79e27d1cf55bb041a2c1bf2c02a701cd74"
+
+[lib]
+crate-type = ["rlib", "cdylib"]
+
+[dependencies]
+horizon-mod-api = { path = ".horizon/sdk/crates/horizon-mod-api" }
+
+[workspace]
+
+[dev-dependencies]
+horizon-mod-api = { path = ".horizon/sdk/crates/horizon-mod-api", features = ["testing"] }

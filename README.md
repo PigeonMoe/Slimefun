@@ -4,13 +4,16 @@
 
 ## 版本分支
 
-| 分支 | 项目版本 | Minecraft / 服务端 | Java |
+| 分支 | 项目版本 | Minecraft / 服务端 | 运行时 |
 | --- | --- | --- | --- |
 | `experimental` | 上游基线 | 保留上游原始内容 | 见上游 |
-| `1.21.11` | Slimefun4 4.9.1 | Paper 1.21.11 | 21+ |
-| `26.2` | Slimefun5 5.0.1 | Paper 26.2 | 25+ |
+| `1.21.11` | Slimefun4 4.9.1 | Paper 1.21.11 | Java 21+ |
+| `26.2` | Slimefun5 5.0.1 | Paper 26.2 | Java 25+ |
+| `Horizon` | Slimefun 移植预览 | Horizon 26.3 | 服务端 WebAssembly |
 
 每个 Minecraft 版本独立维护。不要把新版本的世界降级，也不要在现有生产存档上直接测试开发构建。支持范围与验收记录见 [兼容性记录](docs/COMPATIBILITY.md)。
+
+Horizon 分支的安装、构建与当前覆盖范围见 [Horizon 移植预览](horizon/README.md)。
 
 ## 玩家档案同步
 

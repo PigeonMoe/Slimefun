@@ -1,0 +1,7 @@
+title = "Slimefun"
+description = "查看 Horizon 移植预览的功能状态。"
+
+[[actions]]
+id = "status"
+label = "查看状态"
+command = "slimefun status"
