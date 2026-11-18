@@ -148,7 +148,9 @@ pub(crate) fn researches() -> impl Iterator<Item = &'static Research> {
 }
 
 pub(crate) fn magic_crafting() -> impl Iterator<Item = &'static CraftingRecipe> {
-    [&crate::factory::experience_collector::FLASK_RECIPE].into_iter()
+    [&crate::factory::experience_collector::FLASK_RECIPE]
+        .into_iter()
+        .chain(crate::backpacks::MAGIC_CRAFTING)
 }
 
 pub(crate) fn smelting() -> impl Iterator<Item = &'static SmeltingRecipe> {

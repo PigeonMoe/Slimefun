@@ -20,7 +20,7 @@ use crate::{
 
 #[path = "special_backpacks.rs"]
 mod special;
-pub(crate) use special::keep_on_death;
+pub(crate) use special::{MAGIC_CRAFTING, keep_on_death};
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub(crate) struct BackpackId {
@@ -102,6 +102,7 @@ pub(crate) const RESEARCHES: &[Research] = &[
     RADIANT_RESEARCH,
     special::SOULBOUND_STORAGE,
     special::ENDER_STORAGE,
+    special::NECROMANCY,
 ];
 
 const BACKPACK_TEXTURE: HeadTexture = HeadTexture {
@@ -279,6 +280,9 @@ fn text(value: &str, color: &str, italic: bool) -> Tag {
 }
 
 pub(crate) fn item_lore(id: &str) -> Option<Tag> {
+    if id == special::ENDER_BACKPACK.id() {
+        return Some(special::ender_lore());
+    }
     let (size, _) = tier(id)?;
     let mut label = size.to_string();
     if size == 54 {
@@ -294,13 +298,17 @@ pub(crate) fn item_lore(id: &str) -> Option<Tag> {
         ]),
         text("ID: <ID>", "gray", false),
         Tag::String("".into()),
-        Tag::compound([
-            ("text", Tag::String("Right Click".into())),
-            ("color", Tag::String("yellow".into())),
-            ("italic", Tag::Byte(0)),
-            ("extra", Tag::List(vec![text(" to open", "gray", false)])),
-        ]),
+        open_lore(),
     ]))
+}
+
+fn open_lore() -> Tag {
+    Tag::compound([
+        ("text", Tag::String("Right Click".into())),
+        ("color", Tag::String("yellow".into())),
+        ("italic", Tag::Byte(0)),
+        ("extra", Tag::List(vec![text(" to open", "gray", false)])),
+    ])
 }
 
 fn allowed_contents(host: &dyn Host, stack: &ItemStack) -> bool {
@@ -760,18 +768,21 @@ fn initialize_held(
     })
 }
 
-fn resize_bound(
+fn upgrade_bound(
     host: &mut dyn ServerHost,
     tx: &Transaction,
     id: BackpackId,
     old_size: u32,
     size: u32,
 ) -> Result<(), String> {
-    if !valid_size(size) || size <= old_size {
-        return Err("A backpack upgrade must increase its capacity.".into());
+    if !valid_size(size) || size < old_size {
+        return Err("A backpack upgrade cannot shrink its capacity.".into());
     }
     let mut record =
         live_bag(host, id, old_size)?.ok_or("Restore this Paper backpack before upgrading it.")?;
+    if size == old_size {
+        return Ok(());
+    }
     record.size = size;
     let saved = record.to_nbt(host)?;
     GlobalBackpacks.save(host, tx, id, saved)
@@ -796,7 +807,7 @@ pub(crate) fn prepare_craft(
         Some(Binding::Named(_)) => {
             let previous = input.expect("a named binding was read from a backpack");
             let (id, old_size) = held_id(host, previous)?;
-            resize_bound(host, tx, id, old_size, size)?;
+            upgrade_bound(host, tx, id, old_size, size)?;
             id
         }
         Some(Binding::Blank) | None => {
@@ -940,6 +951,7 @@ fn live_bag(
 }
 
 pub(crate) fn register(registrar: &mut dyn Registrar) {
+    special::register(registrar);
     registrar.item_capability(&ITEM_ITEMS, "minecraft:player_head", |host, at| {
         if !matches!(at, ItemPlace::PlayerHand { .. }) {
             return None;
@@ -1281,6 +1293,100 @@ mod tests {
         let transferred = off_hand.stack(&mut host).unwrap();
         assert_eq!(held_id(&host, &transferred), Ok((first, 9)));
         assert!(GlobalBackpacks.load(&mut host, first).unwrap().is_some());
+    }
+
+    #[test]
+    fn magic_workbench_keeps_the_paper_special_backpack_shapes_and_research() {
+        let recipe = |id| {
+            crate::recipes::magic_crafting()
+                .find(|recipe| recipe.output.kind.id() == id)
+                .unwrap()
+        };
+        let ender = recipe("ENDER_BACKPACK");
+        assert_eq!(ender.research.id, "ender_backpack");
+        assert_eq!(ender.research.cost, 4);
+        assert_eq!(ender.output.count, 1);
+        assert_eq!(
+            ender.inputs.map(|kind| kind.map(Kind::id)),
+            [
+                Some("ENDER_LUMP_2"),
+                Some("minecraft:leather"),
+                Some("ENDER_LUMP_2"),
+                Some("minecraft:leather"),
+                Some("minecraft:chest"),
+                Some("minecraft:leather"),
+                Some("ENDER_LUMP_2"),
+                Some("minecraft:leather"),
+                Some("ENDER_LUMP_2"),
+            ]
+        );
+        let bound = recipe("BOUND_BACKPACK");
+        assert_eq!(bound.research.id, "bound_backpack");
+        assert_eq!(bound.research.cost, 22);
+        assert_eq!(bound.output.count, 1);
+        assert_eq!(
+            bound.inputs.map(|kind| kind.map(Kind::id)),
+            [
+                Some("ENDER_LUMP_2"),
+                None,
+                Some("ENDER_LUMP_2"),
+                Some("ESSENCE_OF_AFTERLIFE"),
+                Some("WOVEN_BACKPACK"),
+                Some("ESSENCE_OF_AFTERLIFE"),
+                Some("ENDER_LUMP_2"),
+                None,
+                Some("ENDER_LUMP_2"),
+            ]
+        );
+        assert_eq!(recipe("NECROTIC_SKULL").research.id, "essence_of_afterlife");
+        assert!(crate::recipes::crafting().all(|recipe| {
+            !matches!(recipe.output.kind.id(), "BOUND_BACKPACK" | "ENDER_BACKPACK")
+        }));
+    }
+
+    #[test]
+    fn binding_a_woven_pack_keeps_its_paper_id_contents_capacity_and_rune() {
+        let mut host = fixture();
+        host.join(RECIPIENT, 7);
+        let player = (&host as &dyn Host).player(RECIPIENT).unwrap();
+        let diamond = material(&host, "minecraft:diamond", 2);
+        let mut lore = tagged_lines();
+        lore.push(string("§7Soulbound"));
+        let mut inputs = [const { None }; 9];
+        inputs[4] = Some(bag(&host, "WOVEN_BACKPACK", lore));
+        let mut output = special::BOUND_BACKPACK.stack(&host, 1).unwrap();
+        assert!(
+            host.transaction(|host, tx| prepare_craft(host, tx, player, &inputs, &mut output))
+                .is_err()
+        );
+        host.transaction(|host, tx| {
+            bind_paper(host, tx, &GlobalBackpacks, ID, 36, |_, _, _| {
+                Ok(Backpack {
+                    size: 36,
+                    paper: true,
+                    slots: BTreeMap::from([(35, diamond.clone())]),
+                })
+            })
+        })
+        .unwrap();
+        let previous = host.attachments.to_nbt();
+        host.transaction(|host, tx| prepare_craft(host, tx, player, &inputs, &mut output))
+            .unwrap();
+        assert_eq!(held_id(&host, &output), Ok((ID, 36)));
+        assert_eq!(soulbound_marker(&output), Some(Tag::Byte(1)));
+        assert!(keep_on_death(&host, &output));
+        assert_eq!(
+            live_bag(&mut host, ID, 36).unwrap().unwrap().slots[&35],
+            diamond
+        );
+        assert_eq!(host.attachments.to_nbt(), previous);
+
+        let mut ender = special::ENDER_BACKPACK.stack(&host, 1).unwrap();
+        let portable = ender.clone();
+        host.transaction(|host, tx| prepare_craft(host, tx, player, &inputs, &mut ender))
+            .unwrap();
+        assert_eq!(ender, portable);
+        assert_eq!(host.attachments.to_nbt(), previous);
     }
 
     #[test]
