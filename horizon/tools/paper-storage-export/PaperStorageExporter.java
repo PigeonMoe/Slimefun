@@ -56,13 +56,15 @@ public final class PaperStorageExporter extends JavaPlugin {
         }
         if (!Files.isDirectory(source.resolve("stored-inventories"))
                 && !Files.isDirectory(source.resolve("universal-inventories"))
+                && !Files.isDirectory(source.resolve("stored-chunks"))
                 && !Files.isDirectory(source.resolve("Players"))) {
-            throw new IOException("The snapshot must include a Slimefun inventory or Players directory.");
+            throw new IOException("The snapshot must include a Slimefun inventory, chunk or Players directory.");
         }
         Path stage = Files.createTempDirectory(parent, ".paper-storage-export-");
         try {
             copyDirectory(source, stage, "stored-blocks");
             copyDirectory(source, stage, "stored-inventories");
+            copyDirectory(source, stage, "stored-chunks");
             copyDirectory(source, stage, "universal-inventories");
             copyDirectory(source, stage, "Players");
             return Files.move(stage, output);

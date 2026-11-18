@@ -16,6 +16,7 @@ mod compressor;
 mod electric_processing;
 mod factory;
 mod fuel_generators;
+mod geology;
 mod gold_pan;
 mod hand_machine;
 mod heated_pressure;
@@ -179,6 +180,7 @@ impl Hooks for Slimefun {
 
     fn block_changed(&self, level: &dyn LevelHost, event: &mut mod_api::BlockChangedEvent) {
         network_runtime::observe_plain_change(level, event);
+        network_runtime::observe_gps_change(&self.networks, level, event);
     }
 
     fn piston_pre(&self, level: &dyn LevelHost, event: &mut mod_api::PistonPreEvent<'_>) -> Flow {
@@ -253,6 +255,15 @@ impl Hooks for Slimefun {
                 "sf storage restore-chunk <dimension:dimension> <pos:block_pos> [offset:integer]",
                 2,
             ),
+            Command::op(
+                "slimefun storage restore-oil <dimension:dimension> <pos:block_pos>",
+                2,
+            ),
+            Command::op(
+                "sf storage restore-oil <dimension:dimension> <pos:block_pos>",
+                2,
+            ),
+
         ]);
     }
 
@@ -311,6 +322,7 @@ impl Hooks for Slimefun {
                 "Craft an Electric Furnace and connect it to a powered Energy Regulator. Open the furnace to load vanilla smelting ingredients.".into(),
                 "The Electric Ore Grinder uses Grind Stone and Ore Crusher recipes. The Electric Ingot Pulverizer reverses single-dust smeltery recipes.".into(),
                 "Power an Electric Gold Pan, Electric Dust Washer and Electric Ingot Factory to turn gravel into sifted ore, dust and ingots. The Electric Press compacts materials and parts.".into(),
+                "Place and power your GPS Transmitters to reach 600 complexity. Use a GPS Geo-Scanner and an Oil Pump in the same chunk to extract oil.".into(),
                 "The Electric Smeltery processes multi-ingredient recipes. The Electrified Crucible fills empty buckets with water or lava, and the Refinery turns buckets of oil into fuel.".into(),
                 "The Heated Pressure Chamber uses two input slots to refine uranium, blistering ingots, and fuel ingredients. Use /sf recipe to find its inputs.".into(),
                 "Wash Sifted Ore by placing a dispenser on a wooden fence with an empty cauldron below it and right-clicking the fence.".into(),
@@ -346,6 +358,17 @@ impl Hooks for Slimefun {
         let Some(level) = player.entity().level(host) else {
             return Flow::Continue;
         };
+        if network_runtime::open_scanner(
+            &self.networks,
+            host,
+            player,
+            level,
+            event.click.pos,
+            &self.rolls,
+        ) {
+            *event.cancellation_result = InteractionResult::Consume;
+            return Flow::Cancel;
+        }
         if factory::open(host, player, level, event.click.pos) {
             *event.cancellation_result = InteractionResult::Consume;
             return Flow::Cancel;
@@ -611,6 +634,11 @@ fn describe_recipe(id: &str, double_ores: bool) -> Vec<String> {
     }
     if outputs(advanced_processing::WATER_BUCKET.id()) {
         lines.push("Electrified Crucible | 1 × minecraft:bucket + 16 × leaves -> 1 × minecraft:water_bucket".into());
+    }
+    if outputs(heated_pressure::BUCKET_OF_OIL.id()) {
+        lines.push(
+            "Oil Pump | 1 × minecraft:bucket + 1 unit of scanned oil -> 1 × BUCKET_OF_OIL".into(),
+        );
     }
     if outputs(fuel_generators::BUCKET_OF_FUEL.id()) {
         lines.push("Refinery | 1 × BUCKET_OF_OIL -> 1 × BUCKET_OF_FUEL".into());

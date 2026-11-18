@@ -13,6 +13,7 @@ use mod_api::{
 };
 
 use crate::{
+    geology,
     items::{item_id, network_item},
     machine::Settings,
     networks::Component,
@@ -41,6 +42,7 @@ struct BlockData {
     id: String,
     charge: u32,
     cargo: Option<CargoSettings>,
+    gps_owner: Option<u128>,
 }
 
 // Marker presence binds a registration to the actual block entity. Replacing
@@ -59,6 +61,12 @@ static NETWORK_STATE: AttachmentType<BlockData> = AttachmentType {
             if let Some(cargo) = &value.cargo {
                 data.insert("cargo".into(), Tag::Compound(cargo.save()));
             }
+            if let Some(owner) = value.gps_owner {
+                data.insert(
+                    "owner".into(),
+                    Tag::String(format!("{owner:032x}").as_str().into()),
+                );
+            }
             Ok(data)
         },
         decode: |data| {
@@ -72,6 +80,14 @@ static NETWORK_STATE: AttachmentType<BlockData> = AttachmentType {
                 cargo: match data.get(&"cargo".into()) {
                     None => None,
                     Some(Tag::Compound(cargo)) => Some(CargoSettings::load(cargo)?),
+                    _ => return Err(AttachmentError::Decode),
+                },
+                gps_owner: match data.get(&"owner".into()) {
+                    None => None,
+                    Some(Tag::String(owner)) => Some(
+                        parse_uuid(&owner.to_string().map_err(|_| AttachmentError::Decode)?)
+                            .ok_or(AttachmentError::Decode)?,
+                    ),
                     _ => return Err(AttachmentError::Decode),
                 },
             })
@@ -88,6 +104,23 @@ fn saved_id(data: &Compound) -> Option<String> {
     let id = value.to_string().ok()?;
     Component::for_item(&id)?;
     Some(id)
+}
+
+fn parse_uuid(value: &str) -> Option<u128> {
+    let owned;
+    let clean = if value.len() == 36
+        && [8, 13, 18, 23]
+            .into_iter()
+            .all(|index| value.as_bytes()[index] == b'-')
+    {
+        owned = value.replace('-', "");
+        owned.as_str()
+    } else {
+        value
+    };
+    (clean.len() == 32 && clean.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        .then(|| u128::from_str_radix(clean, 16).ok())
+        .flatten()
 }
 
 pub(crate) fn read_stack(
@@ -118,9 +151,9 @@ impl ItemPart for NetworkPlacement {
     }
 
     fn on_block_placed_by(&self, host: &mut dyn ServerHost, event: &mut OnBlockPlacedByEvent<'_>) {
-        if event.placer.is_none() {
+        let Some(player) = event.placer else {
             return;
-        }
+        };
         let Some(id) = item_id(event.stack) else {
             return;
         };
@@ -130,9 +163,12 @@ impl ItemPart for NetworkPlacement {
         let Some(level) = host.level(host.dimension()) else {
             return;
         };
-        let Ok((node, data)) = imported(&id, &toml::Table::new()) else {
+        let Ok((node, mut data)) = imported(&id, &toml::Table::new()) else {
             return;
         };
+        if matches!(node.component, Component::GpsTransmitter { .. }) {
+            data.gps_owner = Some(player.uuid());
+        }
         let _ = self
             .0
             .lock()
@@ -208,6 +244,7 @@ struct Node {
 enum Network {
     Energy,
     Cargo,
+    Independent,
 }
 
 impl Node {
@@ -235,8 +272,10 @@ impl Node {
             | Component::EnergyConnector
             | Component::Capacitor(_)
             | Component::ElectricMachine { .. }
+            | Component::GpsTransmitter { .. }
             | Component::FuelGenerator { .. }
             | Component::SolarGenerator { .. } => Network::Energy,
+            Component::GeoScanner => Network::Independent,
             _ => Network::Cargo,
         }
     }
@@ -285,9 +324,18 @@ pub(crate) struct Networks {
     levels: BTreeMap<String, Arc<Nodes>>,
     menus: BTreeMap<u128, cargo_menu::Session>,
     round_robin: HashMap<(LevelRef, Position), usize>,
+    gps_signals: BTreeMap<String, BTreeMap<Position, (u128, u32)>>,
 }
 
 impl Networks {
+    fn gps_complexity(&self, player: u128) -> u32 {
+        self.gps_signals
+            .values()
+            .flat_map(BTreeMap::values)
+            .filter_map(|&(owner, signal)| (owner == player).then_some(signal))
+            .fold(0u32, u32::saturating_add)
+    }
+
     fn nodes(&mut self, host: &dyn ServerHost, dimension: &str) -> Result<Arc<Nodes>, String> {
         if let Some(nodes) = self.levels.get(dimension) {
             return Ok(nodes.clone());
@@ -301,6 +349,7 @@ impl Networks {
         self.levels.clear();
         self.menus.clear();
         self.round_robin.clear();
+        self.gps_signals.clear();
         plain_network::clear();
     }
 
@@ -314,6 +363,9 @@ impl Networks {
         row: &toml::Table,
     ) -> Result<String, String> {
         let (node, mut data) = imported(id, metadata)?;
+        if matches!(node.component, Component::GpsTransmitter { .. }) && data.gps_owner.is_none() {
+            return Err("The Paper GPS transmitter is missing a valid owner UUID.".into());
+        }
         if let Some(cargo) = &mut data.cargo
             && node.filters_items()
             && row.contains_key("paper_inventory")
@@ -423,13 +475,22 @@ fn imported(id: &str, metadata: &toml::Table) -> Result<(Node, BlockData), &'sta
     match component {
         Component::Capacitor(capacity)
         | Component::ElectricMachine { capacity, .. }
+        | Component::GpsTransmitter { capacity }
         | Component::FuelGenerator { capacity, .. } => {
             data.charge = field("energy-charge")
                 .unwrap_or("0")
                 .parse::<u32>()
                 .ok()
                 .filter(|charge| *charge <= capacity)
-                .ok_or("Stored capacitor charge is invalid.")?;
+                .ok_or("Stored buffer charge is invalid.")?;
+            if matches!(component, Component::GpsTransmitter { .. }) {
+                data.gps_owner = match field("owner") {
+                    Some(value) => {
+                        Some(parse_uuid(value).ok_or("Invalid Paper GPS transmitter owner UUID.")?)
+                    }
+                    None => None,
+                };
+            }
         }
         Component::CargoInput | Component::CargoOutput { .. } => {
             data.cargo = Some(CargoSettings::from_paper(metadata, node.filters_items())?);
@@ -556,6 +617,42 @@ fn protected_block(
         .is_some_and(|component| accepts_carrier(component, material))
 }
 
+pub(crate) fn observe_gps_change(
+    networks: &Mutex<Networks>,
+    level: &dyn LevelHost,
+    event: &mod_api::BlockChangedEvent,
+) {
+    let old = level.state_block(event.old);
+    if old == level.state_block(event.new)
+        || !matches!(
+            old,
+            Some("minecraft:player_head" | "minecraft:player_wall_head")
+        )
+    {
+        return;
+    }
+    let dimension = plain_network::dimension(&event.dimension);
+    if let Some(signals) = networks.lock().unwrap().gps_signals.get_mut(dimension) {
+        signals.remove(&[event.pos.x, event.pos.y, event.pos.z]);
+    }
+}
+
+pub(crate) fn open_scanner(
+    networks: &Mutex<Networks>,
+    host: &mut dyn ServerHost,
+    player: mod_api::PlayerRef,
+    level: LevelRef,
+    pos: Position,
+    rolls: &Rolls,
+) -> bool {
+    if !block_data(host, level, pos).is_some_and(|data| data.id == "GPS_GEO_SCANNER") {
+        return false;
+    }
+    let complexity = networks.lock().unwrap().gps_complexity(player.uuid());
+    geology::open_scanner(host, player, level, pos, complexity, rolls);
+    true
+}
+
 pub(crate) fn charge(host: &mut dyn ServerHost, level: LevelRef, pos: Position) -> Option<u32> {
     block_data(host, level, pos).map(|data| data.charge)
 }
@@ -656,9 +753,23 @@ pub(crate) fn tick(
         match node.family() {
             Network::Energy => tick_energy(host, level, &dimension, &active, &group),
             Network::Cargo => cargo_topology::tick(networks, host, level, &active, &group),
+            Network::Independent => (),
         }
     }
+    let mut gps_signals = BTreeMap::new();
     for (&pos, &(node, _)) in &active {
+        if let Component::GpsTransmitter { .. } = node.component
+            && let Some(transmitter) = geology::transmitter(&node.id)
+            && let Ok(signal) = host.transaction(|host, _| {
+                let mut data = block_data(host, level, pos).ok_or(())?;
+                let owner = data.gps_owner.ok_or(())?;
+                data.charge = data.charge.checked_sub(transmitter.cost).ok_or(())?;
+                write_data(host, pos, data).map_err(|_| ())?;
+                Ok::<_, ()>((owner, transmitter.strength(pos[1])))
+            })
+        {
+            gps_signals.insert(pos, signal);
+        }
         if let Component::ElectricMachine { .. } = node.component {
             let _ = host.transaction(|host, _| {
                 let mut data = block_data(host, level, pos).ok_or(())?;
@@ -672,6 +783,12 @@ pub(crate) fn tick(
             });
         }
     }
+    let mut networks = networks.lock().unwrap();
+    if gps_signals.is_empty() {
+        networks.gps_signals.remove(&dimension);
+    } else {
+        networks.gps_signals.insert(dimension, gps_signals);
+    }
 }
 
 fn connected(
@@ -683,6 +800,7 @@ fn connected(
     let limit = match family {
         Network::Energy => 7,
         Network::Cargo => 6,
+        Network::Independent => return BTreeSet::new(),
     };
     let mut seen = BTreeSet::from([start]);
     let mut queue = VecDeque::from([start]);
@@ -798,7 +916,9 @@ fn capacity_updates(
     // Existing consumer energy is already in that machine. It does not enter the shared supply.
     for &pos in group {
         let (node, previous) = active[&pos];
-        if let Component::ElectricMachine { capacity, .. } = node.component {
+        if let Component::ElectricMachine { capacity, .. }
+        | Component::GpsTransmitter { capacity } = node.component
+        {
             let charge = available.min(u64::from(capacity.saturating_sub(previous))) as u32;
             if charge != 0 {
                 updates.push((pos, previous + charge));
@@ -837,6 +957,32 @@ mod tests {
 
     fn node(id: &str) -> Node {
         imported(id, &toml::Table::new()).unwrap().0
+    }
+
+    #[test]
+    fn gps_import_keeps_the_owner_and_complexity_uses_only_its_powered_transmitters() {
+        let metadata: toml::Table =
+            "owner = \"00000000-0000-0000-0000-000000000002\"\nenergy-charge = \"3\""
+                .parse()
+                .unwrap();
+        let (_, transmitter) = imported("GPS_TRANSMITTER_2", &metadata).unwrap();
+        assert_eq!((transmitter.gps_owner, transmitter.charge), (Some(2), 3));
+        let codec = NETWORK_STATE.codec.as_ref().unwrap();
+        let round_trip = (codec.decode)(&(codec.encode)(&transmitter).unwrap()).unwrap();
+        assert_eq!(round_trip.gps_owner, Some(2));
+
+        let mut networks = Networks::default();
+        networks.gps_signals.insert(
+            "minecraft:overworld".to_owned(),
+            BTreeMap::from([([0, 125, 0], (2, 600)), ([1, 125, 0], (1, 600))]),
+        );
+        networks.gps_signals.insert(
+            "minecraft:the_nether".to_owned(),
+            BTreeMap::from([([0, 20, 0], (2, 20))]),
+        );
+        assert_eq!(networks.gps_complexity(2), 620);
+        assert_eq!(networks.gps_complexity(1), 600);
+        assert_eq!(networks.gps_complexity(3), 0);
     }
 
     #[test]

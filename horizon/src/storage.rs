@@ -6,7 +6,7 @@ use mod_api::{
 };
 use std::{collections::BTreeMap, fmt::Write, sync::Mutex};
 
-use crate::{network_runtime::Networks, networks::Component, output_chest};
+use crate::{geology, network_runtime::Networks, networks::Component, output_chest};
 
 fn read(host: &dyn ServerHost, path: &str) -> Result<toml::Table, String> {
     let path = ConfigPath::new(path).map_err(|_| "Invalid Slimefun import file path.")?;
@@ -60,6 +60,14 @@ pub(crate) fn decode_inventory(
     if !row.contains_key("paper_inventory") {
         return Ok(None);
     }
+    decode_archived_slots(host, row, 54).map(Some)
+}
+
+pub(crate) fn decode_archived_slots(
+    host: &dyn ServerHost,
+    row: &toml::Table,
+    size: u32,
+) -> Result<BTreeMap<u32, ItemStack>, String> {
     if let Some(issues) = row.get("paper_item_issues") {
         let issues = issues.as_array().ok_or("Invalid Paper item diagnostics.")?;
         if let Some(first) = issues.first() {
@@ -71,7 +79,7 @@ pub(crate) fn decode_inventory(
         .get("paper_items")
         .and_then(toml::Value::as_array)
         .ok_or("Reimport the Paper archive to convert the inventory slots.")?;
-    if items.len() > 54
+    if items.len() > size as usize
         || row.get("inventory_slots").and_then(toml::Value::as_integer) != Some(items.len() as i64)
     {
         return Err("The Paper inventory has an invalid item count.".into());
@@ -82,7 +90,7 @@ pub(crate) fn decode_inventory(
         let integer = |key| entry.get(key).and_then(toml::Value::as_integer);
         let slot = integer("slot")
             .and_then(|slot| u32::try_from(slot).ok())
-            .filter(|slot| *slot < 54)
+            .filter(|slot| *slot < size)
             .ok_or("Invalid Paper item slot.")?;
         let error = || format!("Could not decode the Paper item in slot {slot}.");
         let id = entry
@@ -110,7 +118,7 @@ pub(crate) fn decode_inventory(
             return Err(format!("The Paper inventory repeats slot {slot}."));
         }
     }
-    Ok(Some(stacks))
+    Ok(stacks)
 }
 
 pub(crate) fn validate_inventory_preset(row: &toml::Table, id: &str) -> Result<(), String> {
@@ -194,6 +202,12 @@ pub(crate) fn command(
                     optional_count("backpacks")?,
                 ));
             }
+            if index.contains_key("oil_reserves") {
+                lines.push(format!(
+                    "Paper GEO | {} scanned oil reserves",
+                    count("oil_reserves")?
+                ));
+            }
             Ok(lines)
         }),
         Some(action @ ("inspect" | "restore-output" | "restore-network" | "restore-inventory")) => {
@@ -201,6 +215,12 @@ pub(crate) fn command(
                 return vec!["Specify a loaded dimension and block position.".into()];
             };
             at(host, level, pos, action, networks)
+        }
+        Some("restore-oil") => {
+            let Some((level, pos)) = dimension_and_position(event) else {
+                return vec!["Specify a loaded dimension and block position.".into()];
+            };
+            restore_oil(host, level, pos)
         }
         Some("restore-chunk") => {
             let Some((level, pos)) = dimension_and_position(event) else {
@@ -216,6 +236,46 @@ pub(crate) fn command(
         Some(_) => return vec!["Unknown Slimefun storage action.".into()],
     };
     result.unwrap_or_else(|message| vec![message])
+}
+
+fn restore_oil(
+    host: &mut dyn ServerHost,
+    level: LevelRef,
+    pos: [i32; 3],
+) -> Result<Vec<String>, String> {
+    let dimension = level
+        .dimension()
+        .id(host)
+        .ok_or("Unknown Horizon dimension.")?;
+    let [x, z] = geology::chunk(pos);
+    let file = format!(
+        "storage-import/geo/{}/{}_{}.toml",
+        encoded_dimension(&dimension),
+        x,
+        z
+    );
+    let row = read(host, &file)?;
+    let coords = row
+        .get("chunk")
+        .and_then(toml::Value::as_array)
+        .ok_or("Missing Paper GEO chunk coordinates.")?;
+    if row.get("dimension").and_then(toml::Value::as_str) != Some(dimension.as_str())
+        || coords.len() != 2
+        || coords[0].as_integer() != Some(i64::from(x))
+        || coords[1].as_integer() != Some(i64::from(z))
+    {
+        return Err("The Paper GEO archive belongs to another chunk.".into());
+    }
+    let imported = row
+        .get("slimefun-oil")
+        .and_then(toml::Value::as_integer)
+        .and_then(|amount| u32::try_from(amount).ok())
+        .filter(|&amount| amount <= i32::MAX as u32)
+        .ok_or("Invalid Paper GEO oil count.")?;
+    let remaining = geology::restore(host, level, pos, imported)?;
+    Ok(vec![format!(
+        "Paper GEO reserve at chunk {x}, {z} has {remaining} units of oil."
+    )])
 }
 
 fn at(

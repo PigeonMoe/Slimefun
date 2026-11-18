@@ -4,6 +4,10 @@
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Component {
     EnergyRegulator,
+    GpsTransmitter {
+        capacity: u32,
+    },
+    GeoScanner,
     EnergyConnector,
     Capacitor(u32),
     ElectricMachine {
@@ -28,6 +32,11 @@ pub(crate) enum Component {
 
 impl Component {
     pub(crate) fn for_item(id: &str) -> Option<Self> {
+        if let Some(transmitter) = crate::geology::transmitter(id) {
+            return Some(Self::GpsTransmitter {
+                capacity: transmitter.capacity,
+            });
+        }
         if let Some(generator) = crate::fuel_generators::generator(id) {
             return Some(Self::FuelGenerator {
                 capacity: generator.capacity,
@@ -35,6 +44,11 @@ impl Component {
             });
         }
         Some(match id {
+            "GPS_GEO_SCANNER" => Self::GeoScanner,
+            "OIL_PUMP" => Self::ElectricMachine {
+                capacity: crate::geology::PUMP_CAPACITY,
+                carrier: "minecraft:player_head",
+            },
             "ENERGY_REGULATOR" => Self::EnergyRegulator,
             "ENERGY_CONNECTOR" => Self::EnergyConnector,
             "SMALL_CAPACITOR" => Self::Capacitor(128),
@@ -100,6 +114,10 @@ impl Component {
 
     pub(crate) fn describe(self, metadata: &toml::Table) -> String {
         match self {
+            Self::GpsTransmitter { capacity } => {
+                format!("GPS transmitter | Paper buffer {capacity} J")
+            }
+            Self::GeoScanner => "GPS Geo-Scanner | Requires 600 GPS complexity".into(),
             Self::EnergyRegulator => "Energy regulator | Paper connection range 6".into(),
             Self::EnergyConnector => "Energy connector | Paper connection range 6".into(),
             Self::Capacitor(capacity) => {

@@ -45,7 +45,7 @@ enum Change {
 // attachment remains available to the synchronous drop hook until the next writable phase.
 static RETIRED: Mutex<BTreeMap<(String, Position), Change>> = Mutex::new(BTreeMap::new());
 
-fn dimension(dimension: &LevelDimension) -> &str {
+pub(super) fn dimension(dimension: &LevelDimension) -> &str {
     match dimension {
         LevelDimension::Overworld => "minecraft:overworld",
         LevelDimension::Nether => "minecraft:the_nether",
@@ -119,6 +119,7 @@ pub(super) fn read(host: &mut dyn ServerHost, level: LevelRef, pos: Position) ->
         id: saved_id(data)?,
         charge: u32::try_from(*charge).ok()?,
         cargo: None,
+        gps_owner: None,
     })
 }
 

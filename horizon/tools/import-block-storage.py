@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
-"""Prepare a Horizon import from Paper Slimefun stored-blocks and stored-inventories."""
+"""Prepare a Horizon import from Paper Slimefun blocks, inventories, and GEO oil reserves."""
 
 import argparse
 from collections import defaultdict
@@ -193,6 +193,39 @@ def collect_universal(source):
     return records
 
 
+def collect_oil(source, mappings):
+    file = source / "stored-chunks" / "chunks.sfc"
+    records = {}
+    if not file.is_file():
+        return records
+    try:
+        for key, raw in mapping(file.read_text(encoding="utf-8"), file).items():
+            if not isinstance(raw, str):
+                raise ValueError(f"Chunk metadata for {key!r} must be a JSON string.")
+            data = json.loads(raw, object_pairs_hook=unique_json_keys)
+            if not isinstance(data, dict):
+                raise ValueError(f"Invalid Paper chunk metadata for {key!r}.")
+            if "slimefun-oil" not in data:
+                continue
+            if not isinstance(key, str):
+                raise ValueError(f"Invalid Paper chunk {key!r}.")
+            coordinates = key.split(";")
+            if len(coordinates) != 4 or coordinates[1] != "Chunk":
+                raise ValueError(f"Invalid Paper chunk {key!r}.")
+            world, _, x, z = coordinates
+            dimension, (x, _, z) = location(f"{world};{x};0;{z}", mappings)
+            oil = data["slimefun-oil"]
+            if not isinstance(oil, str) or re.fullmatch(r"0|[1-9][0-9]*", oil) is None or int(oil) >= 1 << 31:
+                raise ValueError(f"Invalid Paper oil supply in chunk {key!r}.")
+            address = (dimension, x, z)
+            if address in records:
+                raise ValueError(f"Multiple Paper oil supplies resolve to {address}.")
+            records[address] = int(oil)
+    except (ValueError, TypeError, yaml.YAMLError) as error:
+        raise ValueError(f"{file.relative_to(source)}: {error}") from error
+    return records
+
+
 def collect_backpacks(source):
     records = {}
     for file in sorted((source / "Players").glob("*.yml")):
@@ -201,7 +234,7 @@ def collect_backpacks(source):
         except ValueError:
             continue
         raw = file.read_bytes().decode("utf-8")
-        bags, issues = {}, []
+        bags, issues, seen = {}, [], set()
         try:
             data = mapping(raw, file).get("backpacks")
             if data is None or data == {}:
@@ -210,10 +243,12 @@ def collect_backpacks(source):
                 raise ValueError("backpacks must be a mapping.")
             for key, bag in data.items():
                 try:
-                    bag_id, row = backpack_record(key, bag)
-                    if bag_id in bags:
+                    bag_id = backpack_number(key)
+                    if bag_id in seen:
+                        bags.pop(bag_id, None)
                         raise ValueError(f"Repeated backpack ID {key!r}.")
-                    bags[bag_id] = row
+                    seen.add(bag_id)
+                    bags[bag_id] = backpack_record(bag_id, bag)
                 except ValueError as error:
                     issues.append(str(error))
         except (ValueError, TypeError, yaml.YAMLError) as error:
@@ -224,10 +259,14 @@ def collect_backpacks(source):
     return records
 
 
-def backpack_record(key, bag):
+def backpack_number(key):
     number = str(key)
-    if re.fullmatch(r"0|[1-9][0-9]*", number) is None or int(number) >= 1 << 31:
+    if re.fullmatch(r"0|[1-9][0-9]{0,9}", number) is None or int(number) >= 1 << 31:
         raise ValueError(f"Invalid backpack ID {key!r}.")
+    return int(number)
+
+
+def backpack_record(key, bag):
     if not isinstance(bag, dict):
         raise ValueError(f"Backpack {key} must contain its size and contents.")
     size = bag.get("size")
@@ -236,10 +275,15 @@ def backpack_record(key, bag):
     slots = bag.get("contents")
     if slots is not None and not isinstance(slots, dict):
         raise ValueError(f"Backpack {key} contents must be a slot mapping.")
-    return int(number), {"size": size, **inventory_record(slots or {}, size)}
+    slots = slots or {}
+    converted = inventory_record(slots, size)
+    for slot in slots:
+        if re.fullmatch(r"[0-9]+", str(slot)) is None:
+            converted["paper_item_issues"].append(f"Invalid backpack inventory slot {slot!r}.")
+    return {"size": size, **converted}
 
 
-def render(records, universal=None, players=None):
+def render(records, universal=None, players=None, oil=None):
     chunks = defaultdict(list)
     for (dimension, position), record in sorted(records.items()):
         x, _, z = position
@@ -275,6 +319,8 @@ def render(records, universal=None, players=None):
         summary["universal_inventories"] = len(universal)
     if players:
         summary["backpacks"] = sum(len(profile["backpacks"]) for profile in players.values())
+    if oil:
+        summary["oil_reserves"] = len(oil)
     yield "index.toml", "\n".join(
         ["format = 1", *(f"{key} = {value}" for key, value in summary.items()), ""]
     )
@@ -296,6 +342,11 @@ def render(records, universal=None, players=None):
         # Hex makes custom dimension paths predictable even when their IDs contain slashes.
         bucket = f"{dimension.encode().hex()}/{chunk_x}_{chunk_z}.toml"
         yield bucket, "\n".join(lines)
+    for (dimension, x, z), amount in sorted((oil or {}).items()):
+        yield f"geo/{dimension.encode().hex()}/{x}_{z}.toml", "\n".join((
+            "format = 1", f"dimension = {string(dimension)}", f"chunk = [{x}, {z}]",
+            f"slimefun-oil = {amount}", "",
+        ))
     for preset, row in sorted((universal or {}).items()):
         yield f"universal/{preset.encode().hex()}.toml", "\n".join((
             "format = 1", f"preset = {string(preset)}", *item_fields(row), "",
@@ -311,12 +362,12 @@ def render(records, universal=None, players=None):
         yield f"backpacks/{uuid}.toml", "\n".join(lines)
 
 
-def publish(output, records, universal=None, players=None):
+def publish(output, records, universal=None, players=None, oil=None):
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix=".storage-import-", dir=output.parent) as temp:
         stage = Path(temp) / "snapshot"
         stage.mkdir()
-        for name, text in render(records, universal, players):
+        for name, text in render(records, universal, players, oil):
             data = text.encode("utf-8")
             if len(data) > DATA_FILE_MAX:
                 raise ValueError(f"Import chunk {name} exceeds Horizon's 64 MiB data file limit.")
@@ -350,7 +401,7 @@ def main():
             parser.error(f"Invalid world mapping {pair!r}.")
         worlds[paper] = dimension
     if not any((source / name).is_dir() for name in (
-        "stored-blocks", "stored-inventories", "universal-inventories", "Players",
+        "stored-blocks", "stored-inventories", "stored-chunks", "universal-inventories", "Players",
     )):
         parser.error("paper_storage must contain a Paper Slimefun storage directory.")
     if output == source or output.is_relative_to(source) or source.is_relative_to(output):
@@ -359,11 +410,13 @@ def main():
         records = collect(source, worlds)
         universal = collect_universal(source)
         players = collect_backpacks(source)
-        publish(output, records, universal, players)
+        oil = collect_oil(source, worlds)
+        publish(output, records, universal, players, oil)
     except (OSError, ValueError) as error:
         parser.error(str(error))
     print(f"Prepared an import with {len(records)} block or inventory locations, "
-          f"{len(universal)} universal inventories, and {len(players)} backpack profiles.")
+          f"{len(universal)} universal inventories, {len(players)} backpack profiles, "
+          f"and {len(oil)} GEO oil reserves.")
 
 
 if __name__ == "__main__":

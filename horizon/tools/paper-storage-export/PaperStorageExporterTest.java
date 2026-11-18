@@ -29,15 +29,19 @@ public final class PaperStorageExporterTest {
             Path source = Files.createDirectory(root.resolve("source"));
             Path menus = Files.createDirectory(source.resolve("stored-inventories"));
             Path blocks = Files.createDirectories(source.resolve("stored-blocks").resolve("world"));
+            Path chunks = Files.createDirectory(source.resolve("stored-chunks"));
             Path original = menus.resolve("world;1;72;-10.sfi");
             Files.writeString(original, MODERN);
             Files.writeString(blocks.resolve("0_-1.sfb"), "Paper metadata");
+            String oil = "world;Chunk;-1;0: '{\"slimefun-oil\":\"0\"}'\n";
+            Files.writeString(chunks.resolve("chunks.sfc"), oil);
 
             Path output = root.resolve("output");
             Path exported = PaperStorageExporter.exportSnapshot(source, output);
             if (!output.toRealPath().equals(exported)
                     || !MODERN.equals(Files.readString(output.resolve(source.relativize(original))))
                     || !MODERN.equals(Files.readString(original))
+                    || !oil.equals(Files.readString(output.resolve("stored-chunks/chunks.sfc")))
                     || !"Paper metadata".equals(Files.readString(
                             output.resolve("stored-blocks/world/0_-1.sfb")))) {
                 throw new AssertionError("Snapshot export changed source or modern contents.");

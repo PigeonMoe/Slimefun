@@ -20,6 +20,7 @@ use crate::{
     advanced_processing,
     electric_processing::{self, Family, MachineSpec},
     fuel_generators::{self, Generator},
+    geology,
     gold_pan::PANS,
     items::{GOLD_PAN, Kind, PULVERIZED_ORE, PURE_ORE_CLUSTER, SALT, SIFTED_ORE},
     machine::{Settings, makeshift_recipe},
@@ -109,6 +110,7 @@ enum RecipeFamily {
     Processing(&'static MachineSpec),
     Fuel(&'static Generator),
     Advanced(&'static advanced_processing::Machine),
+    OilPump,
 }
 
 #[derive(Clone, Copy)]
@@ -211,6 +213,18 @@ impl ElectricMachine {
                 work_ticks: 0,
                 research: spec.research,
                 family: RecipeFamily::Fuel(spec),
+                speed: 1,
+            });
+        }
+        if id == "OIL_PUMP" {
+            return Some(Self {
+                id: geology::OIL_PUMP.id(),
+                carrier: geology::OIL_PUMP.material(),
+                title: "Oil Pump",
+                cost: geology::PUMP_COST,
+                work_ticks: geology::PUMP_WORK_TICKS,
+                research: &geology::OIL,
+                family: RecipeFamily::OilPump,
                 speed: 1,
             });
         }
@@ -403,6 +417,24 @@ pub(crate) fn open(
         let _ = player.tell(host, Text::literal(message));
         return true;
     }
+    if matches!(furnace.family, RecipeFamily::OilPump) {
+        match geology::supply(host, level, pos) {
+            Ok(Some(_)) => {}
+            Ok(None) => {
+                let _ = player.tell(
+                    host,
+                    Text::literal(
+                        "Scan this chunk with a GPS Geo-Scanner before using the Oil Pump.",
+                    ),
+                );
+                return true;
+            }
+            Err(message) => {
+                let _ = player.tell(host, Text::literal(message));
+                return true;
+            }
+        }
+    }
     let storage = furnace.storage(level, pos);
     let Some(data) = data_at(host, storage) else {
         return true;
@@ -522,6 +554,7 @@ fn menu_items(
                 },
                 RecipeFamily::Fuel(spec) => spec.progress_icon(),
                 RecipeFamily::Advanced(_) => ("minecraft:flint_and_steel", 63),
+                RecipeFamily::OilPump => ("minecraft:diamond_shovel", 1560),
             };
             let mut bar = display_item(host, icon, &format!("{progress}%"));
             if let Some(stack) = &mut bar {
@@ -1058,6 +1091,21 @@ fn find_recipe(
         RecipeFamily::Processing(spec) => {
             processing_recipe(host, data, &inputs, spec, settings, roll)
         }
+        RecipeFamily::OilPump => single_recipe(
+            host,
+            &inputs,
+            std::iter::once(SingleRecipe {
+                input: Stack {
+                    kind: advanced_processing::EMPTY_BUCKET,
+                    count: 1,
+                },
+                output: Stack {
+                    kind: crate::heated_pressure::BUCKET_OF_OIL,
+                    count: 1,
+                },
+            }),
+            false,
+        ),
         RecipeFamily::Fuel(_) | RecipeFamily::Advanced(_) => None,
     }?;
     fits(host, data, &run.output).then_some(run)
@@ -1115,9 +1163,20 @@ pub(crate) fn tick(
     } = find_recipe(host, &data, furnace, settings, |bound| {
         rolls.next(host, level, bound)
     })?;
+    let pumping_oil = matches!(furnace.family, RecipeFamily::OilPump);
+    if pumping_oil && geology::supply(host, level, pos).ok()?.unwrap_or(0) == 0 {
+        let (index, (bucket, _)) = inputs
+            .iter()
+            .enumerate()
+            .find_map(|(index, input)| input.as_ref().map(|input| (index, input)))?;
+        return move_empty_buckets(host, level, pos, index, bucket).then_some(charge);
+    }
     let saved_result = output.to_nbt(host)?;
     let work_ticks = work_override.unwrap_or(furnace.work_ticks) as i32;
     host.transaction(|host, tx| {
+        if pumping_oil {
+            geology::reserve_one(host, level, pos)?;
+        }
         for (index, consumed) in inputs.into_iter().enumerate() {
             if let Some((input, amount)) = consumed
                 && place(level, pos, index).extract(host, tx, &ItemResource::of(&input), amount)
@@ -1133,6 +1192,34 @@ pub(crate) fn tick(
         save(host, storage, next).then_some(charge).ok_or(())
     })
     .ok()
+}
+
+fn move_empty_buckets(
+    host: &mut dyn ServerHost,
+    level: LevelRef,
+    pos: Position,
+    index: usize,
+    stack: &ItemStack,
+) -> bool {
+    let resource = ItemResource::of(stack);
+    host.transaction(|host, tx| {
+        let mut left = stack.count();
+        for output in OUTPUT {
+            left -= place(level, pos, output).insert(host, tx, &resource, left);
+            if left == 0 {
+                break;
+            }
+        }
+        // Preserve the whole stack if the output cannot hold the returned buckets.
+        if left == 0
+            && place(level, pos, index).extract(host, tx, &resource, stack.count()) == stack.count()
+        {
+            Ok(())
+        } else {
+            Err(())
+        }
+    })
+    .is_ok()
 }
 
 /// Advance one generator when its regulator polls it. The caller journals
@@ -1907,5 +1994,52 @@ mod tests {
             .unwrap();
         assert_eq!(fuel.ticks, 180);
         assert!(fuel.returns_bucket);
+    }
+
+    #[test]
+    fn an_exhausted_oil_pump_preserves_empty_buckets_until_output_has_space() {
+        let mut host = recipe_host([
+            "minecraft:bucket",
+            "minecraft:stone",
+            "minecraft:player_head",
+        ]);
+        let level = host.level.level();
+        let pos = [8, 71, -12];
+        let buckets = advanced_processing::EMPTY_BUCKET.stack(&host, 12).unwrap();
+        let full = Kind::Vanilla("minecraft:stone").stack(&host, 64).unwrap();
+        let items = host
+            .level
+            .block_entity(pos)
+            .with_items(4)
+            .items
+            .as_mut()
+            .unwrap();
+        items.slots[0] = Some(buckets.clone());
+        items.slots[2] = Some(full.clone());
+        items.slots[3] = Some(full.clone());
+        assert!(!move_empty_buckets(&mut host, level, pos, 0, &buckets));
+        let items = host.level.block_entity(pos).items.as_mut().unwrap();
+        assert_eq!(items.slots[0], Some(buckets.clone()));
+        assert_eq!(items.slots[2], Some(full));
+        items.slots[3] = None;
+        assert!(move_empty_buckets(&mut host, level, pos, 0, &buckets));
+        let items = host.level.block_entity(pos).items.as_ref().unwrap();
+        assert!(items.slots[0].is_none());
+        assert_eq!(items.slots[3], Some(buckets.clone()));
+
+        let mut data = Compound::new();
+        assert!(write_stack(&host, &mut data, INPUT[0], Some(buckets)));
+        let pump = ElectricMachine::for_item("OIL_PUMP").unwrap();
+        let run = find_recipe(&host, &data, pump, Settings::default(), |_| unreachable!()).unwrap();
+        assert!(crate::heated_pressure::BUCKET_OF_OIL.matches(&host, &run.output));
+        assert_eq!((run.quantity(), pump.work_ticks, pump.cost), (1, 52, 14));
+        use crate::networks::Component;
+        assert_eq!(
+            Component::for_item("OIL_PUMP"),
+            Some(Component::ElectricMachine {
+                capacity: 256,
+                carrier: "minecraft:player_head"
+            })
+        );
     }
 }
