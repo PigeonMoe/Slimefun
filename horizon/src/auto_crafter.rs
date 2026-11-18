@@ -731,6 +731,30 @@ fn named_icon(host: &dyn Host, id: &'static str, name: &str, color: &str) -> Opt
     Some(icon)
 }
 
+fn page_icon(
+    host: &dyn Host,
+    label: &str,
+    page: usize,
+    total: usize,
+    available: bool,
+) -> Option<ItemStack> {
+    let (material, color) = if available {
+        ("minecraft:lime_stained_glass_pane", "white")
+    } else {
+        ("minecraft:black_stained_glass_pane", "dark_gray")
+    };
+    let mut icon = named_icon(host, material, label, color)?;
+    icon.apply_components(&Compound::from([(
+        "minecraft:lore".into(),
+        Tag::List(vec![
+            text("", "gray", false),
+            text(&format!("({page} / {total})"), "gray", false),
+        ]),
+    )]))
+    .ok()?;
+    Some(icon)
+}
+
 fn preview(
     host: &dyn Host,
     recipe: &RecipeView<'_>,
@@ -749,18 +773,8 @@ fn preview(
     if let Some(pages) = candidate.filter(|_| variant == Variant::Vanilla) {
         let current = pages.index + 1;
         let total = pages.recipes.len();
-        for (slot, label, available) in [
-            (PREVIOUS, "Previous recipe", current > 1),
-            (NEXT, "Next recipe", current < total),
-        ] {
-            let name = format!("{label} ({current}/{total})");
-            let (id, color) = if available {
-                ("minecraft:arrow", "green")
-            } else {
-                ("minecraft:gray_stained_glass_pane", "gray")
-            };
-            items[slot] = named_icon(host, id, &name, color);
-        }
+        items[PREVIOUS] = page_icon(host, "⇦ Previous page", current, total, current > 1);
+        items[NEXT] = page_icon(host, "Next page ⇨", current, total, current < total);
     }
     let (control, label, color) = if candidate.is_some() {
         ("minecraft:crafting_table", "Select this recipe", "green")
@@ -1224,6 +1238,26 @@ mod tests {
 
     #[test]
     fn a_vanilla_saved_key_and_two_pages_remain_exact() {
+        let mut host = FakeHost::new();
+        let black = Kind::Vanilla("minecraft:black_stained_glass_pane");
+        let lime = Kind::Vanilla("minecraft:lime_stained_glass_pane");
+        host.registries
+            .resolve_items([black, lime].map(|kind| Identifier::parse(kind.id()).unwrap()))
+            .unwrap();
+        let previous = page_icon(&host, "⇦ Previous page", 1, 2, false).unwrap();
+        let next = page_icon(&host, "Next page ⇨", 1, 2, true).unwrap();
+        assert_eq!(previous.item(), black.stack(&host, 1).unwrap().item());
+        assert_eq!(next.item(), lime.stack(&host, 1).unwrap().item());
+        assert_eq!(
+            next.components()
+                .unwrap()
+                .as_nbt()
+                .get(&"minecraft:lore".into()),
+            Some(&Tag::List(vec![
+                text("", "gray", false),
+                text("(1 / 2)", "gray", false),
+            ])),
+        );
         let saved = paper_selection(&Compound::from([(
             "PublicBukkitValues".into(),
             Tag::compound([
