@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::items::{
+    ADVANCED_CIRCUIT_BOARD, BASIC_CIRCUIT_BOARD, BATTERY, COPPER_WIRE, ELECTRIC_MOTOR,
+    ELECTRO_MAGNET, ENERGY_CONNECTOR, ENERGY_REGULATOR, IGNITION_CHAMBER, MAGNET, REDSTONE_ALLOY,
+    SMALL_CAPACITOR, SOLAR_GENERATOR, SOLAR_PANEL,
+};
+use crate::items::{
     ALUMINUM_BRASS_INGOT, ALUMINUM_BRONZE_INGOT, ALUMINUM_DUST, ALUMINUM_INGOT, BILLON_INGOT,
     BRASS_INGOT, BRONZE_INGOT, CARBON, CARBON_CHUNK, COBALT_INGOT, COMPRESSED_CARBON, COPPER_DUST,
     COPPER_INGOT, CORINTHIAN_BRONZE_INGOT, CRUSHED_ORE, DAMASCUS_STEEL_INGOT, DURALUMIN_INGOT,
@@ -11,6 +16,13 @@ use crate::items::{
     OUTPUT_CHEST, PULVERIZED_ORE, PURE_ORE_CLUSTER, REINFORCED_ALLOY_INGOT, REINFORCED_PLATE, SALT,
     SIFTED_ORE, SILICON, SILVER_DUST, SILVER_INGOT, SOLDER_INGOT, STEEL_INGOT, STEEL_PLATE,
     STONE_CHUNK, SULFATE, TIN_DUST, TIN_INGOT, WHEAT_FLOUR, ZINC_DUST, ZINC_INGOT,
+};
+use crate::items::{
+    APPLE_JUICE, CARBONADO, CARROT_JUICE, GLOW_BERRY_JUICE, GOLDEN_APPLE_JUICE, MELON_JUICE,
+    PUMPKIN_JUICE, RAW_CARBONADO, SWEET_BERRY_JUICE, SYNTHETIC_DIAMOND,
+};
+use crate::items::{
+    ELECTRIC_FURNACE, ELECTRIC_FURNACE_2, ELECTRIC_FURNACE_3, GILDED_IRON, HEATING_COIL,
 };
 
 #[derive(Clone, Copy)]
@@ -88,6 +100,20 @@ pub(crate) struct Research {
     pub cost: i32,
 }
 
+pub(crate) fn crafting() -> impl Iterator<Item = &'static CraftingRecipe> {
+    CRAFTING.iter().chain(crate::network_recipes::CRAFTING)
+}
+
+pub(crate) fn researches() -> impl Iterator<Item = &'static Research> {
+    RESEARCHES.iter().chain(crate::network_recipes::RESEARCHES)
+}
+
+pub(crate) fn smelting() -> impl Iterator<Item = &'static SmeltingRecipe> {
+    SMELTING
+        .iter()
+        .chain([&crate::network_recipes::SAPPHIRE_SMELTING])
+}
+
 pub(crate) const LUMPS: Research = Research {
     id: "lumps",
     name: "Lumps and Magic",
@@ -103,6 +129,7 @@ pub(crate) const TASTY_KELP: Research = Research {
 pub(crate) const RESEARCHES: &[Research] = &[
     LUMPS,
     TASTY_KELP,
+    AUTOMATED_PANNING_MACHINE,
     SYNTHETIC_DIAMONDS,
     POWER_ITEMS,
     ORE_PURIFICATION,
@@ -112,16 +139,44 @@ pub(crate) const RESEARCHES: &[Research] = &[
     DAMASCUS_STEEL,
     GOLD_CARATS,
     GOLD_PAN_RESEARCH,
+    GOLDEN_POTION,
     INGREDIENTS_AND_CHEESE,
+    JUICER,
     MAKESHIFT_SMELTERY,
     NETHER_GOLD_PAN_RESEARCH,
     NICKEL_AND_COBALT,
     ORE_WASHER,
+    PRESSURE_CHAMBER,
+    BLACK_DIAMONDS,
     REINFORCED_ALLOY,
     SILICON_RESEARCH,
     SLIMEFUN_METALS,
     SMELTERY,
     STEEL,
+    TABLE_SAW,
+    BASIC_CIRCUIT_BOARD_RESEARCH,
+    ADVANCED_CIRCUIT_BOARD_RESEARCH,
+    AUTOMATIC_IGNITION_CHAMBER_RESEARCH,
+    BATTERY_RESEARCH,
+    MAGNET_RESEARCH,
+    ELECTRIC_MOTOR_RESEARCH,
+    COPPER_WIRE_RESEARCH,
+    SOLAR_PANEL_AND_HELMET_RESEARCH,
+    REDSTONE_ALLOY_RESEARCH,
+    ENERGY_REGULATOR_RESEARCH,
+    ENERGY_CONNECTORS_RESEARCH,
+    CAPACITORS_RESEARCH,
+    SOLAR_GENERATORS_RESEARCH,
+    ELECTRIC_FURNACES_RESEARCH,
+    BETTER_ELECTRIC_FURNACE_RESEARCH,
+    GILDED_IRON_RESEARCH,
+    ELECTRIC_ORE_GRINDING_RESEARCH,
+    MEDIUM_TIER_ELECTRIC_INGOT_MACHINES_RESEARCH,
+    HIGH_TIER_ELECTRIC_INGOT_MACHINES_RESEARCH,
+    URANIUM_RESEARCH,
+    HEATED_PRESSURE_CHAMBER_RESEARCH,
+    BETTER_HEATED_PRESSURE_CHAMBER_RESEARCH,
+    BLISTERING_INGOTS_RESEARCH,
 ];
 
 const fn lump_upgrade(input: Kind, output: Kind) -> CraftingRecipe {
@@ -224,6 +279,351 @@ pub(crate) const CRAFTING: &[CraftingRecipe] = &[
         output: stack(KELP_COOKIE, 2),
         research: &TASTY_KELP,
     },
+    CraftingRecipe {
+        inputs: [
+            Some(vanilla!("lapis_block")),
+            Some(vanilla!("lapis_block")),
+            Some(vanilla!("lapis_block")),
+            Some(vanilla!("redstone_block")),
+            Some(BASIC_CIRCUIT_BOARD),
+            Some(vanilla!("redstone_block")),
+            Some(vanilla!("lapis_block")),
+            Some(vanilla!("lapis_block")),
+            Some(vanilla!("lapis_block")),
+        ],
+        output: stack(ADVANCED_CIRCUIT_BOARD, 1),
+        research: &ADVANCED_CIRCUIT_BOARD_RESEARCH,
+    },
+    CraftingRecipe {
+        inputs: [
+            Some(vanilla!("iron_ingot")),
+            Some(vanilla!("flint_and_steel")),
+            Some(vanilla!("iron_ingot")),
+            Some(vanilla!("iron_ingot")),
+            Some(BASIC_CIRCUIT_BOARD),
+            Some(vanilla!("iron_ingot")),
+            None,
+            Some(vanilla!("observer")),
+            None,
+        ],
+        output: stack(IGNITION_CHAMBER, 1),
+        research: &AUTOMATIC_IGNITION_CHAMBER_RESEARCH,
+    },
+    CraftingRecipe {
+        inputs: [
+            None,
+            Some(vanilla!("redstone")),
+            None,
+            Some(ZINC_INGOT),
+            Some(SULFATE),
+            Some(COPPER_INGOT),
+            Some(ZINC_INGOT),
+            Some(SULFATE),
+            Some(COPPER_INGOT),
+        ],
+        output: stack(BATTERY, 1),
+        research: &BATTERY_RESEARCH,
+    },
+    CraftingRecipe {
+        inputs: [
+            Some(NICKEL_INGOT),
+            Some(MAGNET),
+            Some(COBALT_INGOT),
+            None,
+            Some(BATTERY),
+            None,
+            None,
+            None,
+            None,
+        ],
+        output: stack(ELECTRO_MAGNET, 1),
+        research: &ELECTRIC_MOTOR_RESEARCH,
+    },
+    CraftingRecipe {
+        inputs: [
+            Some(COPPER_WIRE),
+            Some(COPPER_WIRE),
+            Some(COPPER_WIRE),
+            None,
+            Some(ELECTRO_MAGNET),
+            None,
+            Some(COPPER_WIRE),
+            Some(COPPER_WIRE),
+            Some(COPPER_WIRE),
+        ],
+        output: stack(ELECTRIC_MOTOR, 1),
+        research: &ELECTRIC_MOTOR_RESEARCH,
+    },
+    CraftingRecipe {
+        inputs: [
+            None,
+            None,
+            None,
+            Some(COPPER_INGOT),
+            Some(COPPER_INGOT),
+            Some(COPPER_INGOT),
+            None,
+            None,
+            None,
+        ],
+        output: stack(COPPER_WIRE, 8),
+        research: &COPPER_WIRE_RESEARCH,
+    },
+    CraftingRecipe {
+        inputs: [
+            Some(vanilla!("glass")),
+            Some(vanilla!("glass")),
+            Some(vanilla!("glass")),
+            Some(SILICON),
+            Some(SILICON),
+            Some(SILICON),
+            Some(FERROSILICON),
+            Some(FERROSILICON),
+            Some(FERROSILICON),
+        ],
+        output: stack(SOLAR_PANEL, 1),
+        research: &SOLAR_PANEL_AND_HELMET_RESEARCH,
+    },
+    CraftingRecipe {
+        inputs: [
+            Some(SILVER_INGOT),
+            Some(DAMASCUS_STEEL_INGOT),
+            Some(SILVER_INGOT),
+            Some(DAMASCUS_STEEL_INGOT),
+            Some(ELECTRIC_MOTOR),
+            Some(DAMASCUS_STEEL_INGOT),
+            Some(SILVER_INGOT),
+            Some(DAMASCUS_STEEL_INGOT),
+            Some(SILVER_INGOT),
+        ],
+        output: stack(ENERGY_REGULATOR, 1),
+        research: &ENERGY_REGULATOR_RESEARCH,
+    },
+    CraftingRecipe {
+        inputs: [
+            Some(CARBON),
+            Some(COPPER_WIRE),
+            Some(CARBON),
+            Some(COPPER_WIRE),
+            Some(vanilla!("redstone_block")),
+            Some(COPPER_WIRE),
+            Some(CARBON),
+            Some(COPPER_WIRE),
+            Some(CARBON),
+        ],
+        output: stack(ENERGY_CONNECTOR, 8),
+        research: &ENERGY_CONNECTORS_RESEARCH,
+    },
+    CraftingRecipe {
+        inputs: [
+            Some(DURALUMIN_INGOT),
+            Some(SULFATE),
+            Some(DURALUMIN_INGOT),
+            Some(REDSTONE_ALLOY),
+            Some(ENERGY_CONNECTOR),
+            Some(REDSTONE_ALLOY),
+            Some(DURALUMIN_INGOT),
+            Some(vanilla!("redstone")),
+            Some(DURALUMIN_INGOT),
+        ],
+        output: stack(SMALL_CAPACITOR, 1),
+        research: &CAPACITORS_RESEARCH,
+    },
+    CraftingRecipe {
+        inputs: [
+            Some(SOLAR_PANEL),
+            Some(SOLAR_PANEL),
+            Some(SOLAR_PANEL),
+            Some(ALUMINUM_INGOT),
+            Some(ELECTRIC_MOTOR),
+            Some(ALUMINUM_INGOT),
+            None,
+            Some(ALUMINUM_INGOT),
+            None,
+        ],
+        output: stack(SOLAR_GENERATOR, 1),
+        research: &SOLAR_GENERATORS_RESEARCH,
+    },
+    CraftingRecipe {
+        inputs: [
+            Some(COPPER_WIRE),
+            Some(COPPER_WIRE),
+            Some(COPPER_WIRE),
+            Some(COPPER_WIRE),
+            Some(ELECTRIC_MOTOR),
+            Some(COPPER_WIRE),
+            Some(COPPER_WIRE),
+            Some(COPPER_WIRE),
+            Some(COPPER_WIRE),
+        ],
+        output: stack(HEATING_COIL, 1),
+        research: &ELECTRIC_MOTOR_RESEARCH,
+    },
+    CraftingRecipe {
+        inputs: [
+            None,
+            Some(vanilla!("furnace")),
+            None,
+            Some(GILDED_IRON),
+            Some(HEATING_COIL),
+            Some(GILDED_IRON),
+            Some(GILDED_IRON),
+            Some(ELECTRIC_MOTOR),
+            Some(GILDED_IRON),
+        ],
+        output: stack(ELECTRIC_FURNACE, 1),
+        research: &ELECTRIC_FURNACES_RESEARCH,
+    },
+    CraftingRecipe {
+        inputs: [
+            None,
+            Some(ELECTRIC_MOTOR),
+            None,
+            Some(GILDED_IRON),
+            Some(ELECTRIC_FURNACE),
+            Some(GILDED_IRON),
+            Some(GILDED_IRON),
+            Some(HEATING_COIL),
+            Some(GILDED_IRON),
+        ],
+        output: stack(ELECTRIC_FURNACE_2, 1),
+        research: &BETTER_ELECTRIC_FURNACE_RESEARCH,
+    },
+    CraftingRecipe {
+        inputs: [
+            None,
+            Some(ELECTRIC_MOTOR),
+            None,
+            Some(STEEL_INGOT),
+            Some(ELECTRIC_FURNACE_2),
+            Some(STEEL_INGOT),
+            Some(GILDED_IRON),
+            Some(HEATING_COIL),
+            Some(GILDED_IRON),
+        ],
+        output: stack(ELECTRIC_FURNACE_3, 1),
+        research: &BETTER_ELECTRIC_FURNACE_RESEARCH,
+    },
+    CraftingRecipe {
+        inputs: [
+            None,
+            Some(vanilla!("diamond_pickaxe")),
+            None,
+            Some(GILDED_IRON),
+            Some(HEATING_COIL),
+            Some(GILDED_IRON),
+            Some(GILDED_IRON),
+            Some(ELECTRIC_MOTOR),
+            Some(GILDED_IRON),
+        ],
+        output: stack(crate::items::ELECTRIC_ORE_GRINDER, 1),
+        research: &ELECTRIC_ORE_GRINDING_RESEARCH,
+    },
+    CraftingRecipe {
+        inputs: [
+            None,
+            Some(vanilla!("diamond_pickaxe")),
+            None,
+            Some(HEATING_COIL),
+            Some(crate::items::ELECTRIC_ORE_GRINDER),
+            Some(HEATING_COIL),
+            Some(GILDED_IRON),
+            Some(crate::network_recipes::BLISTERING_INGOT_3),
+            Some(GILDED_IRON),
+        ],
+        output: stack(crate::items::ELECTRIC_ORE_GRINDER_2, 1),
+        research: &MEDIUM_TIER_ELECTRIC_INGOT_MACHINES_RESEARCH,
+    },
+    CraftingRecipe {
+        inputs: [
+            Some(REINFORCED_PLATE),
+            Some(HEATING_COIL),
+            Some(REINFORCED_PLATE),
+            None,
+            Some(crate::items::ELECTRIC_ORE_GRINDER_2),
+            None,
+            Some(REINFORCED_PLATE),
+            Some(crate::network_recipes::BLISTERING_INGOT_3),
+            Some(REINFORCED_PLATE),
+        ],
+        output: stack(crate::items::ELECTRIC_ORE_GRINDER_3, 1),
+        research: &HIGH_TIER_ELECTRIC_INGOT_MACHINES_RESEARCH,
+    },
+    CraftingRecipe {
+        inputs: [
+            None,
+            Some(crate::items::ELECTRIC_ORE_GRINDER),
+            None,
+            Some(LEAD_INGOT),
+            Some(crate::network_recipes::MEDIUM_CAPACITOR),
+            Some(LEAD_INGOT),
+            Some(LEAD_INGOT),
+            Some(HEATING_COIL),
+            Some(LEAD_INGOT),
+        ],
+        output: stack(crate::items::ELECTRIC_INGOT_PULVERIZER, 1),
+        research: &ELECTRIC_ORE_GRINDING_RESEARCH,
+    },
+    CraftingRecipe {
+        inputs: [
+            Some(crate::heated_pressure::TINY_URANIUM),
+            Some(crate::heated_pressure::TINY_URANIUM),
+            Some(crate::heated_pressure::TINY_URANIUM),
+            Some(crate::heated_pressure::TINY_URANIUM),
+            Some(crate::heated_pressure::TINY_URANIUM),
+            Some(crate::heated_pressure::TINY_URANIUM),
+            Some(crate::heated_pressure::TINY_URANIUM),
+            Some(crate::heated_pressure::TINY_URANIUM),
+            Some(crate::heated_pressure::TINY_URANIUM),
+        ],
+        output: stack(crate::heated_pressure::SMALL_URANIUM, 1),
+        research: &URANIUM_RESEARCH,
+    },
+    CraftingRecipe {
+        inputs: [
+            Some(crate::heated_pressure::SMALL_URANIUM),
+            Some(crate::heated_pressure::SMALL_URANIUM),
+            None,
+            Some(crate::heated_pressure::SMALL_URANIUM),
+            Some(crate::heated_pressure::SMALL_URANIUM),
+            None,
+            None,
+            None,
+            None,
+        ],
+        output: stack(crate::heated_pressure::URANIUM, 1),
+        research: &URANIUM_RESEARCH,
+    },
+    CraftingRecipe {
+        inputs: [
+            Some(LEAD_INGOT),
+            Some(ELECTRIC_MOTOR),
+            Some(LEAD_INGOT),
+            Some(LEAD_INGOT),
+            Some(vanilla!("glass")),
+            Some(LEAD_INGOT),
+            Some(LEAD_INGOT),
+            Some(HEATING_COIL),
+            Some(LEAD_INGOT),
+        ],
+        output: stack(crate::heated_pressure::HEATED_PRESSURE_CHAMBER, 1),
+        research: &HEATED_PRESSURE_CHAMBER_RESEARCH,
+    },
+    CraftingRecipe {
+        inputs: [
+            Some(LEAD_INGOT),
+            Some(ELECTRIC_MOTOR),
+            Some(LEAD_INGOT),
+            Some(LEAD_INGOT),
+            Some(crate::heated_pressure::HEATED_PRESSURE_CHAMBER),
+            Some(LEAD_INGOT),
+            Some(REINFORCED_ALLOY_INGOT),
+            Some(HEATING_COIL),
+            Some(REINFORCED_ALLOY_INGOT),
+        ],
+        output: stack(crate::heated_pressure::HEATED_PRESSURE_CHAMBER_2, 1),
+        research: &BETTER_HEATED_PRESSURE_CHAMBER_RESEARCH,
+    },
 ];
 
 // Compressor.registerDefaultRecipes followed by SlimefunItemSetup.
@@ -264,6 +664,7 @@ pub(crate) const CRUSHING: &[SingleRecipe] = &[
     single!(vanilla!("netherrack"), 16, SULFATE, 1),
     single!(SIFTED_ORE, 1, CRUSHED_ORE, 1),
     single!(CRUSHED_ORE, 1, PULVERIZED_ORE, 1),
+    single!(PURE_ORE_CLUSTER, 1, crate::heated_pressure::TINY_URANIUM, 1),
 ];
 
 // Base yields with Paper's double-ores setting disabled.
@@ -320,6 +721,7 @@ pub(crate) const ORE_PURIFICATION: Research = Research {
 pub(crate) fn output_research(kind: Kind) -> Option<&'static Research> {
     match kind {
         SULFATE => Some(&POWER_ITEMS),
+        crate::heated_pressure::TINY_URANIUM => Some(&URANIUM_RESEARCH),
         CRUSHED_ORE | PULVERIZED_ORE | PURE_ORE_CLUSTER => Some(&ORE_PURIFICATION),
         SALT => Some(&INGREDIENTS_AND_CHEESE),
         GOLD_4K | GOLD_6K | GOLD_8K | GOLD_10K | GOLD_12K | GOLD_14K | GOLD_16K | GOLD_18K
@@ -336,6 +738,14 @@ pub(crate) fn output_research(kind: Kind) -> Option<&'static Research> {
         COBALT_INGOT | NICKEL_INGOT => Some(&NICKEL_AND_COBALT),
         HARDENED_METAL_INGOT | REINFORCED_ALLOY_INGOT => Some(&REINFORCED_ALLOY),
         FERROSILICON | SILICON => Some(&SILICON_RESEARCH),
+        RAW_CARBONADO => Some(&BLACK_DIAMONDS),
+        MAGNET => Some(&MAGNET_RESEARCH),
+        GILDED_IRON => Some(&GILDED_IRON_RESEARCH),
+        REINFORCED_PLATE => Some(&crate::network_recipes::HARDENED_GLASS_RESEARCH),
+        crate::network_recipes::SYNTHETIC_SAPPHIRE => {
+            Some(&crate::network_recipes::SYNTHETIC_SAPPHIRE_RESEARCH)
+        }
+        REDSTONE_ALLOY => Some(&REDSTONE_ALLOY_RESEARCH),
         ALUMINUM_INGOT | COPPER_INGOT | LEAD_INGOT | MAGNESIUM_INGOT | SILVER_INGOT | TIN_INGOT
         | ZINC_INGOT => Some(&SLIMEFUN_METALS),
         STEEL_INGOT => Some(&STEEL),
@@ -380,6 +790,21 @@ pub(crate) const WASHER_DUSTS: &[Kind] = &[
 pub(crate) const WASHING: &[SingleRecipe] = &[
     single!(vanilla!("sand"), 2, SALT, 1),
     single!(PULVERIZED_ORE, 1, PURE_ORE_CLUSTER, 1),
+];
+
+pub(crate) const PRESSING: &[SingleRecipe] = &[
+    single!(CARBON_CHUNK, 1, SYNTHETIC_DIAMOND, 1),
+    single!(RAW_CARBONADO, 1, CARBONADO, 1),
+];
+
+pub(crate) const JUICING: &[SingleRecipe] = &[
+    single!(vanilla!("apple"), 1, APPLE_JUICE, 1),
+    single!(vanilla!("carrot"), 1, CARROT_JUICE, 1),
+    single!(vanilla!("melon_slice"), 1, MELON_JUICE, 1),
+    single!(vanilla!("pumpkin"), 1, PUMPKIN_JUICE, 1),
+    single!(vanilla!("sweet_berries"), 1, SWEET_BERRY_JUICE, 1),
+    single!(vanilla!("golden_apple"), 1, GOLDEN_APPLE_JUICE, 1),
+    single!(vanilla!("glow_berries"), 1, GLOW_BERRY_JUICE, 1),
 ];
 
 #[derive(Clone, Copy)]
@@ -519,6 +944,14 @@ pub(crate) const ALLOY_RECIPES: &[SmeltingRecipe] = &[
 pub(crate) const SMELTING: &[SmeltingRecipe] = &[
     smelt(
         &[
+            stack(SYNTHETIC_DIAMOND, 1),
+            stack(CARBON_CHUNK, 1),
+            stack(vanilla!("glass_pane"), 1),
+        ],
+        RAW_CARBONADO,
+    ),
+    smelt(
+        &[
             stack(vanilla!("iron_ingot"), 1),
             stack(IRON_DUST, 1),
             stack(SILICON, 1),
@@ -545,6 +978,25 @@ pub(crate) const SMELTING: &[SmeltingRecipe] = &[
     smelt(&[stack(GOLD_DUST, 1)], GOLD_4K),
     smelt(&[stack(vanilla!("quartz_block"), 1)], SILICON),
     smelt(&[stack(IRON_DUST, 1)], vanilla!("iron_ingot")),
+    smelt(
+        &[
+            stack(NICKEL_INGOT, 1),
+            stack(ALUMINUM_DUST, 1),
+            stack(IRON_DUST, 1),
+            stack(COBALT_INGOT, 1),
+        ],
+        MAGNET,
+    ),
+    smelt(
+        &[
+            stack(vanilla!("redstone"), 1),
+            stack(vanilla!("redstone_block"), 1),
+            stack(FERROSILICON, 1),
+            stack(HARDENED_METAL_INGOT, 1),
+        ],
+        REDSTONE_ALLOY,
+    ),
+    smelt(&[stack(GOLD_24K, 1), stack(IRON_DUST, 1)], GILDED_IRON),
 ];
 
 pub(crate) const ALLOYS: Research = Research {
@@ -577,6 +1029,18 @@ pub(crate) const GOLD_PAN_RESEARCH: Research = Research {
     cost: 5,
 };
 
+pub(crate) const GOLDEN_POTION: Research = Research {
+    id: "golden_apple_juice",
+    name: "Golden potion",
+    cost: 24,
+};
+
+pub(crate) const JUICER: Research = Research {
+    id: "juicer",
+    name: "Delicious Drinks",
+    cost: 29,
+};
+
 pub(crate) const INGREDIENTS_AND_CHEESE: Research = Research {
     id: "ingredients_and_cheese",
     name: "Slimefun Cuisine",
@@ -607,6 +1071,30 @@ pub(crate) const ORE_WASHER: Research = Research {
     cost: 5,
 };
 
+pub(crate) const PRESSURE_CHAMBER: Research = Research {
+    id: "pressure_chamber",
+    name: "Pressure Chamber",
+    cost: 14,
+};
+
+pub(crate) const BLACK_DIAMONDS: Research = Research {
+    id: "carbonado",
+    name: "Black Diamonds",
+    cost: 26,
+};
+
+pub(crate) const TABLE_SAW: Research = Research {
+    id: "table_saw",
+    name: "Table Saw",
+    cost: 4,
+};
+
+pub(crate) const AUTOMATED_PANNING_MACHINE: Research = Research {
+    id: "automated_panning_machine",
+    name: "Automated Gold Pan",
+    cost: 17,
+};
+
 pub(crate) const REINFORCED_ALLOY: Research = Research {
     id: "reinforced_alloy",
     name: "Reinforced Alloy",
@@ -635,4 +1123,140 @@ pub(crate) const STEEL: Research = Research {
     id: "steel",
     name: "Steel Age",
     cost: 11,
+};
+
+pub(crate) const BASIC_CIRCUIT_BOARD_RESEARCH: Research = Research {
+    id: "basic_circuit_board",
+    name: "Electric Work",
+    cost: 8,
+};
+
+pub(crate) const ADVANCED_CIRCUIT_BOARD_RESEARCH: Research = Research {
+    id: "advanced_circuit_board",
+    name: "Advanced Electricity",
+    cost: 9,
+};
+
+pub(crate) const AUTOMATIC_IGNITION_CHAMBER_RESEARCH: Research = Research {
+    id: "automatic_ignition_chamber",
+    name: "Automatic Ignition Chamber",
+    cost: 12,
+};
+
+pub(crate) const BATTERY_RESEARCH: Research = Research {
+    id: "battery",
+    name: "Your first Battery",
+    cost: 10,
+};
+
+pub(crate) const MAGNET_RESEARCH: Research = Research {
+    id: "magnet",
+    name: "Magnetic Metals",
+    cost: 16,
+};
+
+pub(crate) const ELECTRIC_MOTOR_RESEARCH: Research = Research {
+    id: "electric_motor",
+    name: "Heating up",
+    cost: 32,
+};
+
+pub(crate) const COPPER_WIRE_RESEARCH: Research = Research {
+    id: "copper_wire",
+    name: "Thinned-down Conductivity",
+    cost: 15,
+};
+
+pub(crate) const SOLAR_PANEL_AND_HELMET_RESEARCH: Research = Research {
+    id: "solar_panel_and_helmet",
+    name: "Solar Power",
+    cost: 17,
+};
+
+pub(crate) const REDSTONE_ALLOY_RESEARCH: Research = Research {
+    id: "redstone_alloy",
+    name: "Redstone Alloy",
+    cost: 16,
+};
+
+pub(crate) const ENERGY_REGULATOR_RESEARCH: Research = Research {
+    id: "energy_regulator",
+    name: "Energy Networks 101",
+    cost: 6,
+};
+
+pub(crate) const ENERGY_CONNECTORS_RESEARCH: Research = Research {
+    id: "energy_connectors",
+    name: "Wired Connections",
+    cost: 12,
+};
+
+pub(crate) const CAPACITORS_RESEARCH: Research = Research {
+    id: "capacitors",
+    name: "Tier 1 Capacitors",
+    cost: 25,
+};
+
+pub(crate) const SOLAR_GENERATORS_RESEARCH: Research = Research {
+    id: "solar_generators",
+    name: "Solar Power Plant",
+    cost: 14,
+};
+
+pub(crate) const ELECTRIC_FURNACES_RESEARCH: Research = Research {
+    id: "electric_furnaces",
+    name: "Powered Furnace",
+    cost: 15,
+};
+pub(crate) const BETTER_ELECTRIC_FURNACE_RESEARCH: Research = Research {
+    id: "better_electric_furnace",
+    name: "Upgraded Electric Furnace",
+    cost: 20,
+};
+pub(crate) const GILDED_IRON_RESEARCH: Research = Research {
+    id: "gilded_iron",
+    name: "Shiny Iron",
+    cost: 11,
+};
+
+pub(crate) const ELECTRIC_ORE_GRINDING_RESEARCH: Research = Research {
+    id: "electric_ore_grinding",
+    name: "Crushing and Grinding",
+    cost: 20,
+};
+
+pub(crate) const MEDIUM_TIER_ELECTRIC_INGOT_MACHINES_RESEARCH: Research = Research {
+    id: "medium_tier_electric_ingot_machines",
+    name: "Fast Ingot Fabrication",
+    cost: 25,
+};
+
+pub(crate) const HIGH_TIER_ELECTRIC_INGOT_MACHINES_RESEARCH: Research = Research {
+    id: "high_tier_electric_ingot_machines",
+    name: "Super Fast Ingot Fabrication",
+    cost: 32,
+};
+
+pub(crate) const URANIUM_RESEARCH: Research = Research {
+    id: "uranium",
+    name: "Radioactive",
+    cost: 30,
+};
+
+pub(crate) const HEATED_PRESSURE_CHAMBER_RESEARCH: Research = Research {
+    id: "heated_pressure_chamber",
+    name: "Heated Pressure Chamber",
+    cost: 22,
+};
+
+pub(crate) const BETTER_HEATED_PRESSURE_CHAMBER_RESEARCH: Research = Research {
+    id: "better_heated_pressure_chamber",
+    name: "Upgraded Heated Pressure Chamber",
+    cost: 20,
+};
+
+pub(crate) const BLISTERING_INGOTS_RESEARCH: Research = Research {
+    id: "blistering_ingots",
+    name: "Blistering Radioactivity",
+    cost: 38,
 };

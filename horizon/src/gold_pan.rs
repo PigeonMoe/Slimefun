@@ -76,13 +76,13 @@ impl Pan {
         let _ = level.play_sound(host, sound, [x, y, z], SoundSource::Blocks, 1.0, 1.0);
     }
 
-    fn target_sound(&self, block: &str) -> Option<&'static str> {
+    pub(crate) fn target_sound(&self, block: &str) -> Option<&'static str> {
         self.targets
             .iter()
             .find_map(|&(target, sound)| (target == block).then_some(sound))
     }
 
-    fn drop_for(&self, mut roll: u32) -> Option<Kind> {
+    pub(crate) fn drop_for(&self, mut roll: u32) -> Option<Kind> {
         for &(weight, kind) in self.drops {
             if roll < weight {
                 return Some(kind);

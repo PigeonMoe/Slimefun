@@ -5,13 +5,14 @@ use mod_api::{
     PlayerRef, ServerHost, SoundSource, Text, Transaction,
 };
 
-use crate::compressor::Compressor;
+use crate::compressor::DelayedCrafts;
 use crate::items::{OUTPUT_CHEST, SIFTED_ORE, STONE_CHUNK};
 use crate::output_chest;
 use crate::random::Rolls;
 use crate::recipes::{
-    ALLOY_RECIPES, COMPRESSING, CRAFTING, CRUSHING, DOUBLING, GRINDING, MAKESHIFT_SMELTERY,
-    ORE_WASHER, SMELTERY, SMELTING, SmeltingRecipe, Stack, WASHER_DUSTS, WASHING, output_research,
+    ALLOY_RECIPES, COMPRESSING, CRUSHING, DOUBLING, GRINDING, JUICER, JUICING, MAKESHIFT_SMELTERY,
+    ORE_WASHER, PRESSING, PRESSURE_CHAMBER, SMELTERY, SmeltingRecipe, Stack, WASHER_DUSTS, WASHING,
+    crafting, output_research, smelting,
 };
 use crate::research;
 
@@ -21,6 +22,8 @@ pub(crate) enum Machine {
     Crafting,
     Crushing,
     Compressing,
+    Pressing,
+    Juicing,
     Washing,
     Smelting { heat: [i32; 3], makeshift: bool },
 }
@@ -35,7 +38,10 @@ pub(crate) struct Dispenser {
 pub(crate) struct Settings {
     pub double_ores: bool,
     pub legacy_ore_washer: bool,
+    pub legacy_ore_grinder: bool,
     pub fire_breaking_chance: u32,
+    pub drop_from_golems: bool,
+    pub golem_drop_chance: u32,
 }
 
 impl Default for Settings {
@@ -43,7 +49,10 @@ impl Default for Settings {
         Self {
             double_ores: true,
             legacy_ore_washer: false,
+            legacy_ore_grinder: true,
             fire_breaking_chance: 34,
+            drop_from_golems: true,
+            golem_drop_chance: 75,
         }
     }
 }
@@ -75,8 +84,13 @@ pub(crate) enum Refusal {
 impl Machine {
     pub fn at(host: &dyn Host, level: LevelRef, clicked: [i32; 3]) -> Option<(Self, Dispenser)> {
         let [x, y, z] = clicked;
-        let below = [x, y.checked_sub(1)?, z];
         let block = level.block_state(host, clicked)?.block().id(host);
+        if block == "minecraft:cauldron"
+            && let Some(dispenser) = pressure_chamber_at(host, level, clicked)
+        {
+            return Some((Self::Pressing, dispenser));
+        }
+        let below = [x, y.checked_sub(1)?, z];
         let wooden_fence = is_wooden_fence(host, &block);
         let dispenser = host.block_key("minecraft:dispenser")?;
         if wooden_fence && has_block(host, level, below, "minecraft:cauldron") {
@@ -100,6 +114,12 @@ impl Machine {
 
         let machine = match block.as_str() {
             "minecraft:crafting_table" => Self::Crafting,
+            "minecraft:nether_brick_fence"
+                if y.checked_add(1)
+                    .is_some_and(|top| has_block(host, level, [x, top, z], "minecraft:glass")) =>
+            {
+                Self::Juicing
+            }
             _ if wooden_fence || block == "minecraft:nether_brick_fence" => {
                 let heat = [x, y.checked_sub(2)?, z];
                 let bricks = if wooden_fence {
@@ -146,17 +166,17 @@ impl Machine {
         player: PlayerRef,
         dispenser: Dispenser,
         clicked: [i32; 3],
-        compressor: &Compressor,
+        delayed_crafts: &DelayedCrafts,
         settings: Settings,
         rolls: &Rolls,
     ) {
-        let outcome = self.process(host, player, dispenser, compressor, settings, rolls);
+        let outcome = self.process(host, player, dispenser, delayed_crafts, settings, rolls);
 
         let message = match outcome {
-            Ok(()) if matches!(self, Self::Compressing) => return,
+            Ok(()) if matches!(self, Self::Compressing | Self::Pressing) => return,
             Ok(()) => {
                 let sound = match self {
-                    Self::Washing => "minecraft:entity.player.splash",
+                    Self::Washing | Self::Juicing => "minecraft:entity.player.splash",
                     Self::Smelting { heat, makeshift } => {
                         if makeshift
                             || rolls
@@ -177,6 +197,16 @@ impl Machine {
                     1.0,
                     1.0,
                 );
+                if matches!(self, Self::Juicing) {
+                    let _ = dispenser.level.play_sound(
+                        host,
+                        "minecraft:block.grass.break",
+                        clicked.map(|axis| f64::from(axis) + 0.5),
+                        SoundSource::Blocks,
+                        1.0,
+                        1.0,
+                    );
+                }
                 return;
             }
             Err(Refusal::Locked) => "The dispenser is locked.".to_owned(),
@@ -198,11 +228,13 @@ impl Machine {
         host: &mut dyn ServerHost,
         player: PlayerRef,
         dispenser: Dispenser,
-        compressor: &Compressor,
+        delayed_crafts: &DelayedCrafts,
         settings: Settings,
         rolls: &Rolls,
     ) -> Result<(), Refusal> {
         let required = match self {
+            Self::Pressing => Some(&PRESSURE_CHAMBER),
+            Self::Juicing => Some(&JUICER),
             Self::Washing => Some(&ORE_WASHER),
             Self::Smelting {
                 makeshift: true, ..
@@ -227,12 +259,18 @@ impl Machine {
         host.transaction(|host, tx| {
             let slots = dispenser.slots(host);
             match self {
-                Self::Grinding | Self::Crushing | Self::Compressing => {
+                Self::Grinding
+                | Self::Crushing
+                | Self::Compressing
+                | Self::Pressing
+                | Self::Juicing => {
                     let no_bonus: &[_] = &[];
                     let (base, bonus) = match self {
                         Self::Grinding => (GRINDING, no_bonus),
                         Self::Crushing => (CRUSHING, DOUBLING),
                         Self::Compressing => (COMPRESSING, no_bonus),
+                        Self::Pressing => (PRESSING, no_bonus),
+                        Self::Juicing => (JUICING, no_bonus),
                         _ => unreachable!(),
                     };
                     for (slot, input) in slots.iter().enumerate() {
@@ -265,7 +303,7 @@ impl Machine {
                         } else {
                             recipe.input.count
                         };
-                        if matches!(self, Self::Compressing) {
+                        if matches!(self, Self::Compressing | Self::Pressing) {
                             let stack = output
                                 .kind
                                 .stack(host, output.count)
@@ -277,7 +315,19 @@ impl Machine {
                             })
                             .expect_err("space check always rolls back")?;
                             consume(host, tx, &dispenser.place(slot), input, consumption)?;
-                            return compressor.queue(host, player, holder, dispenser, stack);
+                            return if matches!(self, Self::Pressing) {
+                                let [x, y, z] = dispenser.position;
+                                delayed_crafts.queue_pressure_chamber(
+                                    host,
+                                    holder,
+                                    dispenser,
+                                    [x, y - 2, z],
+                                    stack,
+                                )
+                            } else {
+                                delayed_crafts
+                                    .queue_compressor(host, player, holder, dispenser, stack)
+                            };
                         }
 
                         deposit(host, tx, dispenser, output)?;
@@ -330,11 +380,7 @@ impl Machine {
                     let alloys = if makeshift { &[] } else { ALLOY_RECIPES };
                     let (recipe, consumption) = alloys
                         .iter()
-                        .chain(
-                            SMELTING
-                                .iter()
-                                .filter(|recipe| !makeshift || makeshift_recipe(recipe)),
-                        )
+                        .chain(smelting().filter(|recipe| !makeshift || makeshift_recipe(recipe)))
                         .find_map(|recipe| {
                             smelting_inputs(host, &slots, recipe).map(|slots| (recipe, slots))
                         })
@@ -354,8 +400,7 @@ impl Machine {
                     Ok(())
                 }
                 Self::Crafting => {
-                    let recipe = CRAFTING
-                        .iter()
+                    let recipe = crafting()
                         .find(|recipe| {
                             recipe.inputs.iter().zip(&slots).all(|(input, actual)| {
                                 match (input, actual) {
@@ -384,10 +429,30 @@ impl Machine {
     }
 }
 
-fn has_block(host: &dyn Host, level: LevelRef, pos: [i32; 3], name: &str) -> bool {
+pub(crate) fn has_block(host: &dyn Host, level: LevelRef, pos: [i32; 3], name: &str) -> bool {
     level
         .block_state(host, pos)
         .is_some_and(|state| Some(state.block()) == host.block_key(name))
+}
+
+fn pressure_chamber_at(host: &dyn Host, level: LevelRef, [x, y, z]: [i32; 3]) -> Option<Dispenser> {
+    let glass = [x, y.checked_add(1)?, z];
+    let dispenser = [x, y.checked_add(2)?, z];
+    let center_matches = has_block(host, level, glass, "minecraft:glass")
+        && has_block(host, level, dispenser, "minecraft:dispenser");
+    let sides_match = [0, 2].into_iter().any(|axis| {
+        [
+            ([x, y, z], "minecraft:piston"),
+            (glass, "minecraft:piston"),
+            (dispenser, "minecraft:smooth_stone_slab"),
+        ]
+        .into_iter()
+        .all(|(pos, name)| opposite_on_axis(host, level, pos, axis, &[name]))
+    });
+    (center_matches && sides_match).then_some(Dispenser {
+        level,
+        position: dispenser,
+    })
 }
 
 fn exhaust_fire(host: &mut dyn ServerHost, level: LevelRef, pos: [i32; 3]) {
@@ -451,18 +516,33 @@ fn is_wooden_fence(host: &dyn Host, block: &str) -> bool {
         .unwrap_or(block == "minecraft:oak_fence")
 }
 
-fn opposite_blocks(host: &dyn Host, level: LevelRef, center: [i32; 3], supported: &[&str]) -> bool {
-    [0, 2].into_iter().any(|axis| {
-        [-1, 1].into_iter().all(|delta| {
-            let mut pos = center;
-            let Some(offset) = pos[axis].checked_add(delta) else {
-                return false;
-            };
-            pos[axis] = offset;
-            level
-                .block_state(host, pos)
-                .is_some_and(|state| supported.contains(&state.block().id(host).as_str()))
-        })
+pub(crate) fn opposite_blocks(
+    host: &dyn Host,
+    level: LevelRef,
+    center: [i32; 3],
+    supported: &[&str],
+) -> bool {
+    [0, 2]
+        .into_iter()
+        .any(|axis| opposite_on_axis(host, level, center, axis, supported))
+}
+
+fn opposite_on_axis(
+    host: &dyn Host,
+    level: LevelRef,
+    center: [i32; 3],
+    axis: usize,
+    supported: &[&str],
+) -> bool {
+    [-1, 1].into_iter().all(|delta| {
+        let mut pos = center;
+        let Some(offset) = pos[axis].checked_add(delta) else {
+            return false;
+        };
+        pos[axis] = offset;
+        level
+            .block_state(host, pos)
+            .is_some_and(|state| supported.contains(&state.block().id(host).as_str()))
     })
 }
 
@@ -559,12 +639,51 @@ pub(crate) fn deposit_into(
 mod tests {
     use super::*;
     use crate::items::Kind;
+    use crate::recipes::{CRAFTING, SMELTING};
     use mod_api::Identifier;
     use mod_api::testing::FakeHost;
 
     const POSITION: [i32; 3] = [0, 64, 0];
     const BLAZE_ROD: Kind = Kind::Vanilla("minecraft:blaze_rod");
     const BLAZE_POWDER: Kind = Kind::Vanilla("minecraft:blaze_powder");
+
+    #[test]
+    fn carbonado_uses_pressure_chamber_diamond_and_full_smeltery() {
+        use crate::items::{CARBON_CHUNK, CARBONADO, RAW_CARBONADO, SYNTHETIC_DIAMOND};
+
+        assert_eq!(PRESSING.len(), 2);
+        assert_eq!(PRESSING[0].input.kind, CARBON_CHUNK);
+        assert_eq!(PRESSING[0].output.kind, SYNTHETIC_DIAMOND);
+        assert_eq!(PRESSING[1].input.kind, RAW_CARBONADO);
+        assert_eq!(PRESSING[1].output.kind, CARBONADO);
+
+        let raw_recipe = SMELTING
+            .iter()
+            .find(|recipe| recipe.output.kind == RAW_CARBONADO)
+            .unwrap();
+        assert!(!makeshift_recipe(raw_recipe));
+        let mut host = FakeHost::new();
+        host.registries
+            .resolve_items(
+                [
+                    "minecraft:diamond",
+                    "minecraft:player_head",
+                    "minecraft:glass_pane",
+                ]
+                .map(|name| Identifier::parse(name).unwrap()),
+            )
+            .unwrap();
+        let mut slots = std::array::from_fn(|_| None);
+        slots[0] = Kind::Vanilla("minecraft:diamond").stack(&host, 1);
+        slots[1] = CARBON_CHUNK.stack(&host, 1);
+        slots[2] = Kind::Vanilla("minecraft:glass_pane").stack(&host, 1);
+        assert_eq!(smelting_inputs(&host, &slots, raw_recipe), None);
+        slots[0] = SYNTHETIC_DIAMOND.stack(&host, 1);
+        assert_eq!(
+            smelting_inputs(&host, &slots, raw_recipe),
+            Some([1, 1, 1, 0, 0, 0, 0, 0, 0])
+        );
+    }
 
     #[test]
     fn lead_progression_from_gravel_to_output_chest_has_all_required_recipes() {

@@ -53,6 +53,25 @@ impl ItemPart for ChestPlacement {
     }
 }
 
+pub(crate) fn restore_paper_marker(
+    host: &mut dyn ServerHost,
+    level: LevelRef,
+    pos: [i32; 3],
+) -> bool {
+    if !level.in_place(host)
+        || !host.block_key("minecraft:chest").is_some_and(|chest| {
+            level
+                .block_state(host, pos)
+                .is_some_and(|state| state.block() == chest)
+        })
+    {
+        return false;
+    }
+    let holder = Holder::BlockEntity(pos);
+    matches!(MARKER.get_existing(host, holder), Ok(Some(true)))
+        || MARKER.set(host, holder, true).is_ok()
+}
+
 /// Paper's output selection follows faces in this exact order. A chest with
 /// insufficient space leaves its inventory untouched before the next candidate.
 pub(crate) fn try_deposit(
@@ -62,6 +81,20 @@ pub(crate) fn try_deposit(
     stack: &ItemStack,
 ) -> bool {
     try_deposit_with_extra(host, level, dispenser, stack, None, false)
+}
+
+pub(crate) fn route_or_drop(
+    host: &mut dyn ServerHost,
+    level: LevelRef,
+    adjacent_to: [i32; 3],
+    drop_at: [i32; 3],
+    stack: &ItemStack,
+) -> bool {
+    let [x, y, z] = drop_at.map(|axis| f64::from(axis) + 0.5);
+    try_deposit(host, level, adjacent_to, stack)
+        || level
+            .spawn_item(host, x, y, z, stack.clone(), 10)
+            .is_ok_and(|item| item.is_some())
 }
 
 pub(crate) fn try_deposit_with_extra(

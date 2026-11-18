@@ -1,0 +1,8 @@
+name: SlimefunHorizonStorageExport
+version: "1.0"
+main: moe.pigeon.horizon.migration.PaperStorageExporter
+api-version: "26.2"
+commands:
+  sf-export-inventories:
+    description: Normalize a Slimefun storage snapshot for Horizon
+    usage: "/sf-export-inventories <source-snapshot> <new-output-directory>"

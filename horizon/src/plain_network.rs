@@ -1,0 +1,189 @@
+// SPDX-License-Identifier: GPL-3.0-only
+
+use std::{collections::BTreeMap, sync::Mutex};
+
+use mod_api::{
+    AttachmentCodec, AttachmentError, AttachmentType, BlockChangedEvent, BlockDropsEvent, Compound,
+    Holder, LevelDimension, LevelHost, LevelRef, ServerHost, Tag,
+};
+
+use super::{BlockData, Position, saved_id};
+
+pub(super) const CARRIER: &str = "minecraft:light_gray_stained_glass";
+
+static NODES: AttachmentType<Compound> = AttachmentType {
+    namespace: "slimefun",
+    name: "plain_energy_nodes",
+    default: Compound::new,
+    codec: Some(AttachmentCodec {
+        encode: |data| Ok(data.clone()),
+        decode: |data| Ok(data.clone()),
+    }),
+    copy_on_death: false,
+    sync: false,
+};
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum Change {
+    Removed,
+    Dropped,
+    Superseded,
+}
+
+// The world's readonly block-change hook can guard a position immediately. Its saved
+// attachment remains available to the synchronous drop hook until the next writable phase.
+static RETIRED: Mutex<BTreeMap<(String, Position), Change>> = Mutex::new(BTreeMap::new());
+
+fn dimension(dimension: &LevelDimension) -> &str {
+    match dimension {
+        LevelDimension::Overworld => "minecraft:overworld",
+        LevelDimension::Nether => "minecraft:the_nether",
+        LevelDimension::End => "minecraft:the_end",
+        LevelDimension::Custom(id) => id.id(),
+    }
+}
+
+fn chunk([x, _, z]: Position) -> [i32; 2] {
+    [x.div_euclid(16), z.div_euclid(16)]
+}
+
+fn key([x, y, z]: Position) -> String {
+    format!("{x},{y},{z}")
+}
+
+pub(crate) fn observe_plain_change(level: &dyn LevelHost, event: &BlockChangedEvent) {
+    let old = level.state_block(event.old);
+    let new = level.state_block(event.new);
+    if old == new || (old != Some(CARRIER) && new != Some(CARRIER)) {
+        return;
+    }
+    let address = (
+        dimension(&event.dimension).to_owned(),
+        [event.pos.x, event.pos.y, event.pos.z],
+    );
+    let mut changes = RETIRED.lock().unwrap();
+    if new == Some(CARRIER) {
+        // A different newly placed glass block is never allowed to inherit an old node.
+        if let Some(change) = changes.get_mut(&address) {
+            *change = Change::Superseded;
+        }
+    } else {
+        changes.entry(address).or_insert(Change::Removed);
+    }
+}
+
+pub(super) fn read(host: &mut dyn ServerHost, level: LevelRef, pos: Position) -> Option<BlockData> {
+    let address = (level.dimension().id(host)?, pos);
+    if RETIRED.lock().unwrap().contains_key(&address) {
+        return None;
+    }
+    let saved = NODES
+        .get_existing(host, Holder::Chunk(chunk(pos)))
+        .ok()
+        .flatten()?;
+    let Tag::Compound(data) = saved.get(&key(pos).as_str().into())? else {
+        return None;
+    };
+    let Tag::Int(charge) = data.get(&"charge".into())? else {
+        return None;
+    };
+    Some(BlockData {
+        id: saved_id(data)?,
+        charge: u32::try_from(*charge).ok()?,
+        cargo: None,
+    })
+}
+
+pub(super) fn write(
+    host: &mut dyn ServerHost,
+    pos: Position,
+    data: &BlockData,
+) -> Result<(), AttachmentError> {
+    let holder = Holder::Chunk(chunk(pos));
+    let mut map = NODES.get_existing(host, holder)?.unwrap_or_default();
+    map.insert(
+        key(pos).as_str().into(),
+        Tag::compound([
+            ("id", Tag::String(data.id.as_str().into())),
+            (
+                "charge",
+                Tag::Int(i32::try_from(data.charge).map_err(|_| AttachmentError::Decode)?),
+            ),
+        ]),
+    );
+    NODES.set(host, holder, map)
+}
+
+fn remove(host: &mut dyn ServerHost, pos: Position) -> Result<(), AttachmentError> {
+    let holder = Holder::Chunk(chunk(pos));
+    let Some(mut map) = NODES.get_existing(host, holder)? else {
+        return Ok(());
+    };
+    if map.remove(&key(pos).as_str().into()).is_some() {
+        NODES.set(host, holder, map)?;
+    }
+    Ok(())
+}
+
+pub(super) fn prepare_placement(
+    host: &mut dyn ServerHost,
+    level: LevelRef,
+    pos: Position,
+) -> Result<(), AttachmentError> {
+    if let Some(id) = level.dimension().id(host) {
+        let address = (id, pos);
+        let pending = RETIRED.lock().unwrap().contains_key(&address);
+        if !pending {
+            return Ok(());
+        }
+        remove(host, pos)?;
+        crate::factory::clear_plain_data(host, level, pos);
+        RETIRED.lock().unwrap().remove(&address);
+    }
+    Ok(())
+}
+
+pub(super) fn clean_level(host: &mut dyn ServerHost, level: LevelRef) {
+    let Some(id) = level.dimension().id(host) else {
+        return;
+    };
+    let retired: Vec<_> = RETIRED
+        .lock()
+        .unwrap()
+        .keys()
+        .filter(|(dimension, _)| dimension == &id)
+        .map(|(_, pos)| *pos)
+        .collect();
+    for pos in retired {
+        if host.chunk(level, chunk(pos)).is_some() && remove(host, pos).is_ok() {
+            crate::factory::clear_plain_data(host, level, pos);
+            RETIRED.lock().unwrap().remove(&(id.clone(), pos));
+        }
+    }
+}
+
+pub(super) fn clear() {
+    RETIRED.lock().unwrap().clear();
+}
+
+pub(super) fn take_drop(level: &dyn LevelHost, event: &BlockDropsEvent<'_>) -> Option<String> {
+    if level.state_block(event.state) != Some(CARRIER) {
+        return None;
+    }
+    let pos = [event.pos.x, event.pos.y, event.pos.z];
+    let saved = level.chunk_saved_attachment(chunk(pos), NODES.namespace, NODES.name)?;
+    let Tag::Compound(node) = saved.get(&key(pos).as_str().into())? else {
+        return None;
+    };
+    let id = saved_id(node)?;
+    let address = (dimension(&event.dimension).to_owned(), pos);
+    let mut retired = RETIRED.lock().unwrap();
+    if retired
+        .get(&address)
+        .is_some_and(|change| *change != Change::Removed)
+    {
+        return None;
+    }
+    retired.insert(address, Change::Dropped);
+    Some(id)
+}

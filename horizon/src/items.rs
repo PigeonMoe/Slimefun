@@ -18,6 +18,20 @@ pub(crate) struct SlimefunItem {
     pub color: &'static str,
     pub tier: Option<&'static str>,
     pub texture: Option<HeadTexture>,
+    pub juice: Option<JuiceProfile>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct JuiceProfile {
+    pub color: i32,
+    pub effect: &'static str,
+    pub duration: i32,
+}
+
+impl JuiceProfile {
+    pub fn is_saturating(&self) -> bool {
+        self.effect == "minecraft:saturation"
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -38,6 +52,13 @@ impl Kind {
         match self {
             Self::Vanilla(id) => id,
             Self::Slimefun(item) => item.material,
+        }
+    }
+
+    pub fn juice(self) -> Option<&'static JuiceProfile> {
+        match self {
+            Self::Vanilla(_) => None,
+            Self::Slimefun(item) => item.juice.as_ref(),
         }
     }
 
@@ -107,6 +128,53 @@ impl SlimefunItem {
                 ]),
             );
         }
+        if let Some(juice) = &self.juice {
+            components.insert(
+                "minecraft:potion_contents".into(),
+                Tag::compound([
+                    ("custom_color", Tag::Int(juice.color)),
+                    (
+                        "custom_effects",
+                        Tag::List(vec![Tag::compound([
+                            ("id", string(juice.effect)),
+                            ("duration", Tag::Int(juice.duration)),
+                            ("ambient", Tag::Byte(1)),
+                        ])]),
+                    ),
+                ]),
+            );
+            components.insert(
+                "!minecraft:use_remainder".into(),
+                Tag::Compound(Compound::new()),
+            );
+            if juice.is_saturating() {
+                components.insert(
+                    "minecraft:tooltip_display".into(),
+                    Tag::compound([(
+                        "hidden_components",
+                        Tag::List(vec![string("minecraft:potion_contents")]),
+                    )]),
+                );
+                components.insert(
+                    "minecraft:lore".into(),
+                    Tag::List(vec![
+                        string(""),
+                        Tag::compound([
+                            ("text", string("Restores ")),
+                            ("color", string("gray")),
+                            ("italic", Tag::Byte(1)),
+                            (
+                                "extra",
+                                Tag::List(vec![
+                                    text("3.0", "aqua", true),
+                                    text(" Hunger", "gray", true),
+                                ]),
+                            ),
+                        ]),
+                    ]),
+                );
+            }
+        }
         components
     }
 }
@@ -137,16 +205,55 @@ fn text(value: &str, color: &str, italic: bool) -> Tag {
 
 macro_rules! item {
     ($id:ident, $material:literal, $name:literal, $color:literal, $tier:expr, $texture:expr) => {
+        pub(crate) const $id: $crate::items::Kind =
+            $crate::items::Kind::Slimefun(&$crate::items::SlimefunItem {
+                id: stringify!($id),
+                material: concat!("minecraft:", $material),
+                name: $name,
+                color: $color,
+                tier: $tier,
+                texture: $texture,
+                juice: None,
+            });
+    };
+}
+pub(crate) use item;
+
+macro_rules! juice {
+    ($id:ident, $name:literal, $text_color:literal, $color:literal) => {
+        juice!($id, $name, $text_color, $color, "minecraft:saturation", 5);
+    };
+    ($id:ident, $name:literal, $text_color:literal, $color:literal, $effect:literal, $duration:literal) => {
         pub(crate) const $id: Kind = Kind::Slimefun(&SlimefunItem {
             id: stringify!($id),
-            material: concat!("minecraft:", $material),
+            material: "minecraft:potion",
             name: $name,
-            color: $color,
-            tier: $tier,
-            texture: $texture,
+            color: $text_color,
+            tier: None,
+            texture: None,
+            juice: Some(JuiceProfile {
+                color: $color,
+                effect: $effect,
+                duration: $duration,
+            }),
         });
     };
 }
+
+juice!(APPLE_JUICE, "Apple Juice", "red", 0xff0000);
+juice!(CARROT_JUICE, "Carrot Juice", "gold", 0xffa500);
+juice!(MELON_JUICE, "Melon Juice", "red", 0xff0000);
+juice!(PUMPKIN_JUICE, "Pumpkin Juice", "gold", 0xffa500);
+juice!(SWEET_BERRY_JUICE, "Sweet Berry Juice", "red", 0xff0000);
+juice!(GLOW_BERRY_JUICE, "Glow Berry Juice", "gold", 0xffa500);
+juice!(
+    GOLDEN_APPLE_JUICE,
+    "Golden Apple Juice",
+    "aqua",
+    0xffff00,
+    "minecraft:absorption",
+    400
+);
 
 item!(
     MAGIC_LUMP_1,
@@ -568,3 +675,254 @@ item!(TIN_DUST, "sugar", "Tin Dust", "gold", None, None);
 item!(TIN_INGOT, "iron_ingot", "Tin Ingot", "aqua", None, None);
 item!(ZINC_DUST, "sugar", "Zinc Dust", "gold", None, None);
 item!(ZINC_INGOT, "iron_ingot", "Zinc Ingot", "aqua", None, None);
+
+item!(
+    SYNTHETIC_DIAMOND,
+    "diamond",
+    "Synthetic Diamond",
+    "aqua",
+    None,
+    None
+);
+item!(
+    RAW_CARBONADO,
+    "player_head",
+    "Raw Carbonado",
+    "aqua",
+    None,
+    Some(HeadTexture {
+        profile: [-86148934, 3223659, -1993303417, -1687965865],
+        value: "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHBzOi8vdGV4dHVyZXMubWluZWNyYWZ0Lm5ldC90ZXh0dXJlL2ViNDllNmVjMTA3NzFlODk5MjI1YWVhNzNjZDhjZjAzNjg0ZjQxMWQxNDE1YzczMjNjOTNjYjk0NzYyMzAifX19",
+    })
+);
+item!(
+    CARBONADO,
+    "player_head",
+    "Carbonado",
+    "aqua",
+    None,
+    Some(HeadTexture {
+        profile: [-680051172, 1087714401, -1329937131, -1657014872],
+        value: "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHBzOi8vdGV4dHVyZXMubWluZWNyYWZ0Lm5ldC90ZXh0dXJlLzEyZjRiMTU3N2Y1MTYwYzY4OTMxNzI1NzFjNGE3MWQ4YjMyMWNkY2VhYTAzMmM2ZTBlM2I2MGUwYjMyOGZhIn19fQ==",
+    })
+);
+
+item!(
+    BASIC_CIRCUIT_BOARD,
+    "activator_rail",
+    "Basic Circuit Board",
+    "aqua",
+    None,
+    None
+);
+item!(
+    ADVANCED_CIRCUIT_BOARD,
+    "powered_rail",
+    "Advanced Circuit Board",
+    "aqua",
+    None,
+    None
+);
+item!(
+    IGNITION_CHAMBER,
+    "dropper",
+    "Automatic Ignition Chamber",
+    "dark_red",
+    None,
+    None
+);
+item!(
+    BATTERY,
+    "player_head",
+    "Battery",
+    "gold",
+    None,
+    Some(HeadTexture {
+        profile: [1506400309, -904645575, -1715297863, 98820824],
+        value: "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHBzOi8vdGV4dHVyZXMubWluZWNyYWZ0Lm5ldC90ZXh0dXJlLzZlMmRkYTZlZjYxODVkNGRkNmVhODY4NGU5N2QzOWJhOGFiMDM3ZTI1Zjc1Y2RlYTZiZDI5ZGY4ZWIzNGVlIn19fQ==",
+    })
+);
+item!(
+    MAGNET,
+    "player_head",
+    "Magnet",
+    "red",
+    None,
+    Some(HeadTexture {
+        profile: [-1689013977, 1490433317, -1663768500, 1586340172],
+        value: "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHBzOi8vdGV4dHVyZXMubWluZWNyYWZ0Lm5ldC90ZXh0dXJlL2FiYThlYmM0YzZhODE3MzA5NDc0OTliZjdlMWQ1ZTczZmVkNmMxYmIyYzA1MWU5NmQzNWViMTZkMjQ2MTBlNyJ9fX0=",
+    })
+);
+item!(
+    ELECTRO_MAGNET,
+    "player_head",
+    "Electromagnet",
+    "red",
+    None,
+    Some(HeadTexture {
+        profile: [-1689013977, 1490433317, -1663768500, 1586340172],
+        value: "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHBzOi8vdGV4dHVyZXMubWluZWNyYWZ0Lm5ldC90ZXh0dXJlL2FiYThlYmM0YzZhODE3MzA5NDc0OTliZjdlMWQ1ZTczZmVkNmMxYmIyYzA1MWU5NmQzNWViMTZkMjQ2MTBlNyJ9fX0=",
+    })
+);
+item!(
+    ELECTRIC_MOTOR,
+    "player_head",
+    "Electric Motor",
+    "red",
+    None,
+    Some(HeadTexture {
+        profile: [1236088620, -867814837, -1523178510, 245211413],
+        value: "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHBzOi8vdGV4dHVyZXMubWluZWNyYWZ0Lm5ldC90ZXh0dXJlLzhjYmNhMDEyZjY3ZTU0ZGU5YWVlNzJmZjQyNGUwNTZjMmFlNThkZTVlYWNjOTQ5YWIyYmNkOTY4M2NlYyJ9fX0=",
+    })
+);
+item!(COPPER_WIRE, "string", "Copper Wire", "gold", None, None);
+item!(
+    SOLAR_PANEL,
+    "daylight_detector",
+    "Photovoltaic Cell",
+    "blue",
+    None,
+    None
+);
+item!(
+    REDSTONE_ALLOY,
+    "brick",
+    "Redstone Alloy Ingot",
+    "red",
+    None,
+    None
+);
+item!(
+    ENERGY_REGULATOR,
+    "player_head",
+    "Energy Regulator",
+    "gold",
+    None,
+    Some(HeadTexture {
+        profile: [-546435397, 1399734098, -1494264352, -475146256],
+        value: "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHBzOi8vdGV4dHVyZXMubWluZWNyYWZ0Lm5ldC90ZXh0dXJlL2Q3OGYyYjdlNWU3NTYzOWVhN2ZiNzk2YzM1ZDM2NGM0ZGYyOGI0MjQzZTY2Yjc2Mjc3YWFkY2Q2MjYxMzM3In19fQ==",
+    })
+);
+item!(
+    ENERGY_CONNECTOR,
+    "player_head",
+    "Energy Connector",
+    "yellow",
+    None,
+    Some(HeadTexture {
+        profile: [1779154149, 1612987419, -1733160209, 134025994],
+        value: "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHBzOi8vdGV4dHVyZXMubWluZWNyYWZ0Lm5ldC90ZXh0dXJlLzEwODVlMDk4NzU2Yjk5NWIwMDI0MTY0NDA4OWM1NWE4ZjlhY2RlMzViOWEzNzc4NWQ1ZTA1N2E5MjM2MTNiIn19fQ==",
+    })
+);
+item!(
+    SMALL_CAPACITOR,
+    "player_head",
+    "Small Energy Capacitor",
+    "green",
+    None,
+    Some(HeadTexture {
+        profile: [1570095643, -1019004906, -1651193732, -1212268975],
+        value: "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHBzOi8vdGV4dHVyZXMubWluZWNyYWZ0Lm5ldC90ZXh0dXJlLzkxMzYxZTU3NmI0OTNjYmZkZmFlMzI4NjYxY2VkZDFhZGQ1NWZhYjRlNWViNDE4YjkyY2ViZjYyNzVmOGJiNCJ9fX0=",
+    })
+);
+item!(
+    SOLAR_GENERATOR,
+    "daylight_detector",
+    "Solar Generator",
+    "aqua",
+    None,
+    None
+);
+
+pub(crate) fn network_item(id: &str) -> Option<Kind> {
+    [
+        ENERGY_REGULATOR,
+        ENERGY_CONNECTOR,
+        SMALL_CAPACITOR,
+        SOLAR_GENERATOR,
+        ELECTRIC_FURNACE,
+        ELECTRIC_FURNACE_2,
+        ELECTRIC_FURNACE_3,
+        ELECTRIC_ORE_GRINDER,
+        ELECTRIC_ORE_GRINDER_2,
+        ELECTRIC_ORE_GRINDER_3,
+        ELECTRIC_INGOT_PULVERIZER,
+    ]
+    .into_iter()
+    .find(|kind| kind.id() == id)
+    .or_else(|| crate::network_recipes::network_item(id))
+    .or_else(|| crate::heated_pressure::network_item(id))
+}
+
+item!(
+    HEATING_COIL,
+    "player_head",
+    "Heating Coil",
+    "red",
+    None,
+    Some(HeadTexture {
+        profile: [493332113, 165100908, -1818174556, -1968188076],
+        value: "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHBzOi8vdGV4dHVyZXMubWluZWNyYWZ0Lm5ldC90ZXh0dXJlLzdlM2JjNDg5M2JhNDFhM2Y3M2VlMjgxNzRjZGY0ZmVmNmIxNDVlNDFmZTZjODJjYjdiZThkOGU5NzcxYTUifX19"
+    })
+);
+item!(GILDED_IRON, "gold_ingot", "Gilded Iron", "gold", None, None);
+item!(
+    ELECTRIC_FURNACE,
+    "furnace",
+    "Electric Furnace",
+    "red",
+    None,
+    None
+);
+item!(
+    ELECTRIC_FURNACE_2,
+    "furnace",
+    "Electric Furnace - II",
+    "red",
+    None,
+    None
+);
+item!(
+    ELECTRIC_FURNACE_3,
+    "furnace",
+    "Electric Furnace - III",
+    "red",
+    None,
+    None
+);
+
+item!(
+    ELECTRIC_ORE_GRINDER,
+    "furnace",
+    "Electric Ore Grinder",
+    "red",
+    None,
+    None
+);
+
+item!(
+    ELECTRIC_ORE_GRINDER_2,
+    "furnace",
+    "Electric Ore Grinder (II)",
+    "red",
+    None,
+    None
+);
+
+item!(
+    ELECTRIC_ORE_GRINDER_3,
+    "furnace",
+    "Electric Ore Grinder (III)",
+    "red",
+    None,
+    None
+);
+
+item!(
+    ELECTRIC_INGOT_PULVERIZER,
+    "furnace",
+    "Electric Ingot Pulverizer",
+    "red",
+    None,
+    None
+);

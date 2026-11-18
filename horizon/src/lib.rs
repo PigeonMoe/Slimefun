@@ -1,46 +1,59 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use mod_api::{
     BlockDropsEvent, Command, CommandArgumentValue, CommandSource, Config, ConfigFile, ConfigKind,
     ConfigLoadingEvent, ConfigReloadingEvent, Flow, GameMode, Hand, Hooks, HostSide,
-    InteractionResult, ItemKey, LevelHost, PlayerLoggedInEvent, RegisterCommandsEvent,
-    RegisterConfigsEvent, RightClickBlockEvent, RunModCommandEvent, ScheduledTaskEvent, ServerHost,
-    ServerStoppingEvent, Text, TriState,
+    InteractionResult, ItemKey, LevelHost, LevelTickPostEvent, PlayerLoggedInEvent,
+    RegisterCommandsEvent, RegisterConfigsEvent, RightClickBlockEvent, RunModCommandEvent,
+    ScheduledTaskEvent, ServerHost, ServerStoppingEvent, Text, TriState,
 };
 
+mod circuits;
 mod compressor;
+mod factory;
 mod gold_pan;
+mod hand_machine;
+mod heated_pressure;
 mod items;
+mod juice;
 mod machine;
+mod network_recipes;
+mod network_runtime;
+mod networks;
 mod output_chest;
 mod random;
 mod recipes;
 mod research;
+mod storage;
 
-use compressor::Compressor;
+use compressor::DelayedCrafts;
 use machine::{Machine, Settings};
 use random::Rolls;
 use recipes::{
-    ALLOY_RECIPES, COMPRESSING, CRAFTING, CRUSHING, DOUBLING, GRINDING, RESEARCHES, SMELTING,
-    WASHER_DUSTS, WASHING,
+    ALLOY_RECIPES, COMPRESSING, CRUSHING, DOUBLING, GRINDING, JUICING, PRESSING, WASHER_DUSTS,
+    WASHING, crafting, researches, smelting,
 };
 
 struct Slimefun {
-    compressor: Compressor,
+    delayed_crafts: DelayedCrafts,
     settings: Mutex<Settings>,
     rolls: Rolls,
     chest: Mutex<Option<ItemKey>>,
+    networks: Arc<Mutex<network_runtime::Networks>>,
+    network_item_keys: Mutex<Option<[ItemKey; 4]>>,
 }
 
 impl Default for Slimefun {
     fn default() -> Self {
         Self {
-            compressor: Compressor::default(),
+            delayed_crafts: DelayedCrafts::default(),
             settings: Mutex::new(Settings::default()),
             rolls: Rolls::default(),
             chest: Mutex::new(None),
+            networks: Arc::default(),
+            network_item_keys: Mutex::new(None),
         }
     }
 }
@@ -68,6 +81,12 @@ impl Slimefun {
             settings.legacy_ore_washer = value;
         }
         if let Some(value) = table
+            .get("legacy-ore-grinder")
+            .and_then(toml::Value::as_bool)
+        {
+            settings.legacy_ore_grinder = value;
+        }
+        if let Some(value) = table
             .get("fire-breaking-chance")
             .and_then(toml::Value::as_integer)
             && let Ok(value @ 0..=100) = u32::try_from(value)
@@ -80,6 +99,16 @@ impl Slimefun {
         {
             output_chest::set_enabled(value);
         }
+        if let Some(value) = table.get("drop-from-golems").and_then(toml::Value::as_bool) {
+            settings.drop_from_golems = value;
+        }
+        if let Some(value) = table
+            .get("golem-drop-chance")
+            .and_then(toml::Value::as_integer)
+            && let Ok(value @ 0..=100) = u32::try_from(value)
+        {
+            settings.golem_drop_chance = value;
+        }
     }
 }
 
@@ -89,13 +118,28 @@ impl Hooks for Slimefun {
         let chest = registrar.item_key("minecraft:chest");
         registrar.item_part(chest, output_chest::ChestPlacement);
         *self.chest.lock().unwrap() = Some(chest);
+        let network_keys = [
+            registrar.item_key("minecraft:player_head"),
+            registrar.item_key("minecraft:daylight_detector"),
+            registrar.item_key("minecraft:furnace"),
+            registrar.item_key("minecraft:light_gray_stained_glass"),
+        ];
+        for key in network_keys {
+            registrar.item_part(
+                key,
+                network_runtime::NetworkPlacement(self.networks.clone()),
+            );
+        }
+        *self.network_item_keys.lock().unwrap() = Some(network_keys);
+        network_runtime::register_cargo(registrar);
+        factory::register(registrar);
     }
 
     fn register_configs(&self, _: HostSide<'_>, event: &mut RegisterConfigsEvent<'_>) {
         event.configs.push(Config::new(
             "slimefun",
             ConfigKind::Server,
-            "double-ores = true\nlegacy-ore-washer = false\nfire-breaking-chance = 34\noutput-chest-enabled = true\n",
+            "double-ores = true\nlegacy-ore-washer = false\nlegacy-ore-grinder = true\nfire-breaking-chance = 34\noutput-chest-enabled = true\ndrop-from-golems = true\ngolem-drop-chance = 75\n",
         ));
     }
 
@@ -111,6 +155,24 @@ impl Hooks for Slimefun {
         if let Some(chest) = *self.chest.lock().unwrap() {
             output_chest::restore_drop(level, event, chest);
         }
+        if let Some(keys) = *self.network_item_keys.lock().unwrap() {
+            network_runtime::restore_drop(level, event, keys);
+        }
+        factory::restore_drops(level, event);
+        Flow::Continue
+    }
+
+    fn block_changed(&self, level: &dyn LevelHost, event: &mut mod_api::BlockChangedEvent) {
+        network_runtime::observe_plain_change(level, event);
+    }
+
+    fn living_drops(
+        &self,
+        host: &mut dyn ServerHost,
+        event: &mut mod_api::LivingDropsEvent<'_>,
+    ) -> Flow {
+        let settings = *self.settings.lock().unwrap();
+        circuits::add_golem_drop(host, event, settings, &self.rolls);
         Flow::Continue
     }
 
@@ -126,6 +188,48 @@ impl Hooks for Slimefun {
             Command::new("sf recipe <item:text>"),
             Command::new("slimefun research <key:word>"),
             Command::new("sf research <key:word>"),
+            Command::op("slimefun storage", 2),
+            Command::op("sf storage", 2),
+            Command::op(
+                "slimefun storage inspect <dimension:dimension> <pos:block_pos>",
+                2,
+            ),
+            Command::op(
+                "sf storage inspect <dimension:dimension> <pos:block_pos>",
+                2,
+            ),
+            Command::op(
+                "slimefun storage restore-output <dimension:dimension> <pos:block_pos>",
+                2,
+            ),
+            Command::op(
+                "sf storage restore-output <dimension:dimension> <pos:block_pos>",
+                2,
+            ),
+            Command::op(
+                "slimefun storage restore-network <dimension:dimension> <pos:block_pos>",
+                2,
+            ),
+            Command::op(
+                "sf storage restore-network <dimension:dimension> <pos:block_pos>",
+                2,
+            ),
+            Command::op(
+                "slimefun storage restore-inventory <dimension:dimension> <pos:block_pos>",
+                2,
+            ),
+            Command::op(
+                "sf storage restore-inventory <dimension:dimension> <pos:block_pos>",
+                2,
+            ),
+            Command::op(
+                "slimefun storage restore-chunk <dimension:dimension> <pos:block_pos> [offset:integer]",
+                2,
+            ),
+            Command::op(
+                "sf storage restore-chunk <dimension:dimension> <pos:block_pos> [offset:integer]",
+                2,
+            ),
         ]);
     }
 
@@ -139,16 +243,19 @@ impl Hooks for Slimefun {
             return Flow::Continue;
         }
         let lines = match path.next() {
+            Some("storage") => storage::command(host, event, path.next(), &self.networks),
             Some("status") => vec![format!(
-                "Slimefun Horizon development | Grind Stone {} | Enhanced Crafting Table {} | Ore Crusher {} | Compressor {} | Ore Washer {} dusts and {} recipes | Smeltery {} recipes | Research {}",
+                "Slimefun Horizon development | Grind Stone {} | Enhanced Crafting Table {} | Ore Crusher {} | Compressor {} | Pressure Chamber {} | Juicer {} | Ore Washer {} dusts and {} recipes | Smeltery {} recipes | Research {}",
                 GRINDING.len(),
-                CRAFTING.len(),
+                crafting().count(),
                 CRUSHING.len() + DOUBLING.len(),
                 COMPRESSING.len(),
+                PRESSING.len(),
+                JUICING.len(),
                 WASHER_DUSTS.len(),
                 WASHING.len(),
-                SMELTING.len() + ALLOY_RECIPES.len(),
-                RESEARCHES.len()
+                smelting().count() + ALLOY_RECIPES.len(),
+                researches().count()
             )],
             Some("recipe") => match event.command.argument("item") {
                 Some(CommandArgumentValue::String(item)) => describe_recipe(item, self.settings.lock().unwrap().double_ores),
@@ -158,8 +265,8 @@ impl Hooks for Slimefun {
                 let Some(CommandArgumentValue::String(id)) = event.command.argument("key") else {
                     return Flow::Continue;
                 };
-                let Some(research) = RESEARCHES.iter().find(|research| research.id.eq_ignore_ascii_case(id)) else {
-                    let ids = RESEARCHES.iter().map(|research| research.id).collect::<Vec<_>>().join(", ");
+                let Some(research) = researches().find(|research| research.id.eq_ignore_ascii_case(id)) else {
+                    let ids = researches().map(|research| research.id).collect::<Vec<_>>().join(", ");
                     let _ = host.commands().feedback(Text::literal(format!("Available research includes {ids}.")));
                     return Flow::Cancel;
                 };
@@ -173,7 +280,14 @@ impl Hooks for Slimefun {
                 "Build a Grind Stone by putting a wooden fence above a dispenser. Load the dispenser and right-click the fence.".into(),
                 "Build an Enhanced Crafting Table by putting a crafting table on a dispenser. Arrange the recipe in its 3×3 grid and right-click the table.".into(),
                 "An Ore Crusher uses a nether brick fence over a dispenser, with iron bars on opposite sides of the dispenser. A Compressor uses pistons instead of bars.".into(),
+                "For the Pressure Chamber, put glass above a cauldron and a dispenser above the glass. Flank the cauldron and glass with pistons and the dispenser with smooth stone slabs on the same axis. Right-click the cauldron.".into(),
                 "Use a Gold Pan on gravel and a Nether Gold Pan on soul sand or soul soil.".into(),
+                "For Automated Panning, put a wooden trapdoor above a cauldron and right-click it holding gravel, soul sand or soul soil.".into(),
+                "For the Table Saw, put a stonecutter on an iron block and flank the stonecutter with smooth stone slabs. Right-click it holding a log or planks.".into(),
+                "For the Juicer, place a dispenser below a nether brick fence and glass above the fence. Put fruit in the dispenser and right-click the fence.".into(),
+                "Craft an Electric Furnace and connect it to a powered Energy Regulator. Open the furnace to load vanilla smelting ingredients.".into(),
+                "The Electric Ore Grinder uses Grind Stone and Ore Crusher recipes. The Electric Ingot Pulverizer reverses single-dust smeltery recipes.".into(),
+                "The Heated Pressure Chamber uses two input slots to refine uranium, blistering ingots, and fuel ingredients. Use /sf recipe to find its inputs.".into(),
                 "Wash Sifted Ore by placing a dispenser on a wooden fence with an empty cauldron below it and right-clicking the fence.".into(),
                 "For a Makeshift Smeltery use a wooden fence above a dispenser, bricks on opposite sides of the dispenser, and fire below it. Use a nether brick fence and nether bricks for the regular Smeltery.".into(),
                 "Use /sf recipe <item> to read a supported recipe, /sf research <key> to unlock research, and /sf status to view coverage.".into(),
@@ -201,19 +315,41 @@ impl Hooks for Slimefun {
         if !matches!(
             player.game_mode(host),
             Some(GameMode::Survival | GameMode::Creative)
-        ) || player.entity().is_crouching(host) != Some(false)
-        {
+        ) {
             return Flow::Continue;
         }
         let Some(level) = player.entity().level(host) else {
             return Flow::Continue;
         };
+        if factory::open(host, player, level, event.click.pos) {
+            *event.cancellation_result = InteractionResult::Consume;
+            return Flow::Cancel;
+        }
+        if network_runtime::use_node(&self.networks, host, player, level, event.click.pos) {
+            *event.cancellation_result = InteractionResult::Consume;
+            return Flow::Cancel;
+        }
+        if player.entity().is_crouching(host) != Some(false) {
+            return Flow::Continue;
+        }
         if let Some(stack) = event.click.stack
             && let Some(pan) = gold_pan::PANS
                 .iter()
                 .find(|pan| pan.item.matches(host, stack))
         {
             pan.use_on(host, player, level, event.click.pos, &self.rolls);
+            *event.cancellation_result = InteractionResult::Consume;
+            return Flow::Cancel;
+        }
+        if let Some(machine) = hand_machine::HandMachine::at(host, level, event.click.pos) {
+            machine.activate(
+                host,
+                player,
+                level,
+                event.click.pos,
+                &self.delayed_crafts,
+                &self.rolls,
+            );
             *event.cancellation_result = InteractionResult::Consume;
             return Flow::Cancel;
         }
@@ -226,7 +362,7 @@ impl Hooks for Slimefun {
             player,
             dispenser,
             event.click.pos,
-            &self.compressor,
+            &self.delayed_crafts,
             settings,
             &self.rolls,
         );
@@ -240,12 +376,52 @@ impl Hooks for Slimefun {
         }
     }
 
+    fn menu_clicked(&self, host: &mut dyn ServerHost, event: &mut mod_api::MenuClickedEvent) {
+        network_runtime::menu_click(&self.networks, host, event);
+    }
+
+    fn menu_closed(&self, _: &mut dyn ServerHost, event: &mut mod_api::MenuClosedEvent) {
+        factory::VIEWERS.closed(event);
+        network_runtime::menu_closed(&self.networks, event);
+    }
+
+    fn living_entity_use_item_start(
+        &self,
+        host: HostSide<'_>,
+        event: &mut mod_api::LivingEntityUseItemStartEvent<'_>,
+    ) -> Flow {
+        match host {
+            HostSide::Server(host) => juice::start(host, event),
+            _ => Flow::Continue,
+        }
+    }
+
+    fn living_entity_use_item_finish(
+        &self,
+        host: HostSide<'_>,
+        event: &mut mod_api::LivingEntityUseItemFinishEvent<'_>,
+    ) {
+        if let HostSide::Server(host) = host {
+            juice::finish(host, event);
+        }
+    }
+
+    fn level_tick_post(&self, host: HostSide<'_>, event: &mut LevelTickPostEvent) {
+        if let HostSide::Server(host) = host {
+            let settings = *self.settings.lock().unwrap();
+            network_runtime::tick(&self.networks, host, event.level, settings);
+            factory::VIEWERS.refresh(host, event.level);
+        }
+    }
+
     fn scheduled_task(&self, host: &mut dyn ServerHost, event: &mut ScheduledTaskEvent<'_>) {
-        self.compressor.scheduled_task(host, event);
+        self.delayed_crafts.scheduled_task(host, event);
     }
 
     fn server_stopping(&self, _: &mut dyn ServerHost, _: &mut ServerStoppingEvent) {
-        self.compressor.clear();
+        factory::VIEWERS.clear();
+        self.networks.lock().unwrap().clear();
+        self.delayed_crafts.clear();
         self.rolls.clear();
     }
 }
@@ -263,6 +439,8 @@ fn describe_recipe(id: &str, double_ores: bool) -> Vec<String> {
         ("Ore Crusher", CRUSHING, 1),
         ("Ore Crusher", DOUBLING, 1 + u32::from(double_ores)),
         ("Compressor", COMPRESSING, 1),
+        ("Pressure Chamber", PRESSING, 1),
+        ("Juicer", JUICING, 1),
     ] {
         lines.extend(
             recipes
@@ -302,7 +480,7 @@ fn describe_recipe(id: &str, double_ores: bool) -> Vec<String> {
     }
     for recipe in ALLOY_RECIPES
         .iter()
-        .chain(SMELTING)
+        .chain(smelting())
         .filter(|recipe| outputs(recipe.output.kind.id()))
     {
         let name = if machine::makeshift_recipe(recipe) {
@@ -340,10 +518,30 @@ fn describe_recipe(id: &str, double_ores: bool) -> Vec<String> {
         }
     }
 
-    for recipe in CRAFTING
+    for recipe in heated_pressure::RECIPES
         .iter()
         .filter(|recipe| outputs(recipe.output.kind.id()))
     {
+        let inputs = recipe
+            .inputs
+            .iter()
+            .map(|stack| format!("{} × {}", stack.count, stack.kind.id()))
+            .collect::<Vec<_>>()
+            .join(" + ");
+        lines.push(format!(
+            "Heated Pressure Chamber | {inputs} -> {} × {}",
+            recipe.output.count,
+            recipe.output.kind.id()
+        ));
+    }
+
+    if outputs(items::BASIC_CIRCUIT_BOARD.id()) {
+        lines.push(
+            "Iron Golem | player kill | 1 × BASIC_CIRCUIT_BOARD | research basic_circuit_board"
+                .into(),
+        );
+    }
+    for recipe in crafting().filter(|recipe| outputs(recipe.output.kind.id())) {
         lines.push(format!(
             "Enhanced Crafting Table | {} × {} | research {}",
             recipe.output.count,
