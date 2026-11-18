@@ -109,7 +109,9 @@ python3 horizon/tools/import-block-storage.py \
 
 旧式库存可先用 [Paper 存档导出工具](tools/paper-storage-export/build.sh) 转换。用 JDK 25 在临时目录执行 `java -Dpaperclip.patchonly=true -jar /path/to/paper-26.2.jar`，解包 Paper 26.2 及其依赖。将 `versions/26.2/paper-26.2.jar` 与 `libraries/` 内每个 JAR 的绝对路径用冒号连接，填入 `PAPER_EXPORT_CLASSPATH`。执行 `build.sh /path/to/exporter.jar` 构建，或执行 `build.sh --test` 核验历史 ItemMeta 和失败回滚。解包和测试只加载 Paper 的注册表与物品编码器。
 
-将生成的 JAR 装到 Paper 26.2，在本地控制台执行 `sf-export-inventories paper-snapshot normalized-snapshot`。工具保留旧头颅的所有者 UUID 和旧刷怪蛋中的插件 NBT。遇到无法保留的字段会报告文件与槽位，原快照可用于重试。将 `normalized-snapshot` 作为 Horizon 导入脚本的输入。脚本同时归档 `universal-inventories` 和 `Players/*.yml` 中的背包，保留菜单名、背包所有者 UUID、编号和容量。这两类档案仍待接入 Horizon 的游戏内背包和共享菜单。
+将生成的 JAR 装到 Paper 26.2，在本地控制台执行 `sf-export-inventories paper-snapshot normalized-snapshot`。工具保留旧头颅的所有者 UUID 和旧刷怪蛋中的插件 NBT。遇到无法保留的字段会报告文件与槽位，原快照可用于重试。将 `normalized-snapshot` 作为 Horizon 导入脚本的输入。脚本同时归档 `universal-inventories` 和 `Players/*.yml` 中的背包，保留菜单名、背包所有者 UUID、编号和容量。共享库存目前可归档。
+
+已有 Paper 编号的六档普通背包（9–54 格）可在原物品上恢复。先迁移持有该背包的玩家物品，再由原 UUID 所有者或二级及以上 OP 将背包拿在主手执行 `/sf restore-backpack`。解锁对应研究后，持有者可在任意维度右键访问同一份库存，转交物品后 UUID 与背包编号保持原样。重复恢复会保留当前库存。背包不能装入其他背包或潜影盒。当前支持已编号普通背包，空白背包的制作与升级、灵魂绑定和网络同步仍待移植。
 
 `/sf storage restore-network minecraft:overworld -1 64 -17` 激活已导入的网络节点。也可以在增强工作台制作网络节点并直接放置。能源调节器和连接器可将露天太阳能发电机、电容和电力机器相连。电容电量随方块实体保存，`inspect` 同时显示 Paper 档案电量和当前电量。
 

@@ -6,11 +6,12 @@ use mod_api::{
     BlockDropsEvent, Command, CommandArgumentValue, CommandSource, Config, ConfigFile, ConfigKind,
     ConfigLoadingEvent, ConfigReloadingEvent, Flow, GameMode, Hand, Hooks, HostSide,
     InteractionResult, ItemKey, LevelHost, LevelTickPostEvent, PlayerLoggedInEvent,
-    RegisterCommandsEvent, RegisterConfigsEvent, RightClickBlockEvent, RunModCommandEvent,
-    ScheduledTaskEvent, ServerHost, ServerStoppingEvent, Text, TriState,
+    RegisterCommandsEvent, RegisterConfigsEvent, RightClickBlockEvent, RightClickItemEvent,
+    RunModCommandEvent, ScheduledTaskEvent, ServerHost, ServerStoppingEvent, Text, TriState,
 };
 
 mod advanced_processing;
+mod backpacks;
 mod circuits;
 mod compressor;
 mod electric_processing;
@@ -47,6 +48,7 @@ struct Slimefun {
     rolls: Rolls,
     chest: Mutex<Option<ItemKey>>,
     networks: Arc<Mutex<network_runtime::Networks>>,
+    backpacks: backpacks::BackpackMenus,
 }
 
 impl Default for Slimefun {
@@ -57,6 +59,7 @@ impl Default for Slimefun {
             rolls: Rolls::default(),
             chest: Mutex::new(None),
             networks: Arc::default(),
+            backpacks: backpacks::BackpackMenus::default(),
         }
     }
 }
@@ -162,6 +165,7 @@ impl Hooks for Slimefun {
         }
         network_runtime::register_cargo(registrar);
         factory::register(registrar);
+        backpacks::register(registrar);
     }
 
     fn register_configs(&self, _: HostSide<'_>, event: &mut RegisterConfigsEvent<'_>) {
@@ -224,6 +228,8 @@ impl Hooks for Slimefun {
             Command::new("sf recipe <item:text>"),
             Command::new("slimefun research <key:word>"),
             Command::new("sf research <key:word>"),
+            Command::new("slimefun restore-backpack"),
+            Command::new("sf restore-backpack"),
             Command::op("slimefun storage", 2),
             Command::op("sf storage", 2),
             Command::op(
@@ -289,6 +295,23 @@ impl Hooks for Slimefun {
         }
         let lines = match path.next() {
             Some("storage") => storage::command(host, event, path.next(), &self.networks),
+            Some("restore-backpack") => {
+                let message = match *event.source {
+                    CommandSource::Player { player, .. } => match backpacks::restore_held(
+                        host,
+                        &backpacks::GlobalBackpacks,
+                        player,
+                        Hand::Main,
+                        event.source.permission(),
+                    ) {
+                        Ok(backpacks::Restored::Installed) => "Restored the held Paper backpack.".into(),
+                        Ok(backpacks::Restored::AlreadyInstalled) => "This Paper backpack is already restored.".into(),
+                        Err(error) => error,
+                    },
+                    _ => "Hold the Paper backpack in your main hand and run this as a player.".into(),
+                };
+                vec![message]
+            }
             Some("status") => vec![format!(
                 "Slimefun Horizon development | Grind Stone {} | Enhanced Crafting Table {} | Ore Crusher {} | Compressor {} | Pressure Chamber {} | Juicer {} | Ore Washer {} dusts and {} recipes | Smeltery {} recipes | Research {}",
                 GRINDING.len(),
@@ -354,7 +377,7 @@ impl Hooks for Slimefun {
         let HostSide::Server(host) = host else {
             return Flow::Continue;
         };
-        if event.click.hand != Hand::Main || *event.use_block == TriState::False {
+        if *event.use_block == TriState::False {
             return Flow::Continue;
         }
         let Some(player) = host.player(event.click.player) else {
@@ -364,6 +387,15 @@ impl Hooks for Slimefun {
             player.game_mode(host),
             Some(GameMode::Survival | GameMode::Creative)
         ) {
+            return Flow::Continue;
+        }
+        if *event.use_item != TriState::False
+            && self.backpacks.use_held(host, player, event.click.hand)
+        {
+            *event.cancellation_result = InteractionResult::Consume;
+            return Flow::Cancel;
+        }
+        if event.click.hand != Hand::Main {
             return Flow::Continue;
         }
         let Some(level) = player.entity().level(host) else {
@@ -429,6 +461,22 @@ impl Hooks for Slimefun {
         Flow::Cancel
     }
 
+    #[listener(priority = -100)]
+    fn right_click_item(&self, host: HostSide<'_>, event: &mut RightClickItemEvent<'_>) -> Flow {
+        if let HostSide::Server(host) = host
+            && let Some(player) = host.player(event.click.player)
+            && matches!(
+                player.game_mode(host),
+                Some(GameMode::Survival | GameMode::Creative)
+            )
+            && self.backpacks.use_held(host, player, event.click.hand)
+        {
+            *event.cancellation_result = InteractionResult::Consume;
+            return Flow::Cancel;
+        }
+        Flow::Continue
+    }
+
     fn player_logged_in(&self, host: &mut dyn ServerHost, event: &mut PlayerLoggedInEvent<'_>) {
         if let Some(player) = host.player(event.player) {
             research::import_legacy(host, player);
@@ -440,6 +488,7 @@ impl Hooks for Slimefun {
     }
 
     fn menu_closed(&self, _: &mut dyn ServerHost, event: &mut mod_api::MenuClosedEvent) {
+        self.backpacks.closed(event);
         factory::VIEWERS.closed(event);
         network_runtime::menu_closed(&self.networks, event);
     }
@@ -486,6 +535,7 @@ impl Hooks for Slimefun {
     }
 
     fn server_stopping(&self, _: &mut dyn ServerHost, _: &mut ServerStoppingEvent) {
+        self.backpacks.clear();
         factory::VIEWERS.clear();
         self.networks.lock().unwrap().clear();
         self.delayed_crafts.clear();
