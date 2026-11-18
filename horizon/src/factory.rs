@@ -29,6 +29,8 @@ use crate::{
     research,
 };
 
+#[path = "charging_bench.rs"]
+pub(crate) mod charging_bench;
 #[path = "fluid_pump.rs"]
 pub(crate) mod fluid_pump;
 
@@ -580,6 +582,7 @@ fn menu_items(
                     advanced_processing::Family::FoodFabricator
                     | advanced_processing::Family::FoodComposter => ("minecraft:golden_hoe", 31),
                     advanced_processing::Family::AutoBrewer => ("minecraft:fishing_rod", 63),
+                    advanced_processing::Family::ChargingBench => ("minecraft:golden_pickaxe", 31),
                     _ => ("minecraft:flint_and_steel", 63),
                 },
                 RecipeFamily::OilPump | RecipeFamily::FluidPump => {
@@ -1217,6 +1220,10 @@ pub(crate) fn tick(
     let furnace = ElectricMachine::for_item(id)?;
     let storage = furnace.storage(level, pos);
     let data = data_at(host, storage)?;
+    if matches!(furnace.family, RecipeFamily::Advanced(spec) if spec.family == advanced_processing::Family::ChargingBench)
+    {
+        return charge_items(host, storage, data, charge);
+    }
     if let Some(saved) = data.get(&PENDING.into()) {
         let next_charge = charge.checked_sub(furnace.cost)?;
         let remaining = remaining(&data)?;
@@ -1263,7 +1270,7 @@ pub(crate) fn tick(
             .iter()
             .enumerate()
             .find_map(|(index, input)| input.as_ref().map(|input| (index, input)))?;
-        return move_empty_buckets(host, level, pos, index, bucket).then_some(charge);
+        return move_input_to_output(host, level, pos, index, bucket).then_some(charge);
     }
     let saved_result = encode_pending(host, &outputs)?;
     let work_ticks = work_override.unwrap_or(furnace.work_ticks) as i32;
@@ -1288,7 +1295,39 @@ pub(crate) fn tick(
     .ok()
 }
 
-fn move_empty_buckets(
+fn charge_items(
+    host: &mut dyn ServerHost,
+    storage: Storage,
+    mut data: Compound,
+    charge: u32,
+) -> Option<u32> {
+    let next_charge = charge.checked_sub(charging_bench::COST)?;
+    for slot in INPUT {
+        let Some(stack) = stack_in(host, &data, slot) else {
+            continue;
+        };
+        match charging_bench::action(host, &stack) {
+            Some(charging_bench::Action::Charge(charged)) => {
+                return (write_stack(host, &mut data, slot, Some(charged))
+                    && save(host, storage, data))
+                .then_some(next_charge);
+            }
+            Some(charging_bench::Action::ReturnFull) => {
+                return move_input_to_output(host, storage.level, storage.pos, slot, &stack)
+                    .then_some(charge);
+            }
+            Some(charging_bench::Action::ReturnOther) => {
+                if move_input_to_output(host, storage.level, storage.pos, slot, &stack) {
+                    data = data_at(host, storage)?;
+                }
+            }
+            None => {}
+        }
+    }
+    None
+}
+
+fn move_input_to_output(
     host: &mut dyn ServerHost,
     level: LevelRef,
     pos: Position,
@@ -1304,7 +1343,7 @@ fn move_empty_buckets(
                 break;
             }
         }
-        // Preserve the whole stack if the output cannot hold the returned buckets.
+        // Preserve the input until the output can hold the entire transferred stack.
         if left == 0
             && place(level, pos, index).extract(host, tx, &resource, stack.count()) == stack.count()
         {
@@ -2192,12 +2231,12 @@ mod tests {
         items.slots[0] = Some(buckets.clone());
         items.slots[2] = Some(full.clone());
         items.slots[3] = Some(full.clone());
-        assert!(!move_empty_buckets(&mut host, level, pos, 0, &buckets));
+        assert!(!move_input_to_output(&mut host, level, pos, 0, &buckets));
         let items = host.level.block_entity(pos).items.as_mut().unwrap();
         assert_eq!(items.slots[0], Some(buckets.clone()));
         assert_eq!(items.slots[2], Some(full));
         items.slots[3] = None;
-        assert!(move_empty_buckets(&mut host, level, pos, 0, &buckets));
+        assert!(move_input_to_output(&mut host, level, pos, 0, &buckets));
         let items = host.level.block_entity(pos).items.as_ref().unwrap();
         assert!(items.slots[0].is_none());
         assert_eq!(items.slots[3], Some(buckets.clone()));
@@ -2216,5 +2255,89 @@ mod tests {
                 carrier: "minecraft:player_head"
             })
         );
+    }
+
+    #[test]
+    fn charging_bench_debits_ten_joules_then_releases_a_full_item_to_its_output() {
+        let mut host = recipe_host(["minecraft:compass", "minecraft:stone"]);
+        let level = host.level.level();
+        let pos = [5, 70, -12];
+        let id = "CHARGING_BENCH";
+        let machine = ElectricMachine::for_item(id).unwrap();
+        let storage = machine.storage(level, pos);
+        assert!(storage.plain);
+        assert_eq!(
+            crate::networks::Component::for_item(id),
+            Some(crate::networks::Component::ElectricMachine {
+                capacity: 128,
+                carrier: "minecraft:crafting_table"
+            },)
+        );
+
+        let mut item = Kind::Vanilla("minecraft:compass").stack(&host, 1).unwrap();
+        item.set_components(Compound::from([(
+            "minecraft:custom_data".into(),
+            Tag::compound([(
+                "PublicBukkitValues",
+                Tag::compound([
+                    (
+                        crate::items::ID_KEY,
+                        Tag::String("PORTABLE_TELEPORTER".into()),
+                    ),
+                    ("slimefun:item_charge", Tag::Float(49.75f32.to_bits())),
+                ]),
+            )]),
+        )]))
+        .unwrap();
+        let mut initial = Compound::new();
+        assert!(write_stack(
+            &host,
+            &mut initial,
+            INPUT[0],
+            Some(item.clone())
+        ));
+        assert!(save(&mut host, storage, initial.clone()));
+        let run = |host: &mut FakeHost, joules| {
+            tick(
+                host,
+                level,
+                Settings::default(),
+                &Rolls::default(),
+                pos,
+                id,
+                joules,
+            )
+        };
+        assert_eq!(run(&mut host, 9), None);
+        assert_eq!(data_at(&mut host, storage), Some(initial));
+        assert_eq!(run(&mut host, 10), Some(0));
+        let stored = data_at(&mut host, storage).unwrap();
+        let charged = stack_in(&host, &stored, INPUT[0]).unwrap();
+        assert!(matches!(
+            charging_bench::action(&host, &charged),
+            Some(charging_bench::Action::ReturnFull)
+        ));
+        assert!(stack_in(&host, &stored, OUTPUT[0]).is_none());
+
+        // The fake level's item-place backend supplies the handler reached by cargo.
+        let stone = Kind::Vanilla("minecraft:stone").stack(&host, 64).unwrap();
+        let inventory = host
+            .level
+            .block_entity(pos)
+            .with_items(4)
+            .items
+            .as_mut()
+            .unwrap();
+        inventory.slots[INPUT[0]] = Some(charged.clone());
+        inventory.slots[OUTPUT[0]] = Some(stone.clone());
+        inventory.slots[OUTPUT[1]] = Some(stone);
+        assert_eq!(run(&mut host, 10), None);
+        let inventory = host.level.block_entity(pos).items.as_mut().unwrap();
+        assert_eq!(inventory.slots[INPUT[0]], Some(charged.clone()));
+        inventory.slots[OUTPUT[1]] = None;
+        assert_eq!(run(&mut host, 10), Some(10));
+        let inventory = host.level.block_entity(pos).items.as_ref().unwrap();
+        assert!(inventory.slots[INPUT[0]].is_none());
+        assert_eq!(inventory.slots[OUTPUT[1]], Some(charged));
     }
 }

@@ -18,6 +18,7 @@ pub(crate) const CARRIERS: &[&str] = &[
     "minecraft:lime_terracotta",
     "minecraft:green_stained_glass",
     "minecraft:green_terracotta",
+    "minecraft:crafting_table",
     "minecraft:piston",
     "minecraft:red_terracotta",
     "minecraft:blue_terracotta",
