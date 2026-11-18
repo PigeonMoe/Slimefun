@@ -7,7 +7,7 @@ use mod_api::{
 use std::{collections::BTreeMap, fmt::Write, sync::Mutex};
 
 use crate::{
-    ancient_altar,
+    ancient_altar, block_placer,
     geo_deposits::{self, Resource},
     network_runtime::Networks,
     networks::Component,
@@ -365,6 +365,10 @@ fn at(
             return ancient_altar::restore_paper(host, level, pos, kind, row)
                 .map(|restored| vec![restored]);
         }
+        if id == block_placer::BLOCK_PLACER.id() {
+            return block_placer::restore_paper(host, level, pos, row)
+                .map(|restored| vec![restored]);
+        }
         if action == "restore-inventory" && !has_restorable_menu(component) {
             return Err(format!(
                 "Restoring the Paper menu for {id} is not supported yet."
@@ -520,6 +524,7 @@ fn restore_chunk(
         .filter_map(|(pos, row)| {
             let id = record_id(row)?;
             (id == "OUTPUT_CHEST"
+                || id == block_placer::BLOCK_PLACER.id()
                 || Component::for_item(id).is_some()
                 || ancient_altar::paper_device(id).is_some())
             .then_some((pos, row, id))
@@ -544,6 +549,8 @@ fn restore_chunk(
                 .is_some_and(|count| count != 0);
         let result = if let Some(kind) = ancient_altar::paper_device(id) {
             ancient_altar::restore_paper(host, level, pos, kind, row)
+        } else if id == block_placer::BLOCK_PLACER.id() {
+            block_placer::restore_paper(host, level, pos, row)
         } else if unsupported_menu {
             Err("This block has archived items without a supported menu.".into())
         } else if id == "OUTPUT_CHEST" {

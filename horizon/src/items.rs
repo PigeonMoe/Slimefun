@@ -132,7 +132,9 @@ impl SlimefunItem {
         if let Some(lore) = crate::food_machines::lore(self.id) {
             components.insert("minecraft:lore".into(), lore);
         }
-        if let Some(lore) = crate::composter::lore(self.id) {
+        if let Some(lore) =
+            crate::composter::lore(self.id).or_else(|| crate::block_placer::lore(self.id))
+        {
             components.insert("minecraft:lore".into(), lore);
         }
         if let Some(tier) = self.tier {
@@ -891,6 +893,7 @@ item!(
 
 pub(crate) fn network_item(id: &str) -> Option<Kind> {
     [
+        crate::block_placer::BLOCK_PLACER,
         ENERGY_REGULATOR,
         ENERGY_CONNECTOR,
         SMALL_CAPACITOR,

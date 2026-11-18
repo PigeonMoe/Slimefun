@@ -150,7 +150,7 @@ pub(crate) fn enhanced_furnace(
     crate::enhanced_furnaces::by_id(&saved_id(&data)?)
 }
 
-fn parse_uuid(value: &str) -> Option<u128> {
+pub(crate) fn parse_uuid(value: &str) -> Option<u128> {
     let owned;
     let clean = if value.len() == 36
         && [8, 13, 18, 23]

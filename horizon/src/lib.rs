@@ -5,9 +5,10 @@ use std::sync::{Arc, Mutex};
 use mod_api::{
     BlockDropsEvent, Command, CommandArgumentValue, CommandSource, Config, ConfigFile, ConfigKind,
     ConfigLoadingEvent, ConfigReloadingEvent, Flow, GameMode, Hand, Hooks, HostSide,
-    InteractionResult, ItemKey, LevelHost, LevelTickPostEvent, PlayerLoggedInEvent,
-    RegisterCommandsEvent, RegisterConfigsEvent, RightClickBlockEvent, RightClickItemEvent,
-    RunModCommandEvent, ScheduledTaskEvent, ServerHost, ServerStoppingEvent, Text, TriState,
+    InteractionResult, ItemKey, LevelHost, LevelTickPostEvent, LevelTickPreEvent,
+    PlayerLoggedInEvent, RegisterCommandsEvent, RegisterConfigsEvent, RightClickBlockEvent,
+    RightClickItemEvent, RunModCommandEvent, ScheduledTaskEvent, ServerHost, ServerStoppingEvent,
+    Text, TriState,
 };
 
 mod advanced_processing;
@@ -19,6 +20,7 @@ mod auto_brewer;
 mod auto_crafter;
 mod backpacks;
 mod bee_wings;
+mod block_placer;
 mod book_binder;
 mod circuits;
 mod composter;
@@ -63,6 +65,7 @@ use recipes::{
 
 struct Slimefun {
     delayed_crafts: DelayedCrafts,
+    block_placers: block_placer::Placers,
     composters: composter::Composters,
     crucibles: crucible::Crucibles,
     settings: Mutex<Settings>,
@@ -80,6 +83,7 @@ impl Default for Slimefun {
     fn default() -> Self {
         Self {
             delayed_crafts: DelayedCrafts::default(),
+            block_placers: block_placer::Placers::default(),
             composters: composter::Composters::default(),
             crucibles: crucible::Crucibles::default(),
             settings: Mutex::new(Settings::default()),
@@ -103,6 +107,7 @@ impl Slimefun {
         let mut settings = self.settings.lock().unwrap();
         if fresh {
             *settings = Settings::default();
+            self.block_placers.configure(None);
             output_chest::set_enabled(true);
             self.crucibles.configure(false);
             ancient_altar::configure(None);
@@ -110,6 +115,18 @@ impl Slimefun {
         let Ok(table) = config.text.parse::<toml::Table>() else {
             return;
         };
+        self.block_placers.configure(
+            table
+                .get("block-placer")
+                .and_then(|section| section.get("unplaceable-blocks"))
+                .and_then(toml::Value::as_array)
+                .and_then(|entries| {
+                    entries
+                        .iter()
+                        .map(|entry| entry.as_str().map(str::to_owned))
+                        .collect()
+                }),
+        );
         self.transport.configure(&table);
         settings.book_binder = book_binder::Rules::read_config(&table);
         ancient_altar::configure(
@@ -217,6 +234,8 @@ impl Slimefun {
 #[mod_api::horizon_mod]
 impl Hooks for Slimefun {
     fn register(&self, registrar: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
+        let dispenser = registrar.item_key("minecraft:dispenser");
+        registrar.item_part(dispenser, block_placer::Placement);
         let chest = registrar.item_key("minecraft:chest");
         registrar.item_part(chest, output_chest::ChestPlacement);
         *self.chest.lock().unwrap() = Some(chest);
@@ -266,6 +285,7 @@ impl Hooks for Slimefun {
     }
 
     fn block_drops(&self, level: &dyn LevelHost, event: &mut BlockDropsEvent<'_>) -> Flow {
+        block_placer::restore_drop(level, event);
         if let Some(chest) = *self.chest.lock().unwrap() {
             output_chest::restore_drop(level, event, chest);
         }
@@ -308,6 +328,14 @@ impl Hooks for Slimefun {
         } else {
             Flow::Continue
         }
+    }
+
+    fn dispenser_selected(
+        &self,
+        host: &mut dyn ServerHost,
+        event: &mut mod_api::DispenserSelectedEvent<'_>,
+    ) -> Flow {
+        self.block_placers.selected(host, event)
     }
 
     fn block_dispense_pre(
@@ -901,11 +929,23 @@ impl Hooks for Slimefun {
         enhanced_furnaces::process(host, event, &self.rolls);
     }
 
+    fn level_tick_pre(&self, host: HostSide<'_>, event: &mut LevelTickPreEvent) {
+        if let HostSide::Server(host) = host {
+            self.block_placers.tick(host, event.level, &self.networks);
+        }
+    }
+
+    fn level_unload(&self, host: &mut dyn ServerHost, event: &mut mod_api::LevelUnloadEvent<'_>) {
+        self.block_placers.unload(host, event.dimension);
+    }
+
     fn scheduled_task(&self, host: &mut dyn ServerHost, event: &mut ScheduledTaskEvent<'_>) {
+        self.block_placers.due(host, event, &self.networks);
         self.delayed_crafts.scheduled_task(host, event);
     }
 
     fn server_stopping(&self, _: &mut dyn ServerHost, _: &mut ServerStoppingEvent) {
+        self.block_placers.clear();
         auto_crafter::clear();
         self.backpacks.clear();
         self.bee_wings.clear();
