@@ -15,12 +15,15 @@ pub(crate) fn can_use(host: &dyn Host, player: PlayerRef, research: &Research) -
 }
 
 fn unlocked(data: &Compound, research: &Research) -> bool {
+    match data.get(&PERSISTED.into()) {
+        Some(Tag::Compound(saved)) => unlocked_persisted(saved, research),
+        _ => false,
+    }
+}
+
+pub(crate) fn unlocked_persisted(data: &Compound, research: &Research) -> bool {
     let key = format!("slimefun:{}", research.id);
-    matches!(
-        data.get(&PERSISTED.into())
-            .and_then(|saved| saved.get(&key)),
-        Some(Tag::Byte(1))
-    )
+    matches!(data.get(&key.as_str().into()), Some(Tag::Byte(1)))
 }
 
 pub(crate) fn unlock(host: &mut dyn ServerHost, player: PlayerRef, research: &Research) -> String {

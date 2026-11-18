@@ -843,6 +843,41 @@ fn worn_effect(id: &str) -> Option<(&'static str, i32, i32, &'static Research)> 
     Some(effect)
 }
 
+fn footwear_rule(action: &str, id: &str) -> Option<(&'static Research, Option<&'static str>)> {
+    let rule = match (action, id) {
+        ("farmland_trample", "FARMER_SHOES") => (&FARMER_SHOES_RESEARCH, None),
+        ("ender_pearl_damage", "ENDER_BOOTS") => (&ENDER_ARMOR, None),
+        ("fall_damage", "SLIME_BOOTS") => (&SLIME_ARMOR, Some("minecraft:block.slime_block.fall")),
+        ("fall_damage", "SLIME_STEEL_BOOTS") => {
+            (&SLIME_STEEL_ARMOR, Some("minecraft:block.slime_block.fall"))
+        }
+        ("fall_damage", "BEE_BOOTS") => (&BEE_ARMOR, Some("minecraft:block.honey_block.fall")),
+        _ => return None,
+    };
+    Some(rule)
+}
+
+fn footwear_response(
+    action: &str,
+    boots: &mod_api::ItemStack,
+    mode: mod_api::GameMode,
+    persisted: Option<&Compound>,
+) -> Option<Option<&'static str>> {
+    let (unlock, sound) = footwear_rule(action, &crate::items::item_id(boots)?)?;
+    (mode == mod_api::GameMode::Creative
+        || persisted.is_some_and(|saved| research::unlocked_persisted(saved, unlock)))
+    .then_some(sound)
+}
+
+pub(crate) fn footwear(event: &mut mod_api::PlayerFootwearReactionEvent<'_>) -> mod_api::Flow {
+    let Some(sound) = footwear_response(event.action, event.boots, event.actor.1, event.persisted)
+    else {
+        return mod_api::Flow::Continue;
+    };
+    *event.sound = sound.map(str::to_owned);
+    mod_api::Flow::Cancel
+}
+
 pub(crate) fn tick_equipment(host: &mut dyn ServerHost, level: LevelRef) {
     let Some(tick) = level.game_time(host) else {
         return;
@@ -904,6 +939,57 @@ mod tests {
     use mod_api::{Identifier, testing::FakeHost};
 
     use super::*;
+
+    #[test]
+    fn each_boot_reacts_only_to_its_original_action_and_research() {
+        let mut host = FakeHost::new();
+        host.registries
+            .resolve_items(
+                [
+                    "minecraft:leather_boots",
+                    "minecraft:iron_boots",
+                    "minecraft:golden_boots",
+                ]
+                .map(|id| Identifier::parse(id).unwrap()),
+            )
+            .unwrap();
+        for (kind, action, unlock, sound) in [
+            (FARMER_SHOES, "farmland_trample", "farmer_shoes", None),
+            (ENDER_BOOTS, "ender_pearl_damage", "ender_armor", None),
+            (
+                SLIME_BOOTS,
+                "fall_damage",
+                "slime_armor",
+                Some("minecraft:block.slime_block.fall"),
+            ),
+            (
+                SLIME_STEEL_BOOTS,
+                "fall_damage",
+                "slime_steel_armor",
+                Some("minecraft:block.slime_block.fall"),
+            ),
+            (
+                BEE_BOOTS,
+                "fall_damage",
+                "bee_armor",
+                Some("minecraft:block.honey_block.fall"),
+            ),
+        ] {
+            assert_eq!(footwear_rule(action, kind.id()).unwrap().0.id, unlock);
+            let boots = kind.stack(&host, 1).unwrap();
+            let mode = mod_api::GameMode::Survival;
+            assert_eq!(footwear_response(action, &boots, mode, None), None);
+            let saved =
+                Compound::from([(format!("slimefun:{unlock}").as_str().into(), Tag::Byte(1))]);
+            assert_eq!(
+                footwear_response(action, &boots, mode, Some(&saved)),
+                Some(sound)
+            );
+        }
+        assert!(footwear_rule("fall_damage", "ENDER_BOOTS").is_none());
+        assert!(footwear_rule("fall_damage", "BOOTS_OF_THE_STOMPER").is_none());
+        assert!(footwear_rule("farmland_trample", "SLIME_BOOTS").is_none());
+    }
 
     #[test]
     fn all_paper_forge_ids_keep_their_patterns_and_vanilla_chainmail() {
