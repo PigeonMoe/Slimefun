@@ -34,6 +34,7 @@ mod geo_deposits;
 mod geology;
 mod gold_pan;
 mod gps_controls;
+mod gps_transport;
 mod gps_waypoints;
 mod hand_machine;
 mod heated_pressure;
@@ -69,6 +70,7 @@ struct Slimefun {
     chest: Mutex<Option<ItemKey>>,
     networks: Arc<Mutex<network_runtime::Networks>>,
     gps: gps_controls::Controls,
+    transport: gps_transport::Transport,
     backpacks: backpacks::BackpackMenus,
     bee_wings: bee_wings::BeeWings,
     universal: universal_storage::UniversalStorage,
@@ -85,6 +87,7 @@ impl Default for Slimefun {
             chest: Mutex::new(None),
             networks: Arc::default(),
             gps: gps_controls::Controls::default(),
+            transport: gps_transport::Transport::default(),
             backpacks: backpacks::BackpackMenus::default(),
             bee_wings: bee_wings::BeeWings::default(),
             universal: universal_storage::UniversalStorage::default(),
@@ -107,6 +110,7 @@ impl Slimefun {
         let Ok(table) = config.text.parse::<toml::Table>() else {
             return;
         };
+        self.transport.configure(&table);
         settings.book_binder = book_binder::Rules::read_config(&table);
         ancient_altar::configure(
             table
@@ -236,6 +240,7 @@ impl Hooks for Slimefun {
         let skull = registrar.item_key("minecraft:player_head");
         registrar.item_part(skull, food_machines::Placement);
         network_runtime::register_cargo(registrar);
+        gps_transport::register(registrar);
         crucible::register(registrar);
         factory::register(registrar);
         backpacks::register(registrar);
@@ -248,7 +253,7 @@ impl Hooks for Slimefun {
         event.configs.push(Config::new(
             "slimefun",
             ConfigKind::Server,
-            "double-ores = true\ncrucible-allow-water-in-nether = false\nlegacy-ore-washer = false\nlegacy-dust-washer = false\nlegacy-ore-grinder = true\nelectric-gold-pan-override-output-limit = [false, false, false]\nfreezer-use-vanilla-ratios = [false, false, false]\nfire-breaking-chance = 34\noutput-chest-enabled = true\ndrop-from-golems = true\ngolem-drop-chance = 75\n\n[networks]\nenable-visualizer = true\ncargo-ticker-delay = 0\n\n[book-binder]\nbypass-vanilla-max-level = false\nhas-custom-max-level = false\ncustom-max-level = 15\n\n[produce-collector]\nrange = 2\n\n[ancient-altar]\nstep-delay = 8\n",
+            "double-ores = true\ncrucible-allow-water-in-nether = false\nlegacy-ore-washer = false\nlegacy-dust-washer = false\nlegacy-ore-grinder = true\nelectric-gold-pan-override-output-limit = [false, false, false]\nfreezer-use-vanilla-ratios = [false, false, false]\nfire-breaking-chance = 34\noutput-chest-enabled = true\ndrop-from-golems = true\ngolem-drop-chance = 75\n\n[networks]\nenable-visualizer = true\ncargo-ticker-delay = 0\n\n[book-binder]\nbypass-vanilla-max-level = false\nhas-custom-max-level = false\ncustom-max-level = 15\n\n[portable-teleporter]\nteleportation-cost = 10\n\n[produce-collector]\nrange = 2\n\n[ancient-altar]\nstep-delay = 8\n",
         ));
     }
 
@@ -592,7 +597,10 @@ impl Hooks for Slimefun {
         }
         if *event.use_item != TriState::False
             && (self.backpacks.use_held(host, player, event.click.hand)
-                || network_runtime::trash::portable(host, player, event.click.hand))
+                || network_runtime::trash::portable(host, player, event.click.hand)
+                || self
+                    .transport
+                    .use_portable(&self.networks, host, player, event.click.hand))
         {
             *event.cancellation_result = InteractionResult::Consume;
             return Flow::Cancel;
@@ -717,6 +725,9 @@ impl Hooks for Slimefun {
             )
             && (self.backpacks.use_held(host, player, event.click.hand)
                 || network_runtime::trash::portable(host, player, event.click.hand)
+                || self
+                    .transport
+                    .use_portable(&self.networks, host, player, event.click.hand)
                 || geology::held_scanner_item(host, player, event.click.hand).is_some()
                 || factory::experience_collector::use_flask(host, player, event.click.hand))
         {
@@ -754,6 +765,7 @@ impl Hooks for Slimefun {
     ) {
         self.bee_wings.stop(event.player);
         self.gps.logout(event.player);
+        self.transport.logout(event.player);
     }
 
     #[listener(priority = -100)]
@@ -767,6 +779,38 @@ impl Hooks for Slimefun {
             return Flow::Cancel;
         }
         Flow::Continue
+    }
+
+    #[listener(priority = -100)]
+    fn block_trigger_entity_pre(
+        &self,
+        level: &dyn LevelHost,
+        event: &mut mod_api::BlockTriggerEntityPreEvent<'_>,
+    ) -> Flow {
+        let pos = [event.pos.x, event.pos.y, event.pos.z];
+        if let Some(player) = event.player
+            && level
+                .block_state(pos)
+                .and_then(|state| level.state_block(state))
+                == Some("minecraft:stone_pressure_plate")
+            && network_runtime::gps_plate_marked(level, &event.dimension, pos)
+        {
+            self.transport.step(
+                network_runtime::dimension_name(&event.dimension),
+                player,
+                pos,
+            );
+        }
+        Flow::Continue
+    }
+
+    fn player_teleported(
+        &self,
+        host: &mut dyn ServerHost,
+        event: &mut mod_api::PlayerTeleportedEvent<'_>,
+    ) {
+        self.transport
+            .teleported(host, event.player, event.dimension, event.to);
     }
 
     fn entity_toggle_glide(
@@ -785,6 +829,7 @@ impl Hooks for Slimefun {
         auto_crafter::clicked(host, event);
         factory::VIEWERS.clicked(host, event);
         self.gps.click(&self.networks, host, event);
+        self.transport.clicked(host, event);
         network_runtime::menu_click(&self.networks, host, event);
     }
 
@@ -794,6 +839,7 @@ impl Hooks for Slimefun {
         self.universal.closed(event);
         factory::VIEWERS.closed(event);
         self.gps.close(event);
+        self.transport.close(event);
         network_runtime::menu_closed(&self.networks, event);
     }
 
@@ -843,6 +889,7 @@ impl Hooks for Slimefun {
             auto_crafter::refresh(host, event.level);
             armor_forge::tick_equipment(host, event.level);
             self.bee_wings.tick(host, event.level);
+            self.transport.tick(&self.networks, host, event.level);
         }
     }
 
@@ -864,6 +911,7 @@ impl Hooks for Slimefun {
         self.bee_wings.clear();
         self.universal.clear();
         self.gps.clear();
+        self.transport.clear();
         factory::VIEWERS.clear();
         self.networks.lock().unwrap().clear();
         self.delayed_crafts.clear();

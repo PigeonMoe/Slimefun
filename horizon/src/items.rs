@@ -112,6 +112,20 @@ impl SlimefunItem {
         if let Some(lore) = crate::factory::crop_growth::lore(self.id) {
             components.insert("minecraft:lore".into(), lore);
         }
+        if self.id == crate::gps_transport::PORTABLE_TELEPORTER.id() {
+            components.insert(
+                "minecraft:lore".into(),
+                Tag::List(vec![
+                    string(""),
+                    text("This device allows you to teleport", "white", false),
+                    text("to your waypoints from anywhere", "white", false),
+                    string(""),
+                    crate::factory::charging_bench::charge_lore(0.0, 50.0),
+                    string(""),
+                    text("Right Click to use", "yellow", false),
+                ]),
+            );
+        }
         if let Some(lore) = crate::factory::animal_machines::lore(self.id) {
             components.insert("minecraft:lore".into(), lore);
         }
@@ -909,6 +923,7 @@ pub(crate) fn network_item(id: &str) -> Option<Kind> {
     .or_else(|| crate::enhanced_furnaces::by_id(id).map(|furnace| furnace.item))
     .or_else(|| crate::thermal_machines::item(id))
     .or_else(|| crate::geology::network_item(id))
+    .or_else(|| crate::gps_transport::item(id))
     .or_else(|| crate::android_items::item(id))
     .or_else(|| crate::factory::crop_growth::machine(id).map(|machine| machine.item))
     .or_else(|| crate::factory::animal_machines::machine(id).map(|machine| machine.item))

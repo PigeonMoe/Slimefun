@@ -20,7 +20,7 @@ use crate::{
 };
 
 type Position = [i32; 3];
-const VISIBLE: [usize; 21] = [
+pub(crate) const VISIBLE: [usize; 21] = [
     19, 20, 21, 22, 23, 24, 25, 28, 29, 30, 31, 32, 33, 34, 37, 38, 39, 40, 41, 42, 43,
 ];
 
@@ -440,6 +440,10 @@ pub(crate) fn waypoint_icon(
     globe(host, texture, name, lore)
 }
 
+pub(crate) fn world_icon(host: &dyn Host, name: &str) -> Option<ItemStack> {
+    globe(host, &OVERWORLD, name, &[])
+}
+
 fn globe(host: &dyn Host, texture: &HeadTexture, name: &str, lore: &[String]) -> Option<ItemStack> {
     let mut icon = icon(host, Kind::Vanilla("minecraft:player_head"), name, lore)?;
     icon.apply_components(&Compound::from([(
@@ -459,7 +463,7 @@ fn globe(host: &dyn Host, texture: &HeadTexture, name: &str, lore: &[String]) ->
     Some(icon)
 }
 
-fn icon(host: &dyn Host, kind: Kind, name: &str, lore: &[String]) -> Option<ItemStack> {
+pub(crate) fn icon(host: &dyn Host, kind: Kind, name: &str, lore: &[String]) -> Option<ItemStack> {
     let mut icon = kind.stack(host, 1)?;
     icon.apply_components(&Compound::from([
         ("minecraft:custom_name".into(), text(name, "gray", false)),

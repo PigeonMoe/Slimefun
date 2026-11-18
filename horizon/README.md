@@ -169,6 +169,8 @@ Paper 的 `stored-chunks/chunks.sfc` 会随快照导出。生成导入档案后�
 
 GPS 标记工具会记录右击方块对应的相邻位置，随后使用玩家下一条聊天消息作为名称。GPS 控制面板可查看自己的在线发射器、复杂度并删除航点。迁移 Paper 航点时运行 `horizon/tools/import-waypoints.py <Paper数据目录> <Slimefun世界数据目录>/waypoints-import --world <Paper世界名>=<Horizon维度>`。使用 PM-Sync 的快照可加 `--server-id`，并用 Paper 世界 UUID 提供对应的映射。玩家须以同一 UUID 加入，导入保留已有同名航点，之后删除的航点不会从同一档案重新加入。
 
+将传送矩阵放在八个 GPS 支柱中间，把个人或共享激活板放在矩阵上即可打开传送菜单。共享激活板会显示矩阵放置者的航点，个人激活板还要求玩家本人是激活板的放置者。便携传送器使用自己的航点，默认在打开菜单时扣除 10 J，并可在配置项 `[portable-teleporter]` 的 `teleportation-cost` 中调整。选择航点后须留在传送源附近，Horizon 会在实际传送时检查出发地与目的地的领地权限。传送矩阵和个人激活板的旧所有者可随 Paper 方块记录恢复。
+
 Auto Enchanter 和 Auto Disenchanter 各有 I、II 两档。分别消耗附魔书或普通书，保留工具的耐久和其他组件。附魔机应用该物品支持的更高等级附魔，去附魔机将直接附魔和铁砧惩罚转移到新书。两个档位的每个处理刻分别消耗 9 J 和 24 J，使用 Paper 原始的输入槽 19、20 和输出槽 24、25，支持货运和库存恢复。前置材料 Wither-Proof Obsidian 可在增强工作台制作，放置后抵抗爆炸和凋灵拆除。当前使用 Paper 的默认处理规则。Bukkit 附魔事件和可选的词条、等级及 Lore 限制仍待移植。
 
 Auto Anvil 和 Auto Anvil Mk.II 用一份 Duct Tape 修理一件有损耗的物品，分别恢复该物品原型最大耐久的 10% 和 25%，向下取整。修理保留附魔、铁砧惩罚和其他物品组件，两档均用 60 个处理刻，沿用 Paper 四个输入输出槽。增强工作台每次生产两份 Duct Tape，机器通过 Slimefun ID 识别胶带。

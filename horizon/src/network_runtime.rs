@@ -240,7 +240,9 @@ impl ItemPart for NetworkPlacement {
         let Ok((node, mut data)) = imported(&id, &toml::Table::new()) else {
             return;
         };
-        if matches!(node.component, Component::GpsTransmitter { .. }) {
+        if matches!(node.component, Component::GpsTransmitter { .. })
+            || crate::gps_transport::needs_owner(&id)
+        {
             data.gps_owner = Some(player.uuid());
         }
         let _ = self
@@ -351,6 +353,7 @@ impl Node {
             | Component::SolarGenerator { .. } => Network::Energy,
             Component::GeoScanner
             | Component::GpsControlPanel
+            | Component::GpsDevice(_)
             | Component::TrashCan
             | Component::ManualCrucible
             | Component::ManualComposter
@@ -391,6 +394,7 @@ fn accepts_carrier(component: Component, actual: &str) -> bool {
         Component::ManualCrucible | Component::ManualComposter => {
             return crate::crucible::carrier(actual);
         }
+        Component::GpsDevice(kind) => return actual == kind.material(),
         Component::IgnitionChamber => return actual == crate::items::IGNITION_CHAMBER.material(),
         Component::EnhancedFurnace => return actual == "minecraft:furnace",
         Component::ReactorPort => return actual == reactors::REACTOR_ACCESS_PORT.material(),
@@ -446,7 +450,7 @@ impl Networks {
             .collect()
     }
 
-    fn gps_complexity(&self, player: u128) -> u32 {
+    pub(crate) fn gps_complexity(&self, player: u128) -> u32 {
         self.gps_signals
             .values()
             .flat_map(BTreeMap::values)
@@ -482,8 +486,11 @@ impl Networks {
         row: &toml::Table,
     ) -> Result<String, String> {
         let (node, mut data) = imported(id, metadata)?;
-        if matches!(node.component, Component::GpsTransmitter { .. }) && data.gps_owner.is_none() {
-            return Err("The Paper GPS transmitter is missing a valid owner UUID.".into());
+        if (matches!(node.component, Component::GpsTransmitter { .. })
+            || crate::gps_transport::needs_owner(id))
+            && data.gps_owner.is_none()
+        {
+            return Err("The Paper GPS device is missing a valid owner UUID.".into());
         }
         if let Some(cargo) = &mut data.cargo
             && node.filters_items()
@@ -614,14 +621,6 @@ fn imported(id: &str, metadata: &toml::Table) -> Result<(Node, BlockData), &'sta
                 .ok()
                 .filter(|charge| *charge <= capacity)
                 .ok_or("Stored buffer charge is invalid.")?;
-            if matches!(component, Component::GpsTransmitter { .. }) {
-                data.gps_owner = match field("owner") {
-                    Some(value) => {
-                        Some(parse_uuid(value).ok_or("Invalid Paper GPS transmitter owner UUID.")?)
-                    }
-                    None => None,
-                };
-            }
             if reactors::reactor(id).is_some() {
                 data.reactor_production = match field("reactor-mode") {
                     Some("PRODUCTION") => true,
@@ -643,6 +642,13 @@ fn imported(id: &str, metadata: &toml::Table) -> Result<(Node, BlockData), &'sta
             data.cargo_visualizer_disabled = field("visualizer").is_some();
         }
         _ => {}
+    }
+    if matches!(component, Component::GpsTransmitter { .. })
+        || crate::gps_transport::needs_owner(id)
+    {
+        data.gps_owner = field("owner")
+            .map(|owner| parse_uuid(owner).ok_or("Invalid Paper GPS device owner UUID."))
+            .transpose()?;
     }
     Ok((node, data))
 }
@@ -787,6 +793,30 @@ pub(crate) fn observe_gps_change(
     if let Some(signals) = networks.lock().unwrap().gps_signals.get_mut(dimension) {
         signals.remove(&[event.pos.x, event.pos.y, event.pos.z]);
     }
+}
+
+pub(crate) fn gps_plate_marked(
+    level: &dyn LevelHost,
+    dimension: &mod_api::LevelDimension,
+    pos: Position,
+) -> bool {
+    plain_network::saved_at(level, dimension, pos).is_some_and(|id| {
+        matches!(
+            id.as_str(),
+            "GPS_ACTIVATION_DEVICE_SHARED" | "GPS_ACTIVATION_DEVICE_PERSONAL"
+        )
+    })
+}
+
+pub(crate) fn gps_device_at(
+    host: &mut dyn ServerHost,
+    level: LevelRef,
+    pos: Position,
+) -> Option<(crate::items::Kind, Option<u128>)> {
+    let data = block_data(host, level, pos)?;
+    let kind = crate::gps_transport::fixed(&data.id)?;
+    let carrier = level.block(host, pos)?.id(host);
+    accepts_carrier(Component::GpsDevice(kind), &carrier).then_some((kind, data.gps_owner))
 }
 
 pub(crate) fn gps_panel_at(host: &mut dyn ServerHost, level: LevelRef, pos: Position) -> bool {
@@ -1431,6 +1461,30 @@ mod tests {
         assert!(!networks.cargo_due(level, b, 2));
         assert!(networks.cargo_due(level, b, 0));
         assert!(!networks.cargo_due(level, b, 2));
+    }
+
+    #[test]
+    fn paper_transport_recovers_independent_matrix_and_personal_plate_owners() {
+        let id = "aaaa0000-1111-2222-3333-444455556666";
+        let metadata = toml::Table::from_iter([("owner".into(), toml::Value::String(id.into()))]);
+        for (paper_id, material) in [
+            ("GPS_TELEPORTATION_MATRIX", "minecraft:iron_block"),
+            (
+                "GPS_ACTIVATION_DEVICE_PERSONAL",
+                "minecraft:stone_pressure_plate",
+            ),
+        ] {
+            let (node, data) = imported(paper_id, &metadata).unwrap();
+            assert!(matches!(node.family(), Network::Independent));
+            assert!(accepts_carrier(node.component, material));
+            assert_eq!(data.gps_owner, parse_uuid(id));
+        }
+        let (shared, data) = imported("GPS_ACTIVATION_DEVICE_SHARED", &toml::Table::new()).unwrap();
+        assert!(accepts_carrier(
+            shared.component,
+            "minecraft:stone_pressure_plate"
+        ));
+        assert_eq!(data.gps_owner, None);
     }
 
     #[test]

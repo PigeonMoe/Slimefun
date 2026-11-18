@@ -28,6 +28,8 @@ pub(crate) const CARRIERS: &[&str] = &[
     "minecraft:iron_block",
     "minecraft:bookshelf",
     "minecraft:hay_block",
+    crate::gps_transport::CARRIERS[0],
+    crate::gps_transport::CARRIERS[1],
 ];
 
 pub(crate) fn is_carrier(block: &str) -> bool {

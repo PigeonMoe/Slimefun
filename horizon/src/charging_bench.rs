@@ -171,7 +171,7 @@ fn display_number(value: f32) -> String {
     }
 }
 
-fn charge_lore(current: f32, maximum: f32) -> Tag {
+pub(crate) fn charge_lore(current: f32, maximum: f32) -> Tag {
     let amount = format!(
         "{} / {} J",
         display_number(current),
@@ -206,7 +206,18 @@ fn charge_lore(current: f32, maximum: f32) -> Tag {
     ])
 }
 
+pub(crate) fn discharge(host: &dyn Host, stack: &ItemStack, amount: u32) -> Option<ItemStack> {
+    match update_charge(host, stack, Some(amount))? {
+        Action::Charge(stack) => Some(stack),
+        _ => None,
+    }
+}
+
 pub(crate) fn action(host: &dyn Host, stack: &ItemStack) -> Option<Action> {
+    update_charge(host, stack, None)
+}
+
+fn update_charge(host: &dyn Host, stack: &ItemStack, discharge: Option<u32>) -> Option<Action> {
     if stack.count() != 1 {
         return None;
     }
@@ -244,11 +255,13 @@ pub(crate) fn action(host: &dyn Host, stack: &ItemStack) -> Option<Action> {
         None => first.map_or(0.0, |(_, charge)| charge),
         _ => return None,
     };
-    if current >= maximum {
-        return Some(Action::ReturnFull);
-    }
-    // Paper rounds the f32 charge after addition and writes the same float to PDC and lore.
-    let charge = (current + COST as f32 / 2.0).min(maximum);
+    let charge = match discharge {
+        Some(amount) if current >= amount as f32 => current - amount as f32,
+        Some(_) => return None,
+        None if current >= maximum => return Some(Action::ReturnFull),
+        None => (current + COST as f32 / 2.0).min(maximum),
+    };
+    // Paper rounds the f32 charge and writes the same value to PDC and lore.
     let charge = ((f64::from(charge) * 100.0).round() / 100.0) as f32;
     values.insert(CHARGE_KEY.into(), Tag::Float(charge.to_bits()));
     let display = charge_lore(charge, maximum);
@@ -348,6 +361,22 @@ mod tests {
         };
         assert_charge(&charged, 50.0, 50.0);
         assert!(matches!(action(&host, &charged), Some(Action::ReturnFull)));
+    }
+
+    #[test]
+    fn portable_teleporter_debits_paper_charge_once_and_respects_zero_cost() {
+        let host = host();
+        let stack = paper_stack(
+            &host,
+            "PORTABLE_TELEPORTER",
+            "minecraft:compass",
+            Some(15.25),
+            charge_lore(0.0, 50.0),
+        );
+        let debited = discharge(&host, &stack, 10).unwrap();
+        assert_charge(&debited, 5.25, 50.0);
+        assert!(discharge(&host, &debited, 10).is_none());
+        assert_charge(&discharge(&host, &debited, 0).unwrap(), 5.25, 50.0);
     }
 
     #[test]

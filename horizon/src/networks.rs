@@ -9,6 +9,7 @@ pub(crate) enum Component {
     },
     GeoScanner,
     GpsControlPanel,
+    GpsDevice(crate::items::Kind),
     ManualCrucible,
     ManualComposter,
     IgnitionChamber,
@@ -84,6 +85,9 @@ impl Component {
                 capacity: reactor.capacity,
                 carrier: reactor.item.material(),
             });
+        }
+        if let Some(device) = crate::gps_transport::fixed(id) {
+            return Some(Self::GpsDevice(device));
         }
         Some(match id {
             "REACTOR_ACCESS_PORT" => Self::ReactorPort,
@@ -195,6 +199,13 @@ impl Component {
             }
             Self::GeoScanner => "GPS Geo-Scanner | Requires 600 GPS complexity".into(),
             Self::GpsControlPanel => "GPS Control Panel".into(),
+            Self::GpsDevice(kind) => {
+                let owner = metadata
+                    .get("owner")
+                    .and_then(toml::Value::as_str)
+                    .unwrap_or("—");
+                format!("GPS {} | owner {owner}", kind.id())
+            }
             Self::EnergyRegulator => "Energy regulator | Paper connection range 6".into(),
             Self::EnergyConnector => "Energy connector | Paper connection range 6".into(),
             Self::Capacitor(capacity) => {
