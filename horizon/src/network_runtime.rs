@@ -199,7 +199,7 @@ impl ItemPart for NetworkPlacement {
                 crate::heated_pressure::ENRICHED_NETHER_ICE,
                 crate::heated_pressure::NETHER_ICE_COOLANT_CELL,
                 reactors::NEPTUNIUM,
-                assemblers::ANDROID_MEMORY_CORE,
+                crate::network_recipes::ANDROID_MEMORY_CORE,
                 trash::PORTABLE_DUSTBIN,
             ]
             .iter()

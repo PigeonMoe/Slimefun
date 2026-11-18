@@ -7,11 +7,8 @@ use mod_api::{
 
 use crate::{
     enchantment_machines::WITHER_PROOF_OBSIDIAN,
-    items::{
-        ADVANCED_CIRCUIT_BOARD, BRASS_INGOT, ELECTRIC_MOTOR, HeadTexture, Kind,
-        REINFORCED_ALLOY_INGOT, TIN_DUST, item,
-    },
-    network_recipes::{BLISTERING_INGOT_3, CARBONADO_EDGED_CAPACITOR, POWER_CRYSTAL},
+    items::{ADVANCED_CIRCUIT_BOARD, ELECTRIC_MOTOR, Kind, REINFORCED_ALLOY_INGOT, item},
+    network_recipes::{ANDROID_MEMORY_CORE, BLISTERING_INGOT_3, CARBONADO_EDGED_CAPACITOR},
     recipes::{CraftingRecipe, Research, Stack},
 };
 
@@ -31,17 +28,6 @@ item!(
     None,
     None
 );
-item!(
-    ANDROID_MEMORY_CORE,
-    "player_head",
-    "Android Memory Core",
-    "aqua",
-    None,
-    Some(HeadTexture {
-        profile: [-546435397, 1399734098, -1494264352, -475146256],
-        value: "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHBzOi8vdGV4dHVyZXMubWluZWNyYWZ0Lm5ldC90ZXh0dXJlL2Q3OGYyYjdlNWU3NTYzOWVhN2ZiNzk2YzM1ZDM2NGM0ZGYyOGI0MjQzZTY2Yjc2Mjc3YWFkY2Q2MjYxMzM3In19fQ==",
-    })
-);
 
 const GOLEM: Research = Research {
     id: "iron_golem_assembler",
@@ -53,35 +39,11 @@ const WITHER: Research = Research {
     name: "Automated Wither Killer",
     cost: 35,
 };
-const MEMORY: Research = Research {
-    id: "android_memory_core",
-    name: "Memory Core",
-    cost: 28,
-};
-pub(crate) const RESEARCHES: &[Research] = &[GOLEM, WITHER, MEMORY];
+pub(crate) const RESEARCHES: &[Research] = &[GOLEM, WITHER];
 
 const IRON: Kind = Kind::Vanilla("minecraft:iron_block");
-const GLASS: Kind = Kind::Vanilla("minecraft:orange_stained_glass");
 const STAR: Kind = Kind::Vanilla("minecraft:nether_star");
 pub(crate) const CRAFTING: &[CraftingRecipe] = &[
-    CraftingRecipe {
-        inputs: [
-            Some(BRASS_INGOT),
-            Some(GLASS),
-            Some(BRASS_INGOT),
-            Some(POWER_CRYSTAL),
-            Some(TIN_DUST),
-            Some(POWER_CRYSTAL),
-            Some(BRASS_INGOT),
-            Some(GLASS),
-            Some(BRASS_INGOT),
-        ],
-        output: Stack {
-            kind: ANDROID_MEMORY_CORE,
-            count: 1,
-        },
-        research: &MEMORY,
-    },
     CraftingRecipe {
         inputs: assembly_recipe(ADVANCED_CIRCUIT_BOARD, IRON),
         output: Stack {
