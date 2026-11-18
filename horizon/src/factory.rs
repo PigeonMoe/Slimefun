@@ -752,6 +752,7 @@ fn menu_items(
                     advanced_processing::Family::FoodFabricator
                     | advanced_processing::Family::FoodComposter => ("minecraft:golden_hoe", 31),
                     advanced_processing::Family::AutoBrewer => ("minecraft:fishing_rod", 63),
+                    advanced_processing::Family::AutoAnvil => ("minecraft:iron_pickaxe", 249),
                     advanced_processing::Family::ChargingBench => ("minecraft:golden_pickaxe", 31),
                     advanced_processing::Family::AutoEnchanter => {
                         ("minecraft:golden_chestplate", 112)

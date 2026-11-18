@@ -11,6 +11,7 @@ use mod_api::{
 };
 
 mod advanced_processing;
+mod auto_anvil;
 mod auto_brewer;
 mod backpacks;
 mod circuits;

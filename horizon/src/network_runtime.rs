@@ -335,6 +335,7 @@ impl Node {
             Component::GeoScanner
             | Component::TrashCan
             | Component::ManualCrucible
+            | Component::DuctTape
             | Component::WitherProofObsidian
             | Component::ReactorPort => Network::Independent,
             _ => Network::Cargo,

@@ -28,6 +28,7 @@ pub(crate) enum Component {
     TrashCan,
     ReactorPort,
     WitherProofObsidian,
+    DuctTape,
     CargoInput,
     CargoOutput {
         advanced: bool,
@@ -56,6 +57,7 @@ impl Component {
         Some(match id {
             "REACTOR_ACCESS_PORT" => Self::ReactorPort,
             "WITHER_PROOF_OBSIDIAN" => Self::WitherProofObsidian,
+            "DUCT_TAPE" => Self::DuctTape,
             "TRASH_CAN_BLOCK" => Self::TrashCan,
             "GPS_GEO_SCANNER" => Self::GeoScanner,
             "CRUCIBLE" => Self::ManualCrucible,
@@ -169,6 +171,7 @@ impl Component {
             Self::TrashCan => "Trash can | Seven input slots".into(),
             Self::ReactorPort => "Reactor Access Port | Three blocks above a Reactor".into(),
             Self::WitherProofObsidian => "Wither-Proof Obsidian".into(),
+            Self::DuctTape => "Duct Tape".into(),
             Self::CargoInput => cargo_terminal("Cargo input", metadata),
             Self::CargoOutput { advanced: false } => cargo_terminal("Cargo output", metadata),
             Self::CargoOutput { advanced: true } => {

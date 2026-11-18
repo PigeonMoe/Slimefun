@@ -122,6 +122,9 @@ impl SlimefunItem {
         if let Some(lore) = crate::network_runtime::trash::lore(self.id) {
             components.insert("minecraft:lore".into(), lore);
         }
+        if let Some(lore) = crate::auto_anvil::lore(self.id) {
+            components.insert("minecraft:lore".into(), lore);
+        }
         crate::enchantment_machines::decorate(self.id, &mut components);
         if let Some(texture) = &self.texture {
             components.insert(
@@ -851,6 +854,7 @@ pub(crate) fn network_item(id: &str) -> Option<Kind> {
         SMALL_CAPACITOR,
         SOLAR_GENERATOR,
         crate::advanced_processing::CRUCIBLE,
+        crate::auto_anvil::DUCT_TAPE,
         crate::enchantment_machines::WITHER_PROOF_OBSIDIAN,
         ELECTRIC_FURNACE,
         ELECTRIC_FURNACE_2,

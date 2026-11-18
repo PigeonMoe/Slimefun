@@ -79,6 +79,7 @@ pub(crate) enum Family {
     FoodFabricator,
     FoodComposter,
     AutoBrewer,
+    AutoAnvil,
     ChargingBench,
     AutoEnchanter,
     AutoDisenchanter,
@@ -157,6 +158,7 @@ pub(crate) fn machine(id: &str) -> Option<&'static Machine> {
         .chain(crate::thermal_machines::MACHINES)
         .chain(crate::food_machines::MACHINES)
         .chain(crate::enchantment_machines::MACHINES)
+        .chain(crate::auto_anvil::MACHINES)
         .chain([
             &crate::auto_brewer::MACHINE,
             &crate::factory::charging_bench::MACHINE,
@@ -556,6 +558,7 @@ pub(crate) fn next(
             crate::food_machines::next(host, machine, inputs)
         }
         Family::AutoBrewer => crate::auto_brewer::next(host, inputs),
+        Family::AutoAnvil => crate::auto_anvil::next(host, machine, inputs),
         Family::ChargingBench => None,
         Family::AutoEnchanter | Family::AutoDisenchanter => {
             crate::enchantment_machines::next(host, machine, inputs)
