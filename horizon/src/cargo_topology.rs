@@ -218,7 +218,7 @@ impl Filter {
 enum InventoryKind {
     Ordinary,
     Chest,
-    Factory,
+    Factory { smeltery: bool },
     Smelter(&'static str),
     Brewer,
 }
@@ -243,7 +243,7 @@ impl InventoryKind {
     fn extract(self, size: usize) -> Range<usize> {
         match self {
             Self::Ordinary | Self::Chest => 0..size,
-            Self::Factory => 2..4.min(size),
+            Self::Factory { .. } => 2..4.min(size),
             Self::Smelter(_) => 2..3.min(size),
             Self::Brewer => 0..3.min(size),
         }
@@ -252,7 +252,8 @@ impl InventoryKind {
     fn insert(self, host: &dyn ServerHost, size: usize, stack: &ItemStack) -> Range<usize> {
         match self {
             Self::Ordinary | Self::Chest => 0..size,
-            Self::Factory => 0..2.min(size),
+            Self::Factory { smeltery: true } => 0..0,
+            Self::Factory { smeltery: false } => 0..2.min(size),
             Self::Smelter(recipe) => {
                 let fuel = host
                     .item_burn_time(stack.item())
@@ -329,8 +330,10 @@ fn attached_inventory(
         _ => return None,
     };
     pos[axis] = pos[axis].checked_add(delta)?;
-    if factory_identity(host, level, pos).is_some() {
-        return Some((pos, InventoryKind::Factory));
+    if let Some(id) = factory_identity(host, level, pos) {
+        let smeltery = crate::factory::ElectricMachine::for_item(&id)
+            .is_some_and(crate::factory::ElectricMachine::is_smeltery);
+        return Some((pos, InventoryKind::Factory { smeltery }));
     }
     let state = level.block_state(host, pos)?;
     Some((pos, InventoryKind::from_block(&state.block().id(host))?))
@@ -455,6 +458,28 @@ fn route(
     None
 }
 
+// Paper spreads the same item only among inputs already holding that item.
+fn smeltery_slots(
+    size: usize,
+    mut matching: impl FnMut(usize) -> Option<(u32, u32)>,
+) -> Vec<usize> {
+    let inputs = crate::factory::SMELTERY_INPUT
+        .into_iter()
+        .filter(|&slot| slot < size);
+    let mut matching_slots: Vec<_> = inputs
+        .clone()
+        .filter_map(|slot| matching(slot).map(|(count, capacity)| (slot, count, capacity)))
+        .collect();
+    if matching_slots.is_empty() {
+        return inputs.collect();
+    }
+    matching_slots.sort_by_key(|&(_, count, _)| count);
+    matching_slots
+        .into_iter()
+        .filter_map(|(slot, count, capacity)| (count < capacity).then_some(slot))
+        .collect()
+}
+
 fn move_to_first(
     host: &mut dyn ServerHost,
     level: LevelRef,
@@ -479,7 +504,20 @@ fn move_to_first(
             .slot_position(host, level, input.inventory, source_size, source_slot)
             .ok_or(())?;
         let mut endpoint_allowed = BTreeMap::new();
-        for slot in output.kind.insert(host, size, stack) {
+        let smeltery = match output.kind {
+            InventoryKind::Factory { smeltery: true } => smeltery_slots(size, |slot| {
+                let resource = destination.resource(host, slot)?;
+                let held = destination.amount(host, slot);
+                let current = resource.to_stack(held)?;
+                similar(&current, stack, true)
+                    .then(|| (held, destination.capacity(host, slot, &resource)))
+            }),
+            _ => Vec::new(),
+        };
+        for slot in smeltery
+            .into_iter()
+            .chain(output.kind.insert(host, size, stack))
+        {
             let current = destination
                 .resource(host, slot)
                 .and_then(|item| item.to_stack(destination.amount(host, slot)));
@@ -522,6 +560,21 @@ fn move_to_first(
 mod tests {
     use super::*;
     use mod_api::{Identifier, prelude::ItemsHost, testing::FakeHost};
+
+    #[test]
+    fn smeltery_cargo_prefers_existing_partial_stacks_and_refuses_full_matching_inputs() {
+        assert_eq!(smeltery_slots(8, |_| None), [4, 5, 0, 1, 6, 7]);
+        assert_eq!(
+            smeltery_slots(8, |slot| match slot {
+                4 => Some((12, 64)),
+                0 => Some((3, 64)),
+                6 => Some((64, 64)),
+                _ => None,
+            }),
+            [0, 4]
+        );
+        assert!(smeltery_slots(8, |slot| (slot == 4).then_some((64, 64))).is_empty());
+    }
 
     #[test]
     fn only_the_moved_amount_leaves_source_and_a_stale_source_rolls_back_destination() {

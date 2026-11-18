@@ -17,6 +17,7 @@ use crate::recipes::{
     smelting,
 };
 use crate::{
+    advanced_processing,
     electric_processing::{self, Family, MachineSpec},
     fuel_generators::{self, Generator},
     gold_pan::PANS,
@@ -28,7 +29,9 @@ use crate::{
 };
 
 type Position = [i32; 3];
-const SLOTS: [&str; 4] = ["19", "20", "24", "25"];
+const SLOTS: [&str; 8] = ["19", "20", "24", "25", "10", "11", "28", "29"];
+const STANDARD_SLOT_COUNT: usize = 4;
+pub(crate) const SMELTERY_INPUT: [usize; 6] = [4, 5, 0, 1, 6, 7];
 const INPUT: [usize; 2] = [0, 1];
 const OUTPUT: [usize; 2] = [2, 3];
 const PENDING: &str = "pending";
@@ -37,12 +40,14 @@ const TOTAL: &str = "total";
 const RETURNS_BUCKET: &str = "returns_bucket";
 const MAX_WORK_TICKS: i32 = 180;
 const IMPORT: &str = "paper_inventory_import";
-const MENU_SLOTS: [usize; 4] = [19, 20, 24, 25];
+const MENU_SLOTS: [usize; 8] = [19, 20, 24, 25, 10, 11, 28, 29];
 const BACKGROUND: &[usize] = &[
     0, 1, 2, 3, 4, 5, 6, 7, 8, 13, 31, 36, 37, 38, 39, 40, 41, 42, 43, 44,
 ];
 const INPUT_BORDER: &[usize] = &[9, 10, 11, 12, 18, 21, 27, 28, 29, 30];
 const OUTPUT_BORDER: &[usize] = &[14, 15, 16, 17, 23, 26, 32, 33, 34, 35];
+const SMELTERY_BACKGROUND: &[usize] = &[4, 5, 6, 7, 8, 13, 31, 40, 41, 42, 43, 44];
+const SMELTERY_INPUT_BORDER: &[usize] = &[0, 1, 2, 3, 9, 12, 18, 21, 27, 30, 36, 37, 38, 39];
 
 static INVENTORY: AttachmentType<Compound> = AttachmentType {
     namespace: "slimefun",
@@ -103,6 +108,7 @@ enum RecipeFamily {
     HeatedPressure,
     Processing(&'static MachineSpec),
     Fuel(&'static Generator),
+    Advanced(&'static advanced_processing::Machine),
 }
 
 #[derive(Clone, Copy)]
@@ -206,6 +212,18 @@ impl ElectricMachine {
                 research: spec.research,
                 family: RecipeFamily::Fuel(spec),
                 speed: 1,
+            });
+        }
+        if let Some(spec) = advanced_processing::machine(id) {
+            return Some(Self {
+                id: spec.item.id(),
+                carrier: spec.item.material(),
+                title: spec.title,
+                cost: spec.cost,
+                work_ticks: 0,
+                research: spec.research,
+                family: RecipeFamily::Advanced(spec),
+                speed: spec.speed,
             });
         }
         if let Some(spec) = electric_processing::machine(id) {
@@ -314,6 +332,18 @@ impl ElectricMachine {
             || (self.carrier == "minecraft:player_head" && block == "minecraft:player_wall_head")
     }
 
+    pub(crate) fn is_smeltery(self) -> bool {
+        matches!(self.family, RecipeFamily::Advanced(spec) if spec.family == advanced_processing::Family::Smeltery)
+    }
+
+    fn slot_count(self) -> usize {
+        if self.is_smeltery() {
+            SLOTS.len()
+        } else {
+            STANDARD_SLOT_COUNT
+        }
+    }
+
     fn storage(self, level: LevelRef, pos: Position) -> Storage {
         Storage {
             level,
@@ -344,7 +374,11 @@ pub(crate) fn register(registrar: &mut dyn mod_api::Registrar) {
             Some(Box::new(MachineInventory {
                 storage,
                 // An empty handler also refuses the backing vanilla slots for sided access.
-                size: if at.side.is_none() { SLOTS.len() } else { 0 },
+                size: if at.side.is_none() {
+                    machine.slot_count()
+                } else {
+                    0
+                },
             }))
         });
     }
@@ -396,8 +430,8 @@ pub(crate) fn open(
     };
     if let Ok(Some(window)) = opened {
         let mut backing = vec![MenuSlotPlace::Decoration; 45];
-        for (slot, menu_slot) in MENU_SLOTS.into_iter().enumerate() {
-            let allow_insert = INPUT.contains(&slot);
+        for (slot, &menu_slot) in MENU_SLOTS[..furnace.slot_count()].iter().enumerate() {
+            let allow_insert = !OUTPUT.contains(&slot);
             backing[menu_slot] = match entity {
                 Some(entity) => MenuSlotPlace::BlockEntityItems {
                     entity,
@@ -444,9 +478,14 @@ fn menu_items(
     furnace: ElectricMachine,
 ) -> Vec<Option<ItemStack>> {
     let mut items = vec![None; 45];
+    let (background, input_border) = if furnace.is_smeltery() {
+        (SMELTERY_BACKGROUND, SMELTERY_INPUT_BORDER)
+    } else {
+        (BACKGROUND, INPUT_BORDER)
+    };
     for (indices, material) in [
-        (BACKGROUND, "minecraft:gray_stained_glass_pane"),
-        (INPUT_BORDER, "minecraft:cyan_stained_glass_pane"),
+        (background, "minecraft:gray_stained_glass_pane"),
+        (input_border, "minecraft:cyan_stained_glass_pane"),
         (OUTPUT_BORDER, "minecraft:orange_stained_glass_pane"),
     ] {
         let pane = display_item(host, material, " ");
@@ -454,7 +493,7 @@ fn menu_items(
             items[index] = pane.clone();
         }
     }
-    for (index, menu_slot) in MENU_SLOTS.into_iter().enumerate() {
+    for (index, &menu_slot) in MENU_SLOTS[..furnace.slot_count()].iter().enumerate() {
         items[menu_slot] = stack_in(host, data, index);
     }
     items[22] = match remaining(data) {
@@ -482,6 +521,7 @@ fn menu_items(
                     Family::IngotFactory => ("minecraft:flint_and_steel", 63),
                 },
                 RecipeFamily::Fuel(spec) => spec.progress_icon(),
+                RecipeFamily::Advanced(_) => ("minecraft:flint_and_steel", 63),
             };
             let mut bar = display_item(host, icon, &format!("{progress}%"));
             if let Some(stack) = &mut bar {
@@ -762,14 +802,14 @@ fn fits(host: &dyn Host, data: &Compound, output: &ItemStack) -> bool {
 }
 
 struct RecipeRun {
-    inputs: [Option<(ItemStack, u32)>; 2],
+    inputs: [Option<(ItemStack, u32)>; SLOTS.len()],
     output: ItemStack,
     work_override: Option<u32>,
 }
 
 impl RecipeRun {
     fn single(index: usize, input: ItemStack, amount: u32, output: ItemStack) -> Self {
-        let mut inputs = [None, None];
+        let mut inputs = std::array::from_fn(|_| None);
         inputs[index] = Some((input, amount));
         Self {
             inputs,
@@ -871,7 +911,7 @@ fn heated_recipe(
     speed: u32,
 ) -> Option<RecipeRun> {
     crate::heated_pressure::RECIPES.iter().find_map(|recipe| {
-        let mut consumed = [None, None];
+        let mut consumed = std::array::from_fn(|_| None);
         for ingredient in recipe.inputs {
             let (slot, item) = INPUT.into_iter().zip(inputs).find_map(|(slot, item)| {
                 let item = item.as_ref()?;
@@ -969,6 +1009,30 @@ fn find_recipe(
     settings: Settings,
     roll: impl FnMut(u32) -> Option<u32>,
 ) -> Option<RecipeRun> {
+    if let RecipeFamily::Advanced(spec) = machine.family {
+        let layout: &[usize] = if machine.is_smeltery() {
+            &SMELTERY_INPUT
+        } else {
+            &INPUT
+        };
+        let stored: Vec<_> = layout
+            .iter()
+            .map(|&index| stack_in(host, data, index))
+            .collect();
+        let plan = advanced_processing::next(host, spec, &stored)?;
+        if !fits(host, data, &plan.output) {
+            return None;
+        }
+        let mut inputs = std::array::from_fn(|_| None);
+        for (slot, stack, count) in plan.consumed {
+            inputs[layout[slot]] = Some((stack, count));
+        }
+        return Some(RecipeRun {
+            inputs,
+            output: plan.output,
+            work_override: Some(plan.work_ticks),
+        });
+    }
     let inputs = INPUT.map(|index| stack_in(host, data, index));
     if inputs.iter().all(Option::is_none) {
         return None;
@@ -994,7 +1058,7 @@ fn find_recipe(
         RecipeFamily::Processing(spec) => {
             processing_recipe(host, data, &inputs, spec, settings, roll)
         }
-        RecipeFamily::Fuel(_) => None,
+        RecipeFamily::Fuel(_) | RecipeFamily::Advanced(_) => None,
     }?;
     fits(host, data, &run.output).then_some(run)
 }
@@ -1165,6 +1229,11 @@ pub(crate) fn prepare_paper_inventory(
             if !storage.plain && host.block_entity(level, pos).is_none() {
                 return Err("The resident machine block entity is unavailable.".into());
             }
+            if id == "REFINERY"
+                && level.block_property(host, pos, "extended").as_deref() != Some("false")
+            {
+                return Err("Load the original, unextended Paper refinery block first.".into());
+            }
             if machine.carrier == "minecraft:furnace" {
                 if level.block_property(host, pos, "lit").as_deref() != Some("false") {
                     return Err("Load the original, unlit Paper furnace block first.".into());
@@ -1180,7 +1249,7 @@ pub(crate) fn prepare_paper_inventory(
     }
     let mut restored = Compound::new();
     for (paper_slot, stack) in items {
-        let Some(index) = SLOTS
+        let Some(index) = SLOTS[..machine.slot_count()]
             .iter()
             .position(|slot| slot.parse::<u32>() == Ok(paper_slot))
         else {
@@ -1663,5 +1732,180 @@ mod tests {
             ),
             (1, 1, 2, 20)
         );
+    }
+
+    #[test]
+    fn electric_smeltery_uses_the_paper_slots_and_prioritizes_the_six_ingredient_alloy() {
+        let recipes = advanced_processing::smeltery_recipes();
+        assert_eq!(recipes.len(), 32);
+        let reinforced = recipes[0];
+        assert_eq!(reinforced.output.kind, crate::items::REINFORCED_ALLOY_INGOT);
+        assert_eq!(reinforced.inputs.len(), 6);
+        let host = recipe_host([
+            "minecraft:iron_ingot",
+            "minecraft:gold_ingot",
+            "minecraft:nether_brick",
+            "minecraft:brick",
+            "minecraft:copper_ingot",
+            "minecraft:gunpowder",
+        ]);
+        let mut data = Compound::new();
+        let machine = ElectricMachine::for_item("ELECTRIC_SMELTERY_2").unwrap();
+        assert_eq!(machine.slot_count(), 8);
+        assert_eq!(
+            SMELTERY_INPUT.map(|slot| MENU_SLOTS[slot]),
+            [10, 11, 19, 20, 28, 29]
+        );
+        for (index, ingredient) in SMELTERY_INPUT
+            .into_iter()
+            .zip(reinforced.inputs.iter().rev())
+        {
+            let input = ingredient.kind.stack(&host, 3).unwrap();
+            assert!(write_stack(&host, &mut data, index, Some(input)));
+        }
+        let recipe = find_recipe(
+            &host,
+            &data,
+            machine,
+            Settings::default(),
+            |_| unreachable!(),
+        )
+        .unwrap();
+        assert!(reinforced.output.kind.matches(&host, &recipe.output));
+        assert_eq!((recipe.quantity(), recipe.work_override), (6, Some(8)));
+        for (slot, input) in recipe.inputs.iter().enumerate() {
+            assert_eq!(input.is_some(), SMELTERY_INPUT.contains(&slot));
+        }
+
+        assert!(write_stack(&host, &mut data, SMELTERY_INPUT[0], None));
+        assert!(
+            find_recipe(
+                &host,
+                &data,
+                machine,
+                Settings::default(),
+                |_| unreachable!()
+            )
+            .is_none()
+        );
+        data.clear();
+        let iron_dust = crate::items::IRON_DUST.stack(&host, 3).unwrap();
+        assert!(write_stack(
+            &host,
+            &mut data,
+            SMELTERY_INPUT[0],
+            Some(iron_dust)
+        ));
+        assert!(
+            find_recipe(
+                &host,
+                &data,
+                machine,
+                Settings::default(),
+                |_| unreachable!()
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn electrified_crucible_melts_paper_material_quantities_and_powers_a_lava_generator() {
+        use crate::advanced_processing::{EMPTY_BUCKET, LAVA_BUCKET};
+
+        let host = recipe_host([
+            "minecraft:bucket",
+            "minecraft:blue_terracotta",
+            "minecraft:lava_bucket",
+        ]);
+        let mut data = Compound::new();
+        let machine = ElectricMachine::for_item("ELECTRIFIED_CRUCIBLE_3").unwrap();
+        let terracotta = Kind::Vanilla("minecraft:blue_terracotta");
+        assert!(write_stack(
+            &host,
+            &mut data,
+            INPUT[1],
+            EMPTY_BUCKET.stack(&host, 1)
+        ));
+        assert!(write_stack(
+            &host,
+            &mut data,
+            INPUT[0],
+            terracotta.stack(&host, 11)
+        ));
+        assert!(
+            find_recipe(
+                &host,
+                &data,
+                machine,
+                Settings::default(),
+                |_| unreachable!()
+            )
+            .is_none()
+        );
+        assert!(write_stack(
+            &host,
+            &mut data,
+            INPUT[0],
+            terracotta.stack(&host, 12)
+        ));
+        let melt = find_recipe(
+            &host,
+            &data,
+            machine,
+            Settings::default(),
+            |_| unreachable!(),
+        )
+        .unwrap();
+        assert!(LAVA_BUCKET.matches(&host, &melt.output));
+        assert_eq!(
+            (melt.quantity(), melt.work_override, machine.cost),
+            (13, Some(4), 60)
+        );
+        let fuel = fuel_generators::generator("LAVA_GENERATOR")
+            .unwrap()
+            .fuel(&host, &melt.output)
+            .unwrap();
+        assert_eq!(fuel.ticks, 80);
+        assert!(fuel.returns_bucket);
+    }
+
+    #[test]
+    fn refinery_produces_the_combustion_reactor_fuel_with_the_paper_duration() {
+        let host = recipe_host(["minecraft:player_head", "minecraft:bucket"]);
+        let mut data = Compound::new();
+        let machine = ElectricMachine::for_item("REFINERY").unwrap();
+        let empty = advanced_processing::EMPTY_BUCKET.stack(&host, 1);
+        assert!(write_stack(&host, &mut data, INPUT[0], empty));
+        assert!(
+            find_recipe(
+                &host,
+                &data,
+                machine,
+                Settings::default(),
+                |_| unreachable!()
+            )
+            .is_none()
+        );
+        let oil = crate::heated_pressure::BUCKET_OF_OIL.stack(&host, 2);
+        assert!(write_stack(&host, &mut data, INPUT[1], oil));
+        let refined = find_recipe(
+            &host,
+            &data,
+            machine,
+            Settings::default(),
+            |_| unreachable!(),
+        )
+        .unwrap();
+        assert!(fuel_generators::BUCKET_OF_FUEL.matches(&host, &refined.output));
+        assert_eq!(
+            (refined.quantity(), refined.work_override, machine.cost),
+            (1, Some(80), 16)
+        );
+        let fuel = fuel_generators::generator("COMBUSTION_REACTOR")
+            .unwrap()
+            .fuel(&host, &refined.output)
+            .unwrap();
+        assert_eq!(fuel.ticks, 180);
+        assert!(fuel.returns_bucket);
     }
 }

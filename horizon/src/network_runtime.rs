@@ -260,23 +260,24 @@ impl Node {
         let Some(actual) = level.block_state(host, pos).map(|state| state.block()) else {
             return false;
         };
-        let expected = match self.component {
-            Component::SolarGenerator { .. } => ["minecraft:daylight_detector"; 2],
-            Component::ElectricMachine { carrier, .. }
-            | Component::FuelGenerator { carrier, .. } => {
-                if carrier == "minecraft:player_head" {
-                    ["minecraft:player_head", "minecraft:player_wall_head"]
-                } else {
-                    [carrier; 2]
-                }
-            }
-            Component::CargoInput | Component::CargoOutput { .. } => {
-                ["minecraft:player_wall_head"; 2]
-            }
-            _ => ["minecraft:player_head", "minecraft:player_wall_head"],
-        };
-        expected.iter().any(|id| host.block_key(id) == Some(actual))
+        accepts_carrier(self.component, &actual.id(host))
     }
+}
+
+fn accepts_carrier(component: Component, actual: &str) -> bool {
+    let expected = match component {
+        Component::SolarGenerator { .. } => ["minecraft:daylight_detector"; 2],
+        Component::ElectricMachine { carrier, .. } | Component::FuelGenerator { carrier, .. } => {
+            if carrier == "minecraft:player_head" {
+                ["minecraft:player_head", "minecraft:player_wall_head"]
+            } else {
+                [carrier; 2]
+            }
+        }
+        Component::CargoInput | Component::CargoOutput { .. } => ["minecraft:player_wall_head"; 2],
+        _ => ["minecraft:player_head", "minecraft:player_wall_head"],
+    };
+    expected.contains(&actual)
 }
 
 #[derive(Default)]
@@ -510,6 +511,49 @@ fn save(host: &dyn ServerHost, dimension: &str, nodes: &Nodes) -> Result<(), Str
     host.world_data_files()
         .write(&file(dimension), text.as_bytes())
         .map_err(|error| format!("Slimefun could not save its network registrations: {error}"))
+}
+
+pub(crate) fn protect_piston(level: &dyn LevelHost, event: &mod_api::PistonPreEvent<'_>) -> bool {
+    let point = |pos: mod_api::BlockPos| [pos.x, pos.y, pos.z];
+    let piston = point(event.piston);
+    let protected = |pos| protected_block(level, &event.dimension, pos);
+    let step = |pos: Position| std::array::from_fn(|i| pos[i].saturating_add(event.direction[i]));
+    protected(piston)
+        || event
+            .push
+            .iter()
+            .copied()
+            .map(point)
+            .any(|pos| protected(pos) || protected(step(pos)))
+        || event.destroy.iter().copied().map(point).any(protected)
+}
+
+fn protected_block(
+    level: &dyn LevelHost,
+    dimension: &mod_api::LevelDimension,
+    pos: Position,
+) -> bool {
+    let Some(material) = level
+        .block_state(pos)
+        .and_then(|state| level.state_block(state))
+    else {
+        return false;
+    };
+    let id = if is_plain_carrier(material) {
+        plain_network::saved_at(level, dimension, pos)
+    } else if let Some(entity) = level.block_entity_at(pos) {
+        if material == "minecraft:chest" && crate::output_chest::marked(level, entity) {
+            return true;
+        }
+        level
+            .block_entity_saved_attachment(entity, NETWORK_STATE.namespace, NETWORK_STATE.name)
+            .as_ref()
+            .and_then(saved_id)
+    } else {
+        None
+    };
+    id.and_then(|id| Component::for_item(&id))
+        .is_some_and(|component| accepts_carrier(component, material))
 }
 
 pub(crate) fn charge(host: &mut dyn ServerHost, level: LevelRef, pos: Position) -> Option<u32> {

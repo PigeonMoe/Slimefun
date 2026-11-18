@@ -106,6 +106,7 @@ pub(crate) fn crafting() -> impl Iterator<Item = &'static CraftingRecipe> {
         .chain(crate::network_recipes::CRAFTING)
         .chain(crate::electric_processing::CRAFTING)
         .chain(crate::fuel_generators::CRAFTING)
+        .chain(crate::advanced_processing::CRAFTING)
 }
 
 pub(crate) fn researches() -> impl Iterator<Item = &'static Research> {
@@ -114,12 +115,14 @@ pub(crate) fn researches() -> impl Iterator<Item = &'static Research> {
         .chain(crate::network_recipes::RESEARCHES)
         .chain(crate::electric_processing::RESEARCHES)
         .chain(crate::fuel_generators::RESEARCHES)
+        .chain(crate::advanced_processing::RESEARCHES)
 }
 
 pub(crate) fn smelting() -> impl Iterator<Item = &'static SmeltingRecipe> {
-    SMELTING
-        .iter()
-        .chain([&crate::network_recipes::SAPPHIRE_SMELTING])
+    SMELTING.iter().chain([
+        &crate::network_recipes::SAPPHIRE_SMELTING,
+        &crate::advanced_processing::SYNTHETIC_EMERALD_SMELTING,
+    ])
 }
 
 pub(crate) const LUMPS: Research = Research {
@@ -752,6 +755,9 @@ pub(crate) fn output_research(kind: Kind) -> Option<&'static Research> {
         REINFORCED_PLATE => Some(&crate::network_recipes::HARDENED_GLASS_RESEARCH),
         crate::network_recipes::SYNTHETIC_SAPPHIRE => {
             Some(&crate::network_recipes::SYNTHETIC_SAPPHIRE_RESEARCH)
+        }
+        crate::advanced_processing::SYNTHETIC_EMERALD => {
+            Some(&crate::advanced_processing::EMERALD_RESEARCH)
         }
         REDSTONE_ALLOY => Some(&REDSTONE_ALLOY_RESEARCH),
         ALUMINUM_INGOT | COPPER_INGOT | LEAD_INGOT | MAGNESIUM_INGOT | SILVER_INGOT | TIN_INGOT

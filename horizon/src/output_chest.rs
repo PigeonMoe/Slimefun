@@ -165,11 +165,7 @@ pub(crate) fn restore_drop(level: &dyn LevelHost, event: &mut BlockDropsEvent<'_
     let Some(entity) = event.block_entity else {
         return;
     };
-    let Some(marker) = level.block_entity_saved_attachment(entity, MARKER.namespace, MARKER.name)
-    else {
-        return;
-    };
-    if marker.get(&"placed".into()) != Some(&Tag::Byte(1)) {
+    if !marked(level, entity) {
         return;
     }
     if let Some(drop) = event
@@ -179,6 +175,12 @@ pub(crate) fn restore_drop(level: &dyn LevelHost, event: &mut BlockDropsEvent<'_
     {
         OUTPUT_CHEST.decorate(&mut drop.stack);
     }
+}
+
+pub(crate) fn marked(level: &dyn LevelHost, entity: mod_api::BlockEntityRef) -> bool {
+    level
+        .block_entity_saved_attachment(entity, MARKER.namespace, MARKER.name)
+        .is_some_and(|marker| marker.get(&"placed".into()) == Some(&Tag::Byte(1)))
 }
 
 fn adjacent([x, y, z]: [i32; 3]) -> impl Iterator<Item = [i32; 3]> {

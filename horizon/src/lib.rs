@@ -10,6 +10,7 @@ use mod_api::{
     ScheduledTaskEvent, ServerHost, ServerStoppingEvent, Text, TriState,
 };
 
+mod advanced_processing;
 mod circuits;
 mod compressor;
 mod electric_processing;
@@ -180,6 +181,14 @@ impl Hooks for Slimefun {
         network_runtime::observe_plain_change(level, event);
     }
 
+    fn piston_pre(&self, level: &dyn LevelHost, event: &mut mod_api::PistonPreEvent<'_>) -> Flow {
+        if network_runtime::protect_piston(level, event) {
+            Flow::Cancel
+        } else {
+            Flow::Continue
+        }
+    }
+
     fn living_drops(
         &self,
         host: &mut dyn ServerHost,
@@ -302,6 +311,7 @@ impl Hooks for Slimefun {
                 "Craft an Electric Furnace and connect it to a powered Energy Regulator. Open the furnace to load vanilla smelting ingredients.".into(),
                 "The Electric Ore Grinder uses Grind Stone and Ore Crusher recipes. The Electric Ingot Pulverizer reverses single-dust smeltery recipes.".into(),
                 "Power an Electric Gold Pan, Electric Dust Washer and Electric Ingot Factory to turn gravel into sifted ore, dust and ingots. The Electric Press compacts materials and parts.".into(),
+                "The Electric Smeltery processes multi-ingredient recipes. The Electrified Crucible fills empty buckets with water or lava, and the Refinery turns buckets of oil into fuel.".into(),
                 "The Heated Pressure Chamber uses two input slots to refine uranium, blistering ingots, and fuel ingredients. Use /sf recipe to find its inputs.".into(),
                 "Wash Sifted Ore by placing a dispenser on a wooden fence with an empty cauldron below it and right-clicking the fence.".into(),
                 "For a Makeshift Smeltery use a wooden fence above a dispenser, bricks on opposite sides of the dispenser, and fire below it. Use a nether brick fence and nether bricks for the regular Smeltery.".into(),
@@ -574,6 +584,36 @@ fn describe_recipe(id: &str, double_ores: bool) -> Vec<String> {
             recipe.output.count,
             recipe.output.kind.id()
         ));
+    }
+
+    for recipe in advanced_processing::smeltery_recipes()
+        .iter()
+        .filter(|recipe| outputs(recipe.output.kind.id()))
+    {
+        let inputs = recipe
+            .inputs
+            .iter()
+            .map(|stack| format!("{} × {}", stack.count, stack.kind.id()))
+            .collect::<Vec<_>>()
+            .join(" + ");
+        lines.push(format!(
+            "Electric Smeltery | {inputs} -> {} × {}",
+            recipe.output.count,
+            recipe.output.kind.id(),
+        ));
+    }
+
+    if outputs(advanced_processing::LAVA_BUCKET.id()) {
+        lines.extend(advanced_processing::LAVA_INPUTS.iter().map(|recipe| format!(
+            "Electrified Crucible | 1 × minecraft:bucket + {} × {} -> 1 × minecraft:lava_bucket",
+            recipe.input.count, recipe.input.kind.id(),
+        )));
+    }
+    if outputs(advanced_processing::WATER_BUCKET.id()) {
+        lines.push("Electrified Crucible | 1 × minecraft:bucket + 16 × leaves -> 1 × minecraft:water_bucket".into());
+    }
+    if outputs(fuel_generators::BUCKET_OF_FUEL.id()) {
+        lines.push("Refinery | 1 × BUCKET_OF_OIL -> 1 × BUCKET_OF_FUEL".into());
     }
 
     if outputs(items::BASIC_CIRCUIT_BOARD.id()) {

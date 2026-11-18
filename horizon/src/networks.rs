@@ -82,10 +82,17 @@ impl Component {
             "CARGO_NODE_OUTPUT" => Self::CargoOutput { advanced: false },
             "CARGO_NODE_OUTPUT_ADVANCED" => Self::CargoOutput { advanced: true },
             _ => {
-                let machine = crate::electric_processing::machine(id)?;
-                Self::ElectricMachine {
-                    capacity: machine.capacity,
-                    carrier: machine.item.material(),
+                if let Some(machine) = crate::electric_processing::machine(id) {
+                    Self::ElectricMachine {
+                        capacity: machine.capacity,
+                        carrier: machine.item.material(),
+                    }
+                } else {
+                    let machine = crate::advanced_processing::machine(id)?;
+                    Self::ElectricMachine {
+                        capacity: machine.capacity,
+                        carrier: machine.item.material(),
+                    }
                 }
             }
         })

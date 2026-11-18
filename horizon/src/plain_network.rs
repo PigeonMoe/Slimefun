@@ -14,6 +14,7 @@ pub(crate) const CARRIERS: &[&str] = &[
     "minecraft:blue_stained_glass",
     "minecraft:brown_terracotta",
     "minecraft:lime_terracotta",
+    "minecraft:piston",
     "minecraft:red_terracotta",
 ];
 
@@ -81,6 +82,22 @@ pub(crate) fn observe_plain_change(level: &dyn LevelHost, event: &BlockChangedEv
         // A different newly placed carrier cannot inherit the retired machine.
         *change = Change::Superseded;
     }
+}
+
+pub(super) fn saved_at(
+    level: &dyn LevelHost,
+    dimension_id: &LevelDimension,
+    pos: Position,
+) -> Option<String> {
+    let address = (dimension(dimension_id).to_owned(), pos);
+    if RETIRED.lock().unwrap().contains_key(&address) {
+        return None;
+    }
+    let saved = level.chunk_saved_attachment(chunk(pos), NODES.namespace, NODES.name)?;
+    let Tag::Compound(data) = saved.get(&key(pos).as_str().into())? else {
+        return None;
+    };
+    saved_id(data)
 }
 
 pub(super) fn read(host: &mut dyn ServerHost, level: LevelRef, pos: Position) -> Option<BlockData> {
