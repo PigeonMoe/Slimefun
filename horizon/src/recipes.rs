@@ -158,6 +158,7 @@ pub(crate) fn researches() -> impl Iterator<Item = &'static Research> {
         .chain(crate::factory::animal_machines::RESEARCHES)
         .chain([
             &crate::android_items::RESEARCH,
+            &crate::android_items::INTERFACES,
             &crate::heated_pressure::PLASTIC_RESEARCH,
         ])
         .chain(crate::factory::crop_growth::RESEARCHES)

@@ -1,0 +1,547 @@
+// SPDX-License-Identifier: GPL-3.0-only
+
+use std::{collections::BTreeMap, sync::Mutex};
+
+use mod_api::{
+    BlockEntityRef, Host, ItemStack, LevelRef, MenuClickedEvent, MenuClosedEvent, MenuReplace,
+    MenuSlotPlace, PlayerRef, ServerHost, Text,
+};
+
+use crate::{
+    android_items,
+    android_machine::{self, FUEL, PAPER_SLOTS, Position},
+    android_program::{self, Instruction, MAX_LENGTH, Mode, Script},
+    gps_controls::{head_icon, icon},
+    items::{HeadTexture, Kind},
+    network_runtime, research,
+};
+
+#[derive(Clone, Copy)]
+struct Anchor {
+    level: LevelRef,
+    pos: Position,
+    entity: BlockEntityRef,
+    mode: Mode,
+}
+
+#[derive(Clone)]
+enum Screen {
+    Main,
+    Memory,
+    Script(Script),
+    Choices { script: Script, index: usize },
+}
+
+#[derive(Clone)]
+struct View {
+    anchor: Anchor,
+    window: i32,
+    screen: Screen,
+    saved: Script,
+}
+
+#[derive(Default)]
+pub(crate) struct Menus(Mutex<BTreeMap<u128, View>>);
+
+fn can_manage(host: &dyn Host, player: PlayerRef, owner: u128) -> bool {
+    player.uuid() == owner
+        || player
+            .permission_level(host)
+            .is_some_and(|level| level >= 2)
+}
+
+impl Menus {
+    pub fn use_at(
+        &self,
+        host: &mut dyn ServerHost,
+        player: PlayerRef,
+        level: LevelRef,
+        pos: Position,
+    ) -> bool {
+        let Some(mode) = network_runtime::android_at(host, level, pos) else {
+            return false;
+        };
+        let Some(entity) = host.block_entity(level, pos) else {
+            return true;
+        };
+        let Some(machine) = android_machine::data(host, level, pos) else {
+            tell(
+                host,
+                player,
+                "This Android's stored program is unavailable.",
+            );
+            return true;
+        };
+        if !can_manage(host, player, machine.owner) {
+            tell(
+                host,
+                player,
+                "Only the Android's owner can open its controls.",
+            );
+            return true;
+        }
+        if mode != Mode::Archived && !research::can_use(host, player, &android_items::RESEARCH) {
+            tell(
+                host,
+                player,
+                "Unlock Programmable Androids to use this machine.",
+            );
+            return true;
+        }
+        self.open(
+            host,
+            player,
+            Anchor {
+                level,
+                pos,
+                entity,
+                mode,
+            },
+            Screen::Main,
+        );
+        true
+    }
+
+    fn open(&self, host: &mut dyn ServerHost, player: PlayerRef, anchor: Anchor, screen: Screen) {
+        let Some(machine) = android_machine::data(host, anchor.level, anchor.pos) else {
+            return;
+        };
+        let (title, items) = match &screen {
+            Screen::Main => ("Programmable Android", main_items(host, &machine)),
+            Screen::Memory => ("Script Editor", memory_items(host)),
+            Screen::Script(script) => ("Script Editor", script_items(host, script)),
+            Screen::Choices { .. } => ("Script Editor", choice_items(host, anchor.mode)),
+        };
+        let rows = (items.len() / 9) as u8;
+        let mut backing = vec![MenuSlotPlace::Decoration; items.len()];
+        if matches!(screen, Screen::Main) {
+            for (slot, &menu) in PAPER_SLOTS.iter().enumerate() {
+                backing[menu] = MenuSlotPlace::BlockEntityItems {
+                    entity: anchor.entity,
+                    slot,
+                    allow_insert: slot == FUEL,
+                };
+            }
+        }
+        if let Ok(Some(window)) = host.open_block_inventory_menu(
+            player,
+            anchor.entity,
+            rows,
+            Text::literal(title),
+            items,
+            MenuReplace::CloseFirst,
+        ) {
+            if player.back_mod_menu_slots(host, window, backing).is_err() {
+                host.close_menu(player.uuid());
+                return;
+            }
+            self.0.lock().unwrap().insert(
+                player.uuid(),
+                View {
+                    anchor,
+                    window,
+                    screen,
+                    saved: machine.script,
+                },
+            );
+        }
+    }
+
+    pub fn clicked(&self, host: &mut dyn ServerHost, event: &MenuClickedEvent) {
+        if !matches!(event.mode, 0 | 1) || !matches!(event.button, 0 | 1) {
+            return;
+        }
+        let Some(view) = self
+            .0
+            .lock()
+            .unwrap()
+            .get(&event.uuid)
+            .cloned()
+            .filter(|view| view.window == event.window)
+        else {
+            return;
+        };
+        let Some(player) = host.player(event.uuid) else {
+            return;
+        };
+        let Anchor {
+            level,
+            pos,
+            entity,
+            mode,
+        } = view.anchor;
+        if player.entity().level(host) != Some(level)
+            || host.block_entity(level, pos) != Some(entity)
+        {
+            host.close_menu(event.uuid);
+            return;
+        }
+        let Some(mut machine) = android_machine::data(host, level, pos)
+            .filter(|machine| can_manage(host, player, machine.owner))
+        else {
+            host.close_menu(event.uuid);
+            return;
+        };
+        let Ok(slot) = usize::try_from(event.slot) else {
+            return;
+        };
+        let shift = event.mode == 1;
+        let right = event.button == 1;
+        let mut changed = false;
+        let mut pause_notice = None;
+        let next = match view.screen {
+            Screen::Main if !shift => match slot {
+                15 if mode != Mode::Archived => {
+                    machine.paused = false;
+                    save_or_close(
+                        host,
+                        player,
+                        pos,
+                        machine,
+                        "Your Android is running its script.",
+                    );
+                    host.close_menu(event.uuid);
+                    return;
+                }
+                15 => {
+                    tell(
+                        host,
+                        player,
+                        "This archived Android mode retains its original script and inventory.",
+                    );
+                    return;
+                }
+                17 => {
+                    machine.paused = true;
+                    save_or_close(
+                        host,
+                        player,
+                        pos,
+                        machine,
+                        "Your Android has paused its script.",
+                    );
+                    return;
+                }
+                16 => {
+                    machine.paused = true;
+                    changed = true;
+                    pause_notice = Some("Your Android has paused its script.");
+                    Screen::Memory
+                }
+                _ => return,
+            },
+            Screen::Memory if !shift => match slot {
+                1 => Screen::Script(machine.script.clone()),
+                3 if mode != Mode::Archived => Screen::Script(Script::default()),
+                8 => Screen::Main,
+                _ => return,
+            },
+            Screen::Script(mut script) => {
+                let last = script.tokens().len() - 1;
+                let add = script.tokens().len() < MAX_LENGTH;
+                if slot == 0 || slot == last + usize::from(add) {
+                    Screen::Main
+                } else if mode == Mode::Archived || slot > last {
+                    return;
+                } else if slot == last {
+                    Screen::Choices {
+                        script,
+                        index: slot,
+                    }
+                } else if right {
+                    let edited = if shift {
+                        script.duplicate(slot)
+                    } else {
+                        script.edit(slot, None)
+                    };
+                    if edited.is_none() {
+                        return;
+                    }
+                    machine.script = script.clone();
+                    changed = true;
+                    Screen::Script(script)
+                } else if !shift {
+                    Screen::Choices {
+                        script,
+                        index: slot,
+                    }
+                } else {
+                    return;
+                }
+            }
+            Screen::Choices { mut script, index } if !shift => {
+                let instruction = if slot == 9 {
+                    None
+                } else {
+                    let Some(choice) = slot
+                        .checked_sub(10)
+                        .and_then(|offset| android_program::choices(mode).nth(offset))
+                    else {
+                        return;
+                    };
+                    Some(choice)
+                };
+                if script.edit(index, instruction).is_none() {
+                    return;
+                }
+                machine.script = script.clone();
+                changed = true;
+                Screen::Script(script)
+            }
+            _ => return,
+        };
+        if changed {
+            if !matches!(next, Screen::Memory)
+                && !android_machine::data(host, level, pos)
+                    .is_some_and(|current| current.script == view.saved)
+            {
+                tell(host, player, "The Android script changed in another menu.");
+                return;
+            }
+            if !android_machine::save(host, pos, machine) {
+                tell(host, player, "The Android's changes could not be saved.");
+                return;
+            }
+            if let Some(message) = pause_notice {
+                tell(host, player, message);
+            }
+        }
+        self.open(host, player, view.anchor, next);
+    }
+
+    pub fn closed(&self, event: &MenuClosedEvent) {
+        let mut views = self.0.lock().unwrap();
+        if views
+            .get(&event.uuid)
+            .is_some_and(|view| view.window == event.window)
+        {
+            views.remove(&event.uuid);
+        }
+    }
+
+    pub fn logout(&self, player: u128) {
+        self.0.lock().unwrap().remove(&player);
+    }
+
+    pub fn clear(&self) {
+        self.0.lock().unwrap().clear();
+    }
+}
+
+fn save_or_close(
+    host: &mut dyn ServerHost,
+    player: PlayerRef,
+    pos: Position,
+    machine: android_machine::Machine,
+    message: &str,
+) {
+    if android_machine::save(host, pos, machine) {
+        tell(host, player, message);
+    } else {
+        tell(host, player, "The Android's changes could not be saved.");
+    }
+}
+
+fn tell(host: &mut dyn ServerHost, player: PlayerRef, message: &str) {
+    let _ = player.tell(host, Text::literal(message));
+}
+
+fn main_items(host: &dyn Host, machine: &android_machine::Machine) -> Vec<Option<ItemStack>> {
+    const BORDER: &[usize] = &[
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 18, 24, 25, 26, 27, 33, 35, 36, 42, 44, 45, 46, 47, 48, 49,
+        50, 51, 52, 53,
+    ];
+    const OUT: &[usize] = &[10, 11, 12, 13, 14, 19, 23, 28, 32, 37, 38, 39, 40, 41];
+    let mut items = vec![None; 54];
+    for (slots, material) in [
+        (BORDER, "minecraft:gray_stained_glass_pane"),
+        (OUT, "minecraft:orange_stained_glass_pane"),
+    ] {
+        let pane = icon(host, Kind::Vanilla(material), " ", &[]);
+        for &slot in slots {
+            items[slot] = pane.clone();
+        }
+    }
+    items[15] = head(host, "START", "Start/Continue", &[]);
+    items[16] = head(
+        host,
+        "MEMORY",
+        "Memory Core",
+        &["Click to open the Script Editor".into()],
+    );
+    items[17] = head(host, "PAUSE", "Pause", &[]);
+    items[34] = icon(
+        host,
+        Kind::Vanilla("minecraft:coal"),
+        "Solid Fuel",
+        &[format!("Remaining steps: {}", machine.fuel)],
+    );
+    for (index, &slot) in PAPER_SLOTS.iter().enumerate() {
+        items[slot] = android_machine::slot(host, machine, index);
+    }
+    items
+}
+
+fn memory_items(host: &dyn Host) -> Vec<Option<ItemStack>> {
+    let mut items = vec![None; 54];
+    items[1] = head(host, "GO_FORWARD", "> Edit Script", &[]);
+    items[3] = head(host, "NEW", "> Create new Script", &[]);
+    items[8] = head(host, "TURN_LEFT", "> Back", &[]);
+    items
+}
+
+fn script_items(host: &dyn Host, script: &Script) -> Vec<Option<ItemStack>> {
+    let mut items = vec![None; 54];
+    let back = ["Left Click to return to the Android's interface".into()];
+    items[0] = head(host, "START", "Start Script", &back);
+    let last = script.tokens().len() - 1;
+    let add = usize::from(script.tokens().len() < MAX_LENGTH);
+    if add == 1 {
+        items[last] = head(host, "NEW", "> Add new Command", &[]);
+    }
+    items[last + add] = head(host, "REPEAT", "Repeat Script", &back);
+    let lore = [
+        "Left Click to edit".into(),
+        "Right Click to delete".into(),
+        "Shift + Right Click to duplicate".into(),
+    ];
+    for (index, token) in script.tokens().iter().enumerate().take(last).skip(1) {
+        let name = match Instruction::parse(token) {
+            Some(instruction) => instruction.label(),
+            None => token.as_str(),
+        };
+        items[index] = head(host, token, name, &lore);
+    }
+    items
+}
+
+fn choice_items(host: &dyn Host, mode: Mode) -> Vec<Option<ItemStack>> {
+    let mut items = vec![None; 54];
+    items[..9].fill(icon(
+        host,
+        Kind::Vanilla("minecraft:gray_stained_glass_pane"),
+        " ",
+        &[],
+    ));
+    items[9] = head(host, "PAUSE", "Do nothing", &[]);
+    for (index, choice) in (10..).zip(android_program::choices(mode)) {
+        items[index] = head(host, choice.id(), choice.label(), &[]);
+    }
+    items
+}
+
+fn head(host: &dyn Host, key: &str, name: &str, lore: &[String]) -> Option<ItemStack> {
+    if let Some((_, texture)) = SKINS.iter().find(|(id, _)| *id == key) {
+        head_icon(host, texture, name, lore)
+    } else {
+        icon(host, Kind::Vanilla("minecraft:paper"), name, lore)
+    }
+}
+
+const SKINS: &[(&str, HeadTexture)] = &[
+    (
+        "START",
+        HeadTexture {
+            profile: [2051923214, 1764440002, -1465804083, 1654626908],
+            value: "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHBzOi8vdGV4dHVyZXMubWluZWNyYWZ0Lm5ldC90ZXh0dXJlLzRhZTI5NDIyZGI0MDQ3ZWZkYjliYWMyY2RhZTVhMDcxOWViNzcyZmNjYzg4YTY2ZDkxMjMyMGIzNDNjMzQxIn19fQ==",
+        },
+    ),
+    (
+        "REPEAT",
+        HeadTexture {
+            profile: [781817581, 1102131614, -1748187270, 640604898],
+            value: "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHBzOi8vdGV4dHVyZXMubWluZWNyYWZ0Lm5ldC90ZXh0dXJlL2JjOGRlZjY3YTEyNjIyZWFkMWRlY2QzZDg5MzY0MjU3YjUzMTg5NmQ4N2U0Njk4MTMxMzFjYTIzNWI1YzcifX19",
+        },
+    ),
+    (
+        "WAIT",
+        HeadTexture {
+            profile: [712385068, -309118490, -1293123308, -143694330],
+            value: "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHBzOi8vdGV4dHVyZXMubWluZWNyYWZ0Lm5ldC90ZXh0dXJlLzJlZTE3NGY0MWU1OTRlNjRlYTMxNDFjMDdkYWY3YWNmMWZhMDQ1YzIzMGIyYjBiMGZiM2RhMTYzZGIyMmY0NTUifX19",
+        },
+    ),
+    (
+        "GO_FORWARD",
+        HeadTexture {
+            profile: [190581783, 516504217, -1762816564, 647721272],
+            value: "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHBzOi8vdGV4dHVyZXMubWluZWNyYWZ0Lm5ldC90ZXh0dXJlL2Q5YmY2ZGI0YWVkYTlkODgyMmI5ZjczNjUzOGU4YzE4YjlhNDg0NGY4NGViNDU1MDRhZGZiZmVlODdlYiJ9fX0=",
+        },
+    ),
+    (
+        "GO_UP",
+        HeadTexture {
+            profile: [-670096659, 758594443, -1792588429, -1893041658],
+            value: "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHBzOi8vdGV4dHVyZXMubWluZWNyYWZ0Lm5ldC90ZXh0dXJlLzEwNWEyY2FiOGI2OGVhNTdlM2FmOTkyYTM2ZTQ3YzhmZjlhYTg3Y2M4Nzc2MjgxOTY2ZjhjM2NmMzFhMzgifX19",
+        },
+    ),
+    (
+        "GO_DOWN",
+        HeadTexture {
+            profile: [-1408375074, -709478614, -2005606555, -1933638107],
+            value: "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHBzOi8vdGV4dHVyZXMubWluZWNyYWZ0Lm5ldC90ZXh0dXJlL2MwMTU4NmUzOWY2ZmZhNjNiNGZiMzAxYjY1Y2E3ZGE4YTkyZjczNTNhYWFiODlkMzg4NjU3OTEyNWRmYmFmOSJ9fX0=",
+        },
+    ),
+    (
+        "TURN_LEFT",
+        HeadTexture {
+            profile: [-306346492, -1326761251, -1640572749, -1231546449],
+            value: "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHBzOi8vdGV4dHVyZXMubWluZWNyYWZ0Lm5ldC90ZXh0dXJlL2ExODVjOTdkYmI4MzUzZGU2NTI2OThkMjRiNjQzMjdiNzkzYTNmMzJhOThiZTY3YjcxOWZiZWRhYjM1ZSJ9fX0=",
+        },
+    ),
+    (
+        "TURN_RIGHT",
+        HeadTexture {
+            profile: [-331308740, -2070925052, -1549426231, 1574221549],
+            value: "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHBzOi8vdGV4dHVyZXMubWluZWNyYWZ0Lm5ldC90ZXh0dXJlLzMxYzBlZGVkZDcxMTVmYzFiMjNkNTFjZTk2NjM1OGIyNzE5NWRhZjI2ZWJiNmU0NWE2NmMzNGM2OWMzNDA5MSJ9fX0=",
+        },
+    ),
+    (
+        "FARM_FORWARD",
+        HeadTexture {
+            profile: [185821184, -1539034433, -1957073323, 213852716],
+            value: "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHBzOi8vdGV4dHVyZXMubWluZWNyYWZ0Lm5ldC90ZXh0dXJlLzRkZTlhNTIyYzNkOWU3ZDg1ZjNkODJjMzc1ZGMzN2ZlY2M4NTZkYmQ4MDFlYjNiY2VkYzExNjUxOThiZiJ9fX0=",
+        },
+    ),
+    (
+        "FARM_DOWN",
+        HeadTexture {
+            profile: [-1628814217, 1089944264, -1437705605, -568766409],
+            value: "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHBzOi8vdGV4dHVyZXMubWluZWNyYWZ0Lm5ldC90ZXh0dXJlLzJkNDI5NmIzMzNkMjUzMTlhZjNmMzMwNTE3OTdmOWU2ZDgyMWNkMTlhMDE0ZmI3MTM3YmViODZhNGU5ZTk2In19fQ==",
+        },
+    ),
+    (
+        "INTERFACE_ITEMS",
+        HeadTexture {
+            profile: [-2123506543, 1539325144, -2064804428, -1891490068],
+            value: "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHBzOi8vdGV4dHVyZXMubWluZWNyYWZ0Lm5ldC90ZXh0dXJlLzkwYTRkYmY2NjI1YzQyYmU1N2E4YmEyYzMzMDk1NGE3NmJkZjIyNzg1NTQwZTg3YTVjOTY3MjY4NTIzOGVjIn19fQ==",
+        },
+    ),
+    (
+        "INTERFACE_FUEL",
+        HeadTexture {
+            profile: [131769886, -1323156926, -1590854046, -370301030],
+            value: "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHBzOi8vdGV4dHVyZXMubWluZWNyYWZ0Lm5ldC90ZXh0dXJlLzI0MzJmNTI4MmE1MDc0NWI5MTJiZTE0ZGVkYTU4MWJkNGEwOWI5NzdhM2MzMmQ3ZTk1Nzg0OTFmZWU4ZmE3In19fQ==",
+        },
+    ),
+    (
+        "NEW",
+        HeadTexture {
+            profile: [-1914612957, 625753127, -1372670388, 2036152987],
+            value: "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHBzOi8vdGV4dHVyZXMubWluZWNyYWZ0Lm5ldC90ZXh0dXJlLzE3MWQ4OTc5YzE4NzhhMDU5ODdhN2ZhZjIxYjU2ZDFiNzQ0ZjlkMDY4Yzc0Y2ZmY2RlMWVhMWVkYWQ1ODUyIn19fQ==",
+        },
+    ),
+    (
+        "PAUSE",
+        HeadTexture {
+            profile: [-1430806123, 377108335, -2105106683, -1825080643],
+            value: "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHBzOi8vdGV4dHVyZXMubWluZWNyYWZ0Lm5ldC90ZXh0dXJlLzE2MTM5ZmQxYzU2NTRlNTZlOWU0ZTJjOGJlN2ViMmJkNWI0OTlkNjMzNjE2NjYzZmVlZTk5Yjc0MzUyYWQ2NCJ9fX0=",
+        },
+    ),
+    (
+        "MEMORY",
+        HeadTexture {
+            profile: [728422456, 1251750602, -1768418679, 1199211128],
+            value: "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHBzOi8vdGV4dHVyZXMubWluZWNyYWZ0Lm5ldC90ZXh0dXJlL2Q3OGYyYjdlNWU3NTYzOWVhN2ZiNzk2YzM1ZDM2NGM0ZGYyOGI0MjQzZTY2Yjc2Mjc3YWFkY2Q2MjYxMzM3In19fQ==",
+        },
+    ),
+];

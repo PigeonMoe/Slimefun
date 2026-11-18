@@ -426,6 +426,7 @@ fn has_restorable_menu(component: Option<Component>) -> bool {
         Some(
             Component::ElectricMachine { .. }
                 | Component::FuelGenerator { .. }
+                | Component::Android
                 | Component::CargoInput
                 | Component::CargoOutput { advanced: true }
         )
@@ -665,6 +666,8 @@ mod tests {
             "BIO_REACTOR",
             "AUTO_BREEDER",
             "ANIMAL_GROWTH_ACCELERATOR",
+            "PROGRAMMABLE_ANDROID",
+            "PROGRAMMABLE_ANDROID_FARMER",
             "CROP_GROWTH_ACCELERATOR",
             "CROP_GROWTH_ACCELERATOR_2",
             "CARGO_NODE_INPUT",

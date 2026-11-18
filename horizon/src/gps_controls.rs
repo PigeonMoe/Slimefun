@@ -248,7 +248,7 @@ impl Controls {
                 format!("Complexity: {complexity}"),
             ],
         );
-        items[6] = globe(host, &OVERWORLD, "Waypoints", &[]);
+        items[6] = head_icon(host, &OVERWORLD, "Waypoints", &[]);
         let mut entries = BTreeMap::new();
         match tab {
             Tab::Transmitters => {
@@ -437,14 +437,19 @@ pub(crate) fn waypoint_icon(
         };
         (waypoint.name.as_str(), texture)
     };
-    globe(host, texture, name, lore)
+    head_icon(host, texture, name, lore)
 }
 
 pub(crate) fn world_icon(host: &dyn Host, name: &str) -> Option<ItemStack> {
-    globe(host, &OVERWORLD, name, &[])
+    head_icon(host, &OVERWORLD, name, &[])
 }
 
-fn globe(host: &dyn Host, texture: &HeadTexture, name: &str, lore: &[String]) -> Option<ItemStack> {
+pub(crate) fn head_icon(
+    host: &dyn Host,
+    texture: &HeadTexture,
+    name: &str,
+    lore: &[String],
+) -> Option<ItemStack> {
     let mut icon = icon(host, Kind::Vanilla("minecraft:player_head"), name, lore)?;
     icon.apply_components(&Compound::from([(
         "minecraft:profile".into(),

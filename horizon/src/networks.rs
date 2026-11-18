@@ -10,6 +10,8 @@ pub(crate) enum Component {
     GeoScanner,
     GpsControlPanel,
     GpsDevice(crate::items::Kind),
+    Android,
+    AndroidInterface,
     ManualCrucible,
     ManualComposter,
     IgnitionChamber,
@@ -89,7 +91,11 @@ impl Component {
         if let Some(device) = crate::gps_transport::fixed(id) {
             return Some(Self::GpsDevice(device));
         }
+        if crate::android_program::mode(id).is_some() {
+            return Some(Self::Android);
+        }
         Some(match id {
+            "ANDROID_INTERFACE_ITEMS" | "ANDROID_INTERFACE_FUEL" => Self::AndroidInterface,
             "REACTOR_ACCESS_PORT" => Self::ReactorPort,
             "WITHER_PROOF_OBSIDIAN" => Self::WitherProofObsidian,
             "DUCT_TAPE" => Self::DuctTape,
@@ -199,6 +205,8 @@ impl Component {
             }
             Self::GeoScanner => "GPS Geo-Scanner | Requires 600 GPS complexity".into(),
             Self::GpsControlPanel => "GPS Control Panel".into(),
+            Self::Android => "Programmable Android".into(),
+            Self::AndroidInterface => "Android Interface".into(),
             Self::GpsDevice(kind) => {
                 let owner = metadata
                     .get("owner")

@@ -203,8 +203,6 @@ impl ItemPart for NetworkPlacement {
                 crate::heated_pressure::NETHER_ICE_COOLANT_CELL,
                 reactors::NEPTUNIUM,
                 crate::network_recipes::ANDROID_MEMORY_CORE,
-                crate::android_items::PROGRAMMABLE_ANDROID,
-                crate::android_items::PROGRAMMABLE_ANDROID_FARMER,
                 trash::PORTABLE_DUSTBIN,
             ]
             .iter()
@@ -213,7 +211,10 @@ impl ItemPart for NetworkPlacement {
             return Some(InteractionResult::Fail);
         }
         if let HostSide::Server(host) = host {
-            if crate::crucible::refuses_placement(host, event)
+            if (event.face != [0, 1, 0]
+                && item_id(event.stack)
+                    .is_some_and(|id| crate::android_program::mode(&id).is_some()))
+                || crate::crucible::refuses_placement(host, event)
                 || crate::composter::refuses_placement(host, event)
                 || crate::auto_crafter::refuses_placement(host, event)
                 || cargo_topology::block_invalid_placement(HostSide::Server(host), event)
@@ -245,11 +246,16 @@ impl ItemPart for NetworkPlacement {
         {
             data.gps_owner = Some(player.uuid());
         }
-        let _ = self
-            .0
-            .lock()
-            .unwrap()
-            .register(host, level, event.pos, node, data, false);
+        let android = node.component == Component::Android;
+        let _ = host.transaction(|host, _| {
+            if android && !crate::android_machine::init(host, level, event.pos, player) {
+                return Err("Could not initialize the Programmable Android.".to_owned());
+            }
+            self.0
+                .lock()
+                .unwrap()
+                .register(host, level, event.pos, node, data, false)
+        });
     }
 }
 
@@ -354,6 +360,8 @@ impl Node {
             Component::GeoScanner
             | Component::GpsControlPanel
             | Component::GpsDevice(_)
+            | Component::Android
+            | Component::AndroidInterface
             | Component::TrashCan
             | Component::ManualCrucible
             | Component::ManualComposter
@@ -395,6 +403,8 @@ fn accepts_carrier(component: Component, actual: &str) -> bool {
             return crate::crucible::carrier(actual);
         }
         Component::GpsDevice(kind) => return actual == kind.material(),
+        Component::Android => return actual == crate::android_machine::DEVICE,
+        Component::AndroidInterface => return actual == "minecraft:dispenser",
         Component::IgnitionChamber => return actual == crate::items::IGNITION_CHAMBER.material(),
         Component::EnhancedFurnace => return actual == "minecraft:furnace",
         Component::ReactorPort => return actual == reactors::REACTOR_ACCESS_PORT.material(),
@@ -514,6 +524,14 @@ impl Networks {
         if crate::auto_crafter::is_machine(id) {
             host.transaction(|host, _| {
                 crate::auto_crafter::restore_paper(host, level, pos, id, row)?;
+                self.register(host, level, pos, node, data, true)
+            })?;
+        } else if node.component == Component::Android {
+            host.transaction(|host, _| {
+                if !node.accepts_block(host, level, pos) {
+                    return Err("Load the original Paper Android head first.".to_owned());
+                }
+                crate::android_machine::restore_paper(host, level, pos, id, metadata, row)?;
                 self.register(host, level, pos, node, data, true)
             })?;
         } else if node.component == Component::TrashCan {
@@ -795,6 +813,47 @@ pub(crate) fn observe_gps_change(
     }
 }
 
+pub(crate) fn android_at(
+    host: &mut dyn ServerHost,
+    level: LevelRef,
+    pos: Position,
+) -> Option<crate::android_program::Mode> {
+    let data = block_data(host, level, pos)?;
+    let mode = crate::android_program::mode(&data.id)?;
+    (level.block(host, pos)?.id(host) == crate::android_machine::DEVICE).then_some(mode)
+}
+
+pub(crate) fn android_interface_at(
+    host: &mut dyn ServerHost,
+    level: LevelRef,
+    pos: Position,
+    id: &str,
+) -> bool {
+    level
+        .block(host, pos)
+        .is_some_and(|block| block.id(host) == "minecraft:dispenser")
+        && block_data(host, level, pos).is_some_and(|data| data.id == id)
+}
+
+pub(crate) fn saved_android_interface(
+    host: &dyn mod_api::Host,
+    level: LevelRef,
+    pos: Position,
+) -> bool {
+    host.block_entity(level, pos)
+        .and_then(|entity| {
+            host.block_entity_saved_attachment(entity, NETWORK_STATE.namespace, NETWORK_STATE.name)
+        })
+        .as_ref()
+        .and_then(saved_id)
+        .is_some_and(|id| {
+            matches!(
+                id.as_str(),
+                "ANDROID_INTERFACE_ITEMS" | "ANDROID_INTERFACE_FUEL"
+            )
+        })
+}
+
 pub(crate) fn gps_plate_marked(
     level: &dyn LevelHost,
     dimension: &mod_api::LevelDimension,
@@ -1034,6 +1093,11 @@ pub(crate) fn tick(
         if node.component == Component::TrashCan {
             trash::clear(host, pos);
         }
+        if node.component == Component::Android
+            && let Some(movement) = crate::android_machine::tick(host, level, pos, &node.id, rolls)
+        {
+            move_android(networks, host, level, &dimension, node, movement);
+        }
     }
     for (&start, &(node, _)) in &active {
         if !node.regulator() || claimed.contains(&start) {
@@ -1219,6 +1283,70 @@ pub(crate) fn tick(
         networks.gps_signals.remove(&dimension);
     } else {
         networks.gps_signals.insert(dimension, gps_signals);
+    }
+}
+
+fn move_android(
+    networks: &Mutex<Networks>,
+    host: &mut dyn ServerHost,
+    level: LevelRef,
+    dimension: &str,
+    node: &Node,
+    movement: crate::android_machine::Movement,
+) {
+    let crate::android_machine::Movement { from, to, rotation } = movement;
+    if !level
+        .height(host)
+        .is_some_and(|(min, height)| to[1] > min && to[1] < min.saturating_add(height))
+        || !level.block(host, to).is_some_and(|block| {
+            matches!(
+                block.id(host).as_str(),
+                "minecraft:air" | "minecraft:cave_air" | "minecraft:void_air"
+            )
+        })
+        || !crate::android_machine::inside_border(host, level, to)
+    {
+        return;
+    }
+    let Some(head) = host.block_entity(level, from) else {
+        return;
+    };
+    let previous = {
+        let mut networks = networks.lock().unwrap();
+        let Ok(nodes) = networks.nodes(host, dimension) else {
+            return;
+        };
+        if nodes.get(&from) != Some(node) {
+            return;
+        }
+        let mut next = (*nodes).clone();
+        let previous = next.insert(to, node.clone());
+        // The head at either position stays discoverable if the world stops during the move.
+        if save(host, dimension, &next).is_err() {
+            return;
+        }
+        networks.levels.insert(dimension.to_owned(), Arc::new(next));
+        previous
+    };
+    let moved = head
+        .relocate_player_head(host, to, rotation)
+        .ok()
+        .flatten()
+        .is_some();
+    let mut networks = networks.lock().unwrap();
+    let Ok(nodes) = networks.nodes(host, dimension) else {
+        return;
+    };
+    let mut next = (*nodes).clone();
+    if moved {
+        next.remove(&from);
+    } else if let Some(previous) = previous {
+        next.insert(to, previous);
+    } else {
+        next.remove(&to);
+    }
+    if save(host, dimension, &next).is_ok() {
+        networks.levels.insert(dimension.to_owned(), Arc::new(next));
     }
 }
 

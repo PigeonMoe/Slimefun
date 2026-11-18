@@ -14,6 +14,9 @@ use mod_api::{
 mod advanced_processing;
 mod ancient_altar;
 mod android_items;
+mod android_machine;
+mod android_program;
+mod android_ui;
 mod armor_forge;
 mod auto_anvil;
 mod auto_brewer;
@@ -73,6 +76,7 @@ struct Slimefun {
     chest: Mutex<Option<ItemKey>>,
     networks: Arc<Mutex<network_runtime::Networks>>,
     gps: gps_controls::Controls,
+    androids: android_ui::Menus,
     transport: gps_transport::Transport,
     backpacks: backpacks::BackpackMenus,
     bee_wings: bee_wings::BeeWings,
@@ -91,6 +95,7 @@ impl Default for Slimefun {
             chest: Mutex::new(None),
             networks: Arc::default(),
             gps: gps_controls::Controls::default(),
+            androids: android_ui::Menus::default(),
             transport: gps_transport::Transport::default(),
             backpacks: backpacks::BackpackMenus::default(),
             bee_wings: bee_wings::BeeWings::default(),
@@ -246,6 +251,7 @@ impl Hooks for Slimefun {
             "minecraft:smoker",
             "minecraft:enchanting_table",
             "minecraft:dropper",
+            "minecraft:dispenser",
         ]
         .into_iter()
         .chain(network_runtime::PLAIN_CARRIERS.iter().copied())
@@ -260,6 +266,7 @@ impl Hooks for Slimefun {
         registrar.item_part(skull, food_machines::Placement);
         network_runtime::register_cargo(registrar);
         gps_transport::register(registrar);
+        android_machine::register(registrar);
         crucible::register(registrar);
         factory::register(registrar);
         backpacks::register(registrar);
@@ -284,6 +291,28 @@ impl Hooks for Slimefun {
         self.read_config(event.config, false);
     }
 
+    fn break_block(
+        &self,
+        host: &mut dyn ServerHost,
+        event: &mut mod_api::BreakBlockEvent<'_>,
+    ) -> Flow {
+        let Some(player) = host.players().acting_player() else {
+            return Flow::Continue;
+        };
+        let Some(level) = player.entity().level(host) else {
+            return Flow::Continue;
+        };
+        if let Some(android) = android_machine::data(host, level, event.pos)
+            && android.owner != player.uuid()
+            && !player
+                .permission_level(host)
+                .is_some_and(|level| level >= 2)
+        {
+            return Flow::Cancel;
+        }
+        Flow::Continue
+    }
+
     fn block_drops(&self, level: &dyn LevelHost, event: &mut BlockDropsEvent<'_>) -> Flow {
         block_placer::restore_drop(level, event);
         if let Some(chest) = *self.chest.lock().unwrap() {
@@ -291,6 +320,7 @@ impl Hooks for Slimefun {
         }
         network_runtime::restore_drop(level, event);
         factory::restore_drops(level, event);
+        android_machine::drop_items(level, event);
         food_machines::restore_drop(level, event);
         ancient_altar::restore_drops(level, event);
         Flow::Continue
@@ -343,10 +373,10 @@ impl Hooks for Slimefun {
         host: &dyn mod_api::Host,
         event: &mut mod_api::BlockDispensePreEvent<'_>,
     ) -> Flow {
-        if host
-            .level(event.dimension)
-            .is_some_and(|level| ancient_altar::is_pedestal(host, level, event.pos))
-        {
+        if host.level(event.dimension).is_some_and(|level| {
+            ancient_altar::is_pedestal(host, level, event.pos)
+                || network_runtime::saved_android_interface(host, level, event.pos)
+        }) {
             Flow::Cancel
         } else {
             Flow::Continue
@@ -694,6 +724,10 @@ impl Hooks for Slimefun {
             *event.cancellation_result = InteractionResult::Consume;
             return Flow::Cancel;
         }
+        if self.androids.use_at(host, player, level, event.click.pos) {
+            *event.cancellation_result = InteractionResult::Consume;
+            return Flow::Cancel;
+        }
         if factory::open(host, player, level, event.click.pos) {
             *event.cancellation_result = InteractionResult::Consume;
             return Flow::Cancel;
@@ -793,6 +827,7 @@ impl Hooks for Slimefun {
     ) {
         self.bee_wings.stop(event.player);
         self.gps.logout(event.player);
+        self.androids.logout(event.player);
         self.transport.logout(event.player);
     }
 
@@ -857,6 +892,7 @@ impl Hooks for Slimefun {
         auto_crafter::clicked(host, event);
         factory::VIEWERS.clicked(host, event);
         self.gps.click(&self.networks, host, event);
+        self.androids.clicked(host, event);
         self.transport.clicked(host, event);
         network_runtime::menu_click(&self.networks, host, event);
     }
@@ -867,6 +903,7 @@ impl Hooks for Slimefun {
         self.universal.closed(event);
         factory::VIEWERS.closed(event);
         self.gps.close(event);
+        self.androids.closed(event);
         self.transport.close(event);
         network_runtime::menu_closed(&self.networks, event);
     }
@@ -959,6 +996,7 @@ impl Hooks for Slimefun {
         self.bee_wings.clear();
         self.universal.clear();
         self.gps.clear();
+        self.androids.clear();
         self.transport.clear();
         factory::VIEWERS.clear();
         self.networks.lock().unwrap().clear();
