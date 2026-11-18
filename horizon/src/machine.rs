@@ -5,6 +5,7 @@ use mod_api::{
     PlayerRef, ServerHost, SoundSource, Text, Transaction,
 };
 
+use crate::backpacks;
 use crate::compressor::DelayedCrafts;
 use crate::items::{OUTPUT_CHEST, SIFTED_ORE, STONE_CHUNK};
 use crate::output_chest;
@@ -84,6 +85,7 @@ pub(crate) enum Refusal {
     MissingRecipe,
     MissingResearch(&'static str),
     NoOutputSpace,
+    Backpack(String),
     Unavailable,
 }
 
@@ -224,6 +226,7 @@ impl Machine {
                 format!("Unlock this research with /sf research {id}.")
             }
             Err(Refusal::NoOutputSpace) => "The dispenser has no room for the output.".to_owned(),
+            Err(Refusal::Backpack(message)) => message,
             Err(Refusal::Unavailable) => "Slimefun could not change this dispenser.".to_owned(),
         };
         let _ = player.tell(host, Text::literal(message));
@@ -420,15 +423,24 @@ impl Machine {
                     if recipe.output.kind == OUTPUT_CHEST && !output_chest::enabled() {
                         return Err(Refusal::Disabled);
                     }
-                    if !research::can_use(host, player, recipe.research) {
+                    if !recipe.research.id.is_empty()
+                        && !research::can_use(host, player, recipe.research)
+                    {
                         return Err(Refusal::MissingResearch(recipe.research.id));
                     }
+                    let mut output = recipe
+                        .output
+                        .kind
+                        .stack(host, recipe.output.count)
+                        .ok_or(Refusal::Unavailable)?;
+                    backpacks::prepare_craft(host, tx, player, &slots, &mut output)
+                        .map_err(Refusal::Backpack)?;
                     for (slot, item) in slots.iter().enumerate() {
                         if let Some(item) = item {
                             consume(host, tx, &dispenser.place(slot), item, 1)?;
                         }
                     }
-                    deposit(host, tx, dispenser, recipe.output)
+                    deposit_output(host, tx, dispenser, &output)
                 }
             }
         })
@@ -574,8 +586,17 @@ fn deposit(
         .kind
         .stack(host, output.count)
         .ok_or(Refusal::Unavailable)?;
-    if output_chest::try_deposit(host, dispenser.level, dispenser.position, &stack)
-        || deposit_stack(host, tx, dispenser, &stack, output.count) == 0
+    deposit_output(host, tx, dispenser, &stack)
+}
+
+fn deposit_output(
+    host: &mut dyn ServerHost,
+    tx: &Transaction,
+    dispenser: Dispenser,
+    stack: &ItemStack,
+) -> Result<(), Refusal> {
+    if output_chest::try_deposit(host, dispenser.level, dispenser.position, stack)
+        || deposit_stack(host, tx, dispenser, stack, stack.count()) == 0
     {
         Ok(())
     } else {

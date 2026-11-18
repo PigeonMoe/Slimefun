@@ -752,12 +752,15 @@ fn describe_recipe(id: &str, double_ores: bool) -> Vec<String> {
         );
     }
     for recipe in crafting().filter(|recipe| outputs(recipe.output.kind.id())) {
-        lines.push(format!(
-            "Enhanced Crafting Table | {} × {} | research {}",
+        let mut header = format!(
+            "Enhanced Crafting Table | {} × {}",
             recipe.output.count,
-            recipe.output.kind.id(),
-            recipe.research.id
-        ));
+            recipe.output.kind.id()
+        );
+        if !recipe.research.id.is_empty() {
+            header.push_str(&format!(" | research {}", recipe.research.id));
+        }
+        lines.push(header);
         lines.extend(recipe.inputs.chunks_exact(3).map(|row| {
             row.iter()
                 .map(|cell| cell.map_or("-", |kind| kind.id()))

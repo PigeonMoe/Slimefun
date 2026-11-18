@@ -116,6 +116,9 @@ impl SlimefunItem {
                 Tag::List(vec![string(""), text(&line, "red", true)]),
             );
         }
+        if let Some(lore) = crate::backpacks::item_lore(self.id) {
+            components.insert("minecraft:lore".into(), lore);
+        }
         if let Some(texture) = &self.texture {
             components.insert(
                 "minecraft:profile".into(),

@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    sync::Mutex,
-};
+use std::{collections::BTreeMap, sync::Mutex};
 
 use mod_api::{
     AttachmentCodec, AttachmentType, ComponentId, Compound, ConfigFileError, ConfigPath, Hand,
@@ -12,7 +9,14 @@ use mod_api::{
     Tag, Text, Transaction,
 };
 
-use crate::{items::item_id, recipes::Research, research, storage::decode_archived_slots};
+use crate::{
+    items::{
+        GOLD_6K, GOLD_10K, GOLD_14K, GOLD_16K, GOLD_22K, GOLD_24K, HeadTexture, Kind, item, item_id,
+    },
+    recipes::{CraftingRecipe, Research, Stack},
+    research,
+    storage::decode_archived_slots,
+};
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub(crate) struct BackpackId {
@@ -23,6 +27,19 @@ pub(crate) struct BackpackId {
 impl BackpackId {
     pub(crate) fn storage_key(self) -> String {
         format!("{:032x}#{}", self.owner, self.number)
+    }
+
+    fn lore(self) -> String {
+        let owner = format!("{:032x}", self.owner);
+        format!(
+            "ID: {}-{}-{}-{}-{}#{}",
+            &owner[..8],
+            &owner[8..12],
+            &owner[12..16],
+            &owner[16..20],
+            &owner[20..],
+            self.number
+        )
     }
 }
 
@@ -58,17 +75,17 @@ const BASIC_BACKPACKS: Research = Research {
     name: "Backpacks",
     cost: 15,
 };
-const WOVEN_BACKPACK: Research = Research {
+const WOVEN_RESEARCH: Research = Research {
     id: "woven_backpack",
     name: "Woven Backpack",
     cost: 19,
 };
-const GILDED_BACKPACK: Research = Research {
+const GILDED_RESEARCH: Research = Research {
     id: "gilded_backpack",
     name: "Gilded Backpack",
     cost: 22,
 };
-const RADIANT_BACKPACK: Research = Research {
+const RADIANT_RESEARCH: Research = Research {
     id: "radiant_backpack",
     name: "Radiant Backpack",
     cost: 25,
@@ -76,9 +93,162 @@ const RADIANT_BACKPACK: Research = Research {
 
 pub(crate) const RESEARCHES: &[Research] = &[
     BASIC_BACKPACKS,
+    WOVEN_RESEARCH,
+    GILDED_RESEARCH,
+    RADIANT_RESEARCH,
+];
+
+const BACKPACK_TEXTURE: HeadTexture = HeadTexture {
+    profile: [1142674294, 177618442, -2100126135, -1576084528],
+    value: "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHBzOi8vdGV4dHVyZXMubWluZWNyYWZ0Lm5ldC90ZXh0dXJlLzQwY2IxZTY3YjUxMmFiMmQ0YmYzZDdhY2UwZWFhZjYxYzMyY2Q0NjgxZGRjMzk4N2NlYjMyNjcwNmEzM2ZhIn19fQ==",
+};
+
+item!(
+    SMALL_BACKPACK,
+    "player_head",
+    "Small Backpack",
+    "yellow",
+    None,
+    Some(BACKPACK_TEXTURE)
+);
+item!(
+    MEDIUM_BACKPACK,
+    "player_head",
+    "Backpack",
+    "yellow",
+    None,
+    Some(BACKPACK_TEXTURE)
+);
+item!(
+    LARGE_BACKPACK,
+    "player_head",
+    "Large Backpack",
+    "yellow",
+    None,
+    Some(BACKPACK_TEXTURE)
+);
+item!(
     WOVEN_BACKPACK,
+    "player_head",
+    "Woven Backpack",
+    "yellow",
+    None,
+    Some(BACKPACK_TEXTURE)
+);
+item!(
     GILDED_BACKPACK,
+    "player_head",
+    "Gilded Backpack",
+    "yellow",
+    None,
+    Some(BACKPACK_TEXTURE)
+);
+item!(
     RADIANT_BACKPACK,
+    "player_head",
+    "Radiant Backpack",
+    "yellow",
+    None,
+    Some(BACKPACK_TEXTURE)
+);
+item!(CLOTH, "paper", "Cloth", "aqua", None, None);
+
+const LEATHER: Option<Kind> = Some(Kind::Vanilla("minecraft:leather"));
+const UNRESTRICTED: Research = Research {
+    id: "",
+    name: "",
+    cost: 0,
+};
+
+const fn casing(material: Option<Kind>, gold: Kind, center: Kind) -> [Option<Kind>; 9] {
+    [
+        material,
+        None,
+        material,
+        Some(gold),
+        Some(center),
+        Some(gold),
+        material,
+        material,
+        material,
+    ]
+}
+
+const fn frame(gold: Kind, center: Kind) -> [Option<Kind>; 9] {
+    [
+        Some(gold),
+        None,
+        Some(gold),
+        LEATHER,
+        Some(center),
+        LEATHER,
+        Some(gold),
+        None,
+        Some(gold),
+    ]
+}
+
+const fn recipe(
+    inputs: [Option<Kind>; 9],
+    kind: Kind,
+    research: &'static Research,
+) -> CraftingRecipe {
+    CraftingRecipe {
+        inputs,
+        output: Stack { kind, count: 1 },
+        research,
+    }
+}
+
+pub(crate) const CRAFTING: &[CraftingRecipe] = &[
+    CraftingRecipe {
+        inputs: [
+            Some(Kind::Vanilla("minecraft:white_wool")),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ],
+        output: Stack {
+            kind: CLOTH,
+            count: 8,
+        },
+        research: &UNRESTRICTED,
+    },
+    recipe(
+        casing(LEATHER, GOLD_6K, Kind::Vanilla("minecraft:chest")),
+        SMALL_BACKPACK,
+        &BASIC_BACKPACKS,
+    ),
+    recipe(
+        casing(LEATHER, GOLD_10K, SMALL_BACKPACK),
+        MEDIUM_BACKPACK,
+        &BASIC_BACKPACKS,
+    ),
+    recipe(
+        casing(LEATHER, GOLD_14K, MEDIUM_BACKPACK),
+        LARGE_BACKPACK,
+        &BASIC_BACKPACKS,
+    ),
+    recipe(
+        casing(Some(CLOTH), GOLD_16K, LARGE_BACKPACK),
+        WOVEN_BACKPACK,
+        &WOVEN_RESEARCH,
+    ),
+    recipe(
+        frame(GOLD_22K, WOVEN_BACKPACK),
+        GILDED_BACKPACK,
+        &GILDED_RESEARCH,
+    ),
+    recipe(
+        frame(GOLD_24K, GILDED_BACKPACK),
+        RADIANT_BACKPACK,
+        &RADIANT_RESEARCH,
+    ),
 ];
 
 fn tier(id: &str) -> Option<(u32, &'static Research)> {
@@ -86,11 +256,44 @@ fn tier(id: &str) -> Option<(u32, &'static Research)> {
         "SMALL_BACKPACK" => (9, &BASIC_BACKPACKS),
         "MEDIUM_BACKPACK" => (18, &BASIC_BACKPACKS),
         "LARGE_BACKPACK" => (27, &BASIC_BACKPACKS),
-        "WOVEN_BACKPACK" => (36, &WOVEN_BACKPACK),
-        "GILDED_BACKPACK" => (45, &GILDED_BACKPACK),
-        "RADIANT_BACKPACK" => (54, &RADIANT_BACKPACK),
+        "WOVEN_BACKPACK" => (36, &WOVEN_RESEARCH),
+        "GILDED_BACKPACK" => (45, &GILDED_RESEARCH),
+        "RADIANT_BACKPACK" => (54, &RADIANT_RESEARCH),
         _ => return None,
     })
+}
+
+fn text(value: &str, color: &str, italic: bool) -> Tag {
+    Tag::compound([
+        ("text", Tag::String(value.into())),
+        ("color", Tag::String(color.into())),
+        ("italic", Tag::Byte(i8::from(italic))),
+    ])
+}
+
+pub(crate) fn item_lore(id: &str) -> Option<Tag> {
+    let (size, _) = tier(id)?;
+    let mut label = size.to_string();
+    if size == 54 {
+        label.push_str(" (Double chest)");
+    }
+    Some(Tag::List(vec![
+        Tag::String("".into()),
+        Tag::compound([
+            ("text", Tag::String("Size: ".into())),
+            ("color", Tag::String("gray".into())),
+            ("italic", Tag::Byte(0)),
+            ("extra", Tag::List(vec![text(&label, "yellow", false)])),
+        ]),
+        text("ID: <ID>", "gray", false),
+        Tag::String("".into()),
+        Tag::compound([
+            ("text", Tag::String("Right Click".into())),
+            ("color", Tag::String("yellow".into())),
+            ("italic", Tag::Byte(0)),
+            ("extra", Tag::List(vec![text(" to open", "gray", false)])),
+        ]),
+    ]))
 }
 
 fn allowed_contents(host: &dyn Host, stack: &ItemStack) -> bool {
@@ -178,10 +381,7 @@ fn binding(stack: &ItemStack) -> Result<Binding, &'static str> {
     found.ok_or("The backpack has no ID lore.")
 }
 
-pub(crate) fn held_id(
-    host: &dyn Host,
-    stack: &ItemStack,
-) -> Result<(BackpackId, u32), &'static str> {
+fn backpack_item(host: &dyn Host, stack: &ItemStack) -> Result<(Binding, u32), &'static str> {
     if stack.item().id(host) != "minecraft:player_head" {
         return Err("Hold an ordinary Slimefun backpack.");
     }
@@ -193,10 +393,41 @@ pub(crate) fn held_id(
     if stack.count() != 1 {
         return Err("Backpacks must be held one at a time.");
     }
-    match binding(stack)? {
+    Ok((binding(stack)?, capacity))
+}
+
+fn held_id(host: &dyn Host, stack: &ItemStack) -> Result<(BackpackId, u32), &'static str> {
+    let (binding, capacity) = backpack_item(host, stack)?;
+    match binding {
         Binding::Named(id) => Ok((id, capacity)),
         Binding::Blank => Err("This backpack has no existing Paper ID."),
     }
+}
+
+fn assign_item_id(stack: &mut ItemStack, id: BackpackId) -> Result<(), &'static str> {
+    if binding(stack)? != Binding::Blank {
+        return Err("The backpack already has a different ID.");
+    }
+    let mut components = stack
+        .components()
+        .ok_or("The backpack has no ID lore.")?
+        .as_nbt()
+        .clone();
+    let Some(Tag::List(lines)) = components.get_mut(&"minecraft:lore".into()) else {
+        return Err("The backpack has no ID lore.");
+    };
+    let line = lines
+        .iter_mut()
+        .find(|line| {
+            let mut literal = String::new();
+            append_literal(line, &mut literal, 0).is_some()
+                && matches!(literal.as_str(), "ID: <ID>" | "§7ID: <ID>")
+        })
+        .ok_or("The backpack has no blank ID lore.")?;
+    *line = text(&id.lore(), "gray", false);
+    stack
+        .set_components(components)
+        .map_err(|_| "Could not update the backpack ID.")
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -268,15 +499,14 @@ impl Backpack {
     }
 }
 
-fn archived_backpack(
+fn archived_records(
     profile: &toml::Table,
-    id: BackpackId,
-    size: u32,
-) -> Result<&toml::Table, String> {
+    owner: u128,
+) -> Result<BTreeMap<u32, &toml::Table>, String> {
     if profile.get("format").and_then(toml::Value::as_integer) != Some(1) {
         return Err("Unsupported archived Paper backpack format.".into());
     }
-    let owner = format!("{:032x}", id.owner);
+    let owner = format!("{owner:032x}");
     if profile.get("player").and_then(toml::Value::as_str) != Some(owner.as_str()) {
         return Err("The archived Paper profile has a different owner UUID.".into());
     }
@@ -300,8 +530,7 @@ fn archived_backpack(
         .get("backpacks")
         .and_then(toml::Value::as_array)
         .ok_or("The Paper profile has no restorable backpack records.")?;
-    let mut seen = BTreeSet::new();
-    let mut found = None;
+    let mut found = BTreeMap::new();
     for entry in entries {
         let entry = entry.as_table().ok_or("Invalid Paper backpack record.")?;
         let number = entry
@@ -310,16 +539,24 @@ fn archived_backpack(
             .and_then(|n| i32::try_from(n).ok())
             .and_then(|n| u32::try_from(n).ok())
             .ok_or("Invalid archived Paper backpack number.")?;
-        if !seen.insert(number) {
+        if found.insert(number, entry).is_some() {
             return Err(format!(
                 "The Paper profile repeats backpack number {number}."
             ));
         }
-        if number == id.number {
-            found = Some(entry);
-        }
     }
-    let entry = found.ok_or("The Paper profile does not contain this backpack number.")?;
+    Ok(found)
+}
+
+fn archived_backpack(
+    profile: &toml::Table,
+    id: BackpackId,
+    size: u32,
+) -> Result<&toml::Table, String> {
+    let records = archived_records(profile, id.owner)?;
+    let entry = *records
+        .get(&id.number)
+        .ok_or("The Paper profile does not contain this backpack number.")?;
     if !valid_size(size)
         || entry.get("size").and_then(toml::Value::as_integer) != Some(i64::from(size))
     {
@@ -328,23 +565,28 @@ fn archived_backpack(
     Ok(entry)
 }
 
-fn load_paper(host: &dyn ServerHost, id: BackpackId, size: u32) -> Result<Backpack, String> {
-    let path = ConfigPath::new(&format!("storage-import/backpacks/{:032x}.toml", id.owner))
+fn read_profile(host: &dyn ServerHost, owner: u128) -> Result<Option<toml::Table>, String> {
+    let path = ConfigPath::new(&format!("storage-import/backpacks/{owner:032x}.toml"))
         .expect("hexadecimal UUID is a valid archive path");
-    let bytes = host
-        .world_data_files()
-        .read(&path)
-        .map_err(|error| match error {
-            ConfigFileError::NotFound => {
-                "There is no Paper archive for this backpack owner.".to_owned()
-            }
-            _ => format!("Could not read the archived Paper backpack: {error}"),
-        })?;
+    let bytes = match host.world_data_files().read(&path) {
+        Ok(bytes) => bytes,
+        Err(ConfigFileError::NotFound) => return Ok(None),
+        Err(error) => {
+            return Err(format!(
+                "Could not read the archived Paper backpack: {error}"
+            ));
+        }
+    };
     let text =
         std::str::from_utf8(&bytes).map_err(|_| "The Paper backpack archive must be UTF-8.")?;
-    let profile: toml::Table = text
-        .parse()
-        .map_err(|_| "The Paper backpack archive contains invalid TOML.")?;
+    text.parse()
+        .map(Some)
+        .map_err(|_| "The Paper backpack archive contains invalid TOML.".into())
+}
+
+fn load_paper(host: &dyn ServerHost, id: BackpackId, size: u32) -> Result<Backpack, String> {
+    let profile = read_profile(host, id.owner)?
+        .ok_or("There is no Paper archive for this backpack owner.")?;
     let row = archived_backpack(&profile, id, size)?;
     let slots = decode_archived_slots(host, row, size)?;
     Ok(Backpack {
@@ -418,6 +660,194 @@ impl BackpackStore for GlobalBackpacks {
             .set(host, Holder::Server, data)
             .map_err(|_| "Could not write the global backpack record.".into())
     }
+}
+
+/// Paper assigns the next ID after the last backpack in the owner's profile.
+fn next_number(
+    host: &mut dyn ServerHost,
+    owner: u128,
+    archived: Option<u32>,
+) -> Result<u32, String> {
+    let mut maximum = archived;
+    let prefix = format!("{owner:032x}#");
+    if let Some(records) = RECORDS
+        .get_existing(host, Holder::Server)
+        .map_err(|_| "The global backpack store is unavailable.")?
+    {
+        for key in records.keys() {
+            let Ok(key) = key.to_string() else { continue };
+            if let Some(suffix) = key.strip_prefix(&prefix) {
+                let current = number(suffix)
+                    .ok_or("The owner already has an invalid live backpack number.")?;
+                maximum = maximum.max(Some(current));
+            }
+        }
+    }
+    match maximum {
+        None => Ok(0),
+        Some(last) if last < i32::MAX as u32 => Ok(last + 1),
+        Some(_) => Err("This owner's backpack numbers are exhausted.".into()),
+    }
+}
+
+fn archived_max(host: &dyn ServerHost, owner: u128) -> Result<Option<u32>, String> {
+    let Some(profile) = read_profile(host, owner)? else {
+        return Ok(None);
+    };
+    Ok(archived_records(&profile, owner)?
+        .last_key_value()
+        .map(|(&number, _)| number))
+}
+
+fn create_record(
+    host: &mut dyn ServerHost,
+    tx: &Transaction,
+    owner: u128,
+    size: u32,
+    reserved: Option<u32>,
+) -> Result<BackpackId, String> {
+    let id = BackpackId {
+        owner,
+        number: next_number(host, owner, reserved)?,
+    };
+    if GlobalBackpacks.load(host, id)?.is_some() {
+        return Err("A backpack already has the new identity.".into());
+    }
+    let record = Backpack {
+        size,
+        slots: BTreeMap::new(),
+        paper: false,
+    }
+    .to_nbt(host)?;
+    GlobalBackpacks.save(host, tx, id, record)?;
+    Ok(id)
+}
+
+fn initialize_held(
+    host: &mut dyn ServerHost,
+    place: &ItemPlace,
+    owner: u128,
+    reserved: Option<u32>,
+) -> Result<(BackpackId, u32), String> {
+    host.transaction(|host, tx| {
+        let mut stack = place
+            .stack(host)
+            .ok_or("The backpack left the player's hand.")?;
+        let (binding, size) = backpack_item(host, &stack)?;
+        if binding != Binding::Blank {
+            return Err("The held backpack already has an ID.".into());
+        }
+        let id = create_record(host, tx, owner, size, reserved)?;
+        assign_item_id(&mut stack, id)?;
+        let changed = place.exchange(host, tx, &ItemResource::of(&stack), 1);
+        if changed != 1 {
+            return Err("Could not bind the backpack in the player's hand.".into());
+        }
+        let current = place
+            .stack(host)
+            .ok_or("The bound backpack is missing from the hand.")?;
+        if held_id(host, &current).ok() != Some((id, size)) {
+            return Err("The hand did not keep the bound backpack.".into());
+        }
+        Ok((id, size))
+    })
+}
+
+fn resize_bound(
+    host: &mut dyn ServerHost,
+    tx: &Transaction,
+    id: BackpackId,
+    old_size: u32,
+    size: u32,
+) -> Result<(), String> {
+    if !valid_size(size) || size <= old_size {
+        return Err("A backpack upgrade must increase its capacity.".into());
+    }
+    let mut record =
+        live_bag(host, id, old_size)?.ok_or("Restore this Paper backpack before upgrading it.")?;
+    record.size = size;
+    let saved = record.to_nbt(host)?;
+    GlobalBackpacks.save(host, tx, id, saved)
+}
+
+pub(crate) fn prepare_craft(
+    host: &mut dyn ServerHost,
+    tx: &Transaction,
+    player: PlayerRef,
+    slots: &[Option<ItemStack>; 9],
+    output: &mut ItemStack,
+) -> Result<(), String> {
+    let Some((size, _)) = item_id(output).as_deref().and_then(tier) else {
+        return Ok(());
+    };
+    let input = slots
+        .iter()
+        .flatten()
+        .find(|item| item_id(item).as_deref().and_then(tier).is_some());
+    let source = input.map(binding).transpose()?;
+    let id = match source {
+        Some(Binding::Named(_)) => {
+            let previous = input.expect("a named binding was read from a backpack");
+            let (id, old_size) = held_id(host, previous)?;
+            resize_bound(host, tx, id, old_size, size)?;
+            id
+        }
+        Some(Binding::Blank) | None => {
+            let reserved = archived_max(host, player.uuid())?;
+            create_record(host, tx, player.uuid(), size, reserved)?
+        }
+    };
+    assign_item_id(output, id)?;
+    if let Some(source) = input {
+        carry_soulbound(source, output)?;
+    }
+    Ok(())
+}
+
+fn carry_soulbound(source: &ItemStack, output: &mut ItemStack) -> Result<(), &'static str> {
+    const KEY: &str = "slimefun:soulbound";
+    let Some(components) = source.components() else {
+        return Ok(());
+    };
+    let flag = components
+        .as_nbt()
+        .get(&"minecraft:custom_data".into())
+        .and_then(|data| data.get("PublicBukkitValues"))
+        .and_then(|data| data.get(KEY))
+        .filter(|tag| matches!(tag, Tag::Byte(_)));
+    let has_lore = components
+        .as_nbt()
+        .get(&"minecraft:lore".into())
+        .is_some_and(|lore| {
+            let Tag::List(lines) = lore else { return false };
+            lines.iter().any(|line| {
+                let mut literal = String::new();
+                append_literal(line, &mut literal, 0).is_some()
+                    && matches!(literal.as_str(), "Soulbound" | "§7Soulbound")
+            })
+        });
+    if flag.is_none() && !has_lore {
+        return Ok(());
+    }
+    let mut components = output
+        .components()
+        .ok_or("The upgraded backpack has no components.")?
+        .as_nbt()
+        .clone();
+    let Some(Tag::List(lines)) = components.get_mut(&"minecraft:lore".into()) else {
+        return Err("The upgraded backpack has no lore.");
+    };
+    lines.push(text("Soulbound", "gray", false));
+    let Some(Tag::Compound(data)) = components.get_mut(&"minecraft:custom_data".into()) else {
+        return Err("The upgraded backpack has no Slimefun item data.");
+    };
+    let Some(Tag::Compound(values)) = data.get_mut(&"PublicBukkitValues".into()) else {
+        return Err("The upgraded backpack has no Slimefun item data.");
+    };
+    values.insert(KEY.into(), flag.cloned().unwrap_or(Tag::Byte(1)));
+    output
+        .set_components(components)
+        .map_err(|_| "Could not preserve the Soulbound marker.")
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -672,12 +1102,19 @@ impl BackpackMenus {
         let Some((_, required)) = item_id(&stack).as_deref().and_then(tier) else {
             return false;
         };
-        let result = held_id(host, &stack)
+        let result = backpack_item(host, &stack)
             .map_err(str::to_owned)
-            .and_then(|(id, size)| {
+            .and_then(|(binding, size)| {
                 if !research::can_use(host, player, required) {
                     return Err(format!("Unlock this research with /sf research {}.", required.id));
                 }
+                let id = match binding {
+                    Binding::Named(id) => id,
+                    Binding::Blank => {
+                        let reserved = archived_max(host, player.uuid())?;
+                        initialize_held(host, &place, player.uuid(), reserved)?.0
+                    }
+                };
                 if live_bag(host, id, size)?.is_none() {
                     return Err("Restore this Paper backpack with /sf restore-backpack while holding it in your main hand.".into());
                 }
@@ -783,6 +1220,145 @@ mod tests {
                 ),
             ]),
         ]
+    }
+
+    #[test]
+    fn first_open_binds_the_held_item_after_every_reserved_paper_id() {
+        let mut host = fixture();
+        let blank = SMALL_BACKPACK.stack(&host, 1).unwrap();
+        assert_eq!(binding(&blank), Ok(Binding::Blank));
+        let place = ItemPlace::PlayerHand {
+            player: OWNER,
+            hand: Hand::Main,
+        };
+        host.join(OWNER, 6).slots.insert(0, blank);
+        let (first, size) = initialize_held(&mut host, &place, OWNER, Some(11)).unwrap();
+        assert_eq!(size, 9);
+        assert_eq!(
+            first,
+            BackpackId {
+                owner: OWNER,
+                number: 12
+            }
+        );
+        let bound = place.stack(&mut host).unwrap();
+        assert_eq!(held_id(&host, &bound), Ok((first, 9)));
+        assert!(
+            live_bag(&mut host, first, size)
+                .unwrap()
+                .unwrap()
+                .slots
+                .is_empty()
+        );
+        assert!(initialize_held(&mut host, &place, OWNER, Some(11)).is_err());
+        assert_eq!(next_number(&mut host, OWNER, Some(11)), Ok(13));
+        assert!(next_number(&mut host, OWNER, Some(i32::MAX as u32)).is_err());
+
+        // Dropping or handing over the physical item leaves the original ID valid.
+        host.players.get_mut(OWNER).unwrap().slots.remove(&0);
+        host.join(RECIPIENT, 7).slots.insert(-106, bound);
+        let off_hand = ItemPlace::PlayerHand {
+            player: RECIPIENT,
+            hand: Hand::Off,
+        };
+        let transferred = off_hand.stack(&mut host).unwrap();
+        assert_eq!(held_id(&host, &transferred), Ok((first, 9)));
+        assert!(GlobalBackpacks.load(&mut host, first).unwrap().is_some());
+    }
+
+    #[test]
+    fn ordinary_upgrade_keeps_the_previous_uuid_slots_and_soulbound_marker() {
+        let mut host = fixture();
+        host.join(RECIPIENT, 7);
+        let player = (&host as &dyn Host).player(RECIPIENT).unwrap();
+        let diamond = material(&host, "minecraft:diamond", 2);
+        let mut lore = tagged_lines();
+        lore.push(string("§7Soulbound"));
+        let source = bag(&host, "SMALL_BACKPACK", lore);
+        let mut inputs = [const { None }; 9];
+        inputs[4] = Some(source);
+        let mut output = MEDIUM_BACKPACK.stack(&host, 1).unwrap();
+        assert!(
+            host.transaction(|host, tx| prepare_craft(host, tx, player, &inputs, &mut output))
+                .is_err()
+        );
+        assert!(GlobalBackpacks.load(&mut host, ID).unwrap().is_none());
+        assert_eq!(binding(&output), Ok(Binding::Blank));
+
+        host.transaction(|host, tx| {
+            bind_paper(host, tx, &GlobalBackpacks, ID, 9, |_, _, _| {
+                Ok(Backpack {
+                    size: 9,
+                    paper: true,
+                    slots: BTreeMap::from([(8, diamond.clone())]),
+                })
+            })
+        })
+        .unwrap();
+        let failed = host.transaction(|host, tx| {
+            let mut output = MEDIUM_BACKPACK.stack(host, 1).unwrap();
+            prepare_craft(host, tx, player, &inputs, &mut output).unwrap();
+            Err::<(), _>("no space for the result")
+        });
+        assert!(failed.is_err());
+        assert!(live_bag(&mut host, ID, 18).is_err());
+        assert_eq!(
+            live_bag(&mut host, ID, 9).unwrap().unwrap().slots[&8],
+            diamond
+        );
+
+        host.transaction(|host, tx| prepare_craft(host, tx, player, &inputs, &mut output))
+            .unwrap();
+        assert_eq!(held_id(&host, &output), Ok((ID, 18)));
+        assert_eq!(
+            live_bag(&mut host, ID, 18).unwrap().unwrap().slots[&8],
+            diamond
+        );
+        assert!(live_bag(&mut host, ID, 9).is_err());
+        assert_eq!(
+            output
+                .components()
+                .unwrap()
+                .as_nbt()
+                .get(&"minecraft:custom_data".into())
+                .unwrap()
+                .get("PublicBukkitValues")
+                .unwrap()
+                .get("slimefun:soulbound"),
+            Some(&Tag::Byte(1))
+        );
+        assert!(
+            host.transaction(|host, tx| bind_paper(
+                host,
+                tx,
+                &GlobalBackpacks,
+                ID,
+                9,
+                |_, _, _| panic!("an old item may not refill or downsize the upgraded record")
+            ))
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn crafting_chain_preserves_the_paper_tier_and_component_requirements() {
+        let expected = [
+            "minecraft:chest",
+            "SMALL_BACKPACK",
+            "MEDIUM_BACKPACK",
+            "LARGE_BACKPACK",
+            "WOVEN_BACKPACK",
+            "GILDED_BACKPACK",
+        ];
+        assert_eq!(CRAFTING[0].output.count, 8);
+        assert_eq!(CRAFTING[0].inputs[0].unwrap().id(), "minecraft:white_wool");
+        for (index, recipe) in CRAFTING[1..].iter().enumerate() {
+            assert_eq!(recipe.inputs[4].unwrap().id(), expected[index]);
+            assert_eq!(
+                tier(recipe.output.kind.id()).map(|(size, _)| size),
+                Some(9 * (index as u32 + 1))
+            );
+        }
     }
 
     #[test]
