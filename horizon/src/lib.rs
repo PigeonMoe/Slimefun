@@ -88,13 +88,12 @@ impl Slimefun {
             *settings = Settings::default();
             output_chest::set_enabled(true);
             self.crucibles.configure(false);
-        }
             ancient_altar::configure(None);
+        }
         let Ok(table) = config.text.parse::<toml::Table>() else {
             return;
         };
         settings.book_binder = book_binder::Rules::read_config(&table);
-        if let Some(range) = table
         ancient_altar::configure(
             table
                 .get("ancient-altar")
@@ -103,6 +102,7 @@ impl Slimefun {
                 .and_then(|delay| i32::try_from(delay).ok())
                 .filter(|&delay| delay >= 0),
         );
+        if let Some(range) = table
             .get("produce-collector")
             .and_then(|section| section.get("range"))
             .and_then(toml::Value::as_integer)
@@ -225,8 +225,8 @@ impl Hooks for Slimefun {
         crucible::register(registrar);
         factory::register(registrar);
         backpacks::register(registrar);
-        self.universal.register(registrar);
         ancient_altar::register(registrar);
+        self.universal.register(registrar);
     }
 
     fn register_configs(&self, _: HostSide<'_>, event: &mut RegisterConfigsEvent<'_>) {
@@ -252,8 +252,8 @@ impl Hooks for Slimefun {
         network_runtime::restore_drop(level, event);
         factory::restore_drops(level, event);
         food_machines::restore_drop(level, event);
-        Flow::Continue
         ancient_altar::restore_drops(level, event);
+        Flow::Continue
     }
 
     fn block_changed(&self, level: &dyn LevelHost, event: &mut mod_api::BlockChangedEvent) {
@@ -262,7 +262,6 @@ impl Hooks for Slimefun {
         network_runtime::observe_gps_change(&self.networks, level, event);
     }
 
-    fn piston_pre(&self, level: &dyn LevelHost, event: &mut mod_api::PistonPreEvent<'_>) -> Flow {
     fn entity_place(
         &self,
         host: &mut dyn ServerHost,
@@ -322,6 +321,7 @@ impl Hooks for Slimefun {
         }
     }
 
+    fn piston_pre(&self, level: &dyn LevelHost, event: &mut mod_api::PistonPreEvent<'_>) -> Flow {
         if network_runtime::protect_piston(level, event) {
             Flow::Cancel
         } else {
@@ -548,7 +548,6 @@ impl Hooks for Slimefun {
         ) {
             return Flow::Continue;
         }
-        if *event.use_item != TriState::False
         if event.click.hand == Hand::Main
             && let Some(level) = player.entity().level(host)
             && ancient_altar::use_at(
@@ -562,6 +561,7 @@ impl Hooks for Slimefun {
             *event.cancellation_result = InteractionResult::Consume;
             return Flow::Cancel;
         }
+        if *event.use_item != TriState::False
             && (self.backpacks.use_held(host, player, event.click.hand)
                 || network_runtime::trash::portable(host, player, event.click.hand))
         {
@@ -727,8 +727,8 @@ impl Hooks for Slimefun {
             network_runtime::tick(&self.networks, host, event.level, settings, &self.rolls);
             factory::VIEWERS.refresh(host, event.level);
             self.crucibles.tick(host, event.level);
-        }
             ancient_altar::tick(host, event.level);
+        }
     }
 
     fn furnace_process(

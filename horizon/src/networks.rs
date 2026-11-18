@@ -10,8 +10,8 @@ pub(crate) enum Component {
     GeoScanner,
     ManualCrucible,
     IgnitionChamber,
-    EnergyConnector,
     EnhancedFurnace,
+    EnergyConnector,
     Capacitor(u32),
     ElectricMachine {
         capacity: u32,
@@ -39,10 +39,10 @@ pub(crate) enum Component {
 
 impl Component {
     pub(crate) fn for_item(id: &str) -> Option<Self> {
-        if let Some(transmitter) = crate::geology::transmitter(id) {
         if crate::enhanced_furnaces::by_id(id).is_some() {
             return Some(Self::EnhancedFurnace);
         }
+        if let Some(transmitter) = crate::geology::transmitter(id) {
             return Some(Self::GpsTransmitter {
                 capacity: transmitter.capacity,
             });
@@ -82,6 +82,10 @@ impl Component {
             "PRODUCE_COLLECTOR" => Self::ElectricMachine {
                 capacity: crate::factory::produce_collector::CAPACITY,
                 carrier: crate::factory::produce_collector::PRODUCE_COLLECTOR.material(),
+            },
+            "TREE_GROWTH_ACCELERATOR" => Self::ElectricMachine {
+                capacity: crate::factory::tree_growth::CAPACITY,
+                carrier: crate::factory::tree_growth::TREE_GROWTH_ACCELERATOR.material(),
             },
             "ENERGY_REGULATOR" => Self::EnergyRegulator,
             "ENERGY_CONNECTOR" => Self::EnergyConnector,
@@ -153,6 +157,9 @@ impl Component {
             }
             Self::ManualCrucible => "Manual Crucible".into(),
             Self::IgnitionChamber => "Automatic Ignition Chamber".into(),
+            Self::EnhancedFurnace => {
+                "Enhanced furnace | Native input, fuel and output slots".into()
+            }
             Self::GeoScanner => "GPS Geo-Scanner | Requires 600 GPS complexity".into(),
             Self::EnergyRegulator => "Energy regulator | Paper connection range 6".into(),
             Self::EnergyConnector => "Energy connector | Paper connection range 6".into(),
@@ -160,9 +167,6 @@ impl Component {
                 let charge = metadata.get("energy-charge").and_then(toml::Value::as_str);
                 match charge {
                     None => format!("Capacitor | Stored charge 0 / {capacity} J"),
-            Self::EnhancedFurnace => {
-                "Enhanced furnace | Native input, fuel and output slots".into()
-            }
                     Some(field) => match field.parse::<u32>() {
                         Ok(value) if value <= capacity => {
                             format!("Capacitor | Stored charge {value} / {capacity} J")

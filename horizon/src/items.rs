@@ -128,18 +128,21 @@ impl SlimefunItem {
         if let Some(lore) = crate::book_binder::lore(self.id) {
             components.insert("minecraft:lore".into(), lore);
         }
+        crate::enhanced_furnaces::decorate(self.id, self.name, &mut components);
         if self.id == IGNITION_CHAMBER.id() {
             components.insert("minecraft:lore".into(), crate::ignition_chamber::lore());
         }
-        crate::enhanced_furnaces::decorate(self.id, self.name, &mut components);
         if self.id == crate::factory::produce_collector::PRODUCE_COLLECTOR.id() {
-            components.insert("minecraft:lore".into(), crate::factory::produce_collector::lore());
+            components.insert(
+                "minecraft:lore".into(),
+                crate::factory::produce_collector::lore(),
+            );
         }
         crate::enchantment_machines::decorate(self.id, &mut components);
+        crate::ancient_altar::decorate(self.id, &mut components);
         if let Some(texture) = &self.texture {
             components.insert(
                 "minecraft:profile".into(),
-        crate::ancient_altar::decorate(self.id, &mut components);
                 Tag::compound([
                     ("id", Tag::IntArray(texture.profile.into())),
                     (
@@ -866,6 +869,7 @@ pub(crate) fn network_item(id: &str) -> Option<Kind> {
         SOLAR_GENERATOR,
         IGNITION_CHAMBER,
         crate::factory::produce_collector::PRODUCE_COLLECTOR,
+        crate::factory::tree_growth::TREE_GROWTH_ACCELERATOR,
         crate::advanced_processing::CRUCIBLE,
         crate::auto_anvil::DUCT_TAPE,
         crate::enchantment_machines::WITHER_PROOF_OBSIDIAN,
@@ -883,6 +887,7 @@ pub(crate) fn network_item(id: &str) -> Option<Kind> {
     .or_else(|| crate::heated_pressure::network_item(id))
     .or_else(|| crate::electric_processing::machine(id).map(|spec| spec.item))
     .or_else(|| crate::advanced_processing::machine(id).map(|spec| spec.item))
+    .or_else(|| crate::enhanced_furnaces::by_id(id).map(|furnace| furnace.item))
     .or_else(|| crate::thermal_machines::item(id))
     .or_else(|| crate::geology::network_item(id))
     .or_else(|| {
@@ -891,7 +896,6 @@ pub(crate) fn network_item(id: &str) -> Option<Kind> {
         };
         [XP_COLLECTOR, FLASK_OF_KNOWLEDGE, FILLED_FLASK_OF_KNOWLEDGE]
             .into_iter()
-    .or_else(|| crate::enhanced_furnaces::by_id(id).map(|furnace| furnace.item))
             .find(|kind| kind.id() == id)
     })
     .or_else(|| crate::factory::reactors::reactor(id).map(|spec| spec.item))

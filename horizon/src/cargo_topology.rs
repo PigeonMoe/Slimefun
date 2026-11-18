@@ -221,6 +221,7 @@ enum InventoryKind {
     TrashCan,
     ReactorPort,
     ExperienceCollector,
+    TreeGrowthAccelerator,
     Factory { smeltery: bool },
     Smelter(&'static str),
     Brewer,
@@ -249,6 +250,7 @@ impl InventoryKind {
             Self::TrashCan => 0..0,
             Self::ReactorPort => 6.min(size)..7.min(size),
             Self::ExperienceCollector => 0..3.min(size),
+            Self::TreeGrowthAccelerator => 0..0,
             Self::Factory { .. } => 2..4.min(size),
             Self::Smelter(_) => 2..3.min(size),
             Self::Brewer => 0..3.min(size),
@@ -268,6 +270,7 @@ impl InventoryKind {
                 }
             }
             Self::ExperienceCollector => 0..0,
+            Self::TreeGrowthAccelerator => 0..size,
             Self::Smelter(recipe) => {
                 let fuel = host
                     .item_burn_time(stack.item())
@@ -350,6 +353,9 @@ fn attached_inventory(
     if let Some(id) = factory_identity(host, level, pos) {
         if id == crate::factory::experience_collector::XP_COLLECTOR.id() {
             return Some((pos, InventoryKind::ExperienceCollector));
+        }
+        if id == crate::factory::tree_growth::TREE_GROWTH_ACCELERATOR.id() {
+            return Some((pos, InventoryKind::TreeGrowthAccelerator));
         }
         if id == crate::factory::reactors::REACTOR_ACCESS_PORT.id() {
             return Some((pos, InventoryKind::ReactorPort));

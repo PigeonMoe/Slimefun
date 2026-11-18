@@ -39,6 +39,8 @@ pub(crate) mod fluid_pump;
 pub(crate) mod produce_collector;
 #[path = "reactors.rs"]
 pub(crate) mod reactors;
+#[path = "tree_growth.rs"]
+pub(crate) mod tree_growth;
 
 type Position = [i32; 3];
 const SLOTS: [&str; 8] = ["19", "20", "24", "25", "10", "11", "28", "29"];
@@ -124,6 +126,7 @@ enum RecipeFamily {
     FluidPump,
     ExperienceCollector,
     ProduceCollector,
+    TreeGrowthAccelerator,
     Reactor(&'static reactors::Reactor),
     ReactorPort,
 }
@@ -301,6 +304,18 @@ impl FactoryViewers {
 impl ElectricMachine {
     pub fn for_item(id: &str) -> Option<Self> {
         use RecipeFamily::{Furnace, HeatedPressure, IngotPulverizer, OreGrinder};
+        if id == tree_growth::TREE_GROWTH_ACCELERATOR.id() {
+            return Some(Self {
+                id: tree_growth::TREE_GROWTH_ACCELERATOR.id(),
+                carrier: tree_growth::TREE_GROWTH_ACCELERATOR.material(),
+                title: "Tree Growth Accelerator",
+                cost: tree_growth::COST,
+                work_ticks: 0,
+                research: &tree_growth::RESEARCH,
+                family: RecipeFamily::TreeGrowthAccelerator,
+                speed: 1,
+            });
+        }
         if id == produce_collector::PRODUCE_COLLECTOR.id() {
             return Some(Self {
                 id: produce_collector::PRODUCE_COLLECTOR.id(),
@@ -522,6 +537,9 @@ impl ElectricMachine {
         if matches!(self.family, RecipeFamily::ExperienceCollector) {
             return experience_collector::MENU_SLOTS;
         }
+        if matches!(self.family, RecipeFamily::TreeGrowthAccelerator) {
+            return tree_growth::MENU_SLOTS;
+        }
         if self.reactor_menu() {
             return reactors::SLOTS;
         }
@@ -536,6 +554,9 @@ impl ElectricMachine {
     fn input_slot(self, index: usize) -> bool {
         if matches!(self.family, RecipeFamily::ExperienceCollector) {
             return false;
+        }
+        if matches!(self.family, RecipeFamily::TreeGrowthAccelerator) {
+            return index < tree_growth::MENU_SLOTS.len();
         }
         if self.reactor_menu() {
             return index < 6;
@@ -553,6 +574,7 @@ impl ElectricMachine {
 }
 
 pub(crate) fn register(registrar: &mut dyn mod_api::Registrar) {
+    tree_growth::register(registrar);
     for material in [
         "minecraft:furnace",
         "minecraft:smoker",
@@ -706,9 +728,14 @@ fn menu_items(
     if furnace.reactor_menu() {
         return reactors::menu_items(host, data, furnace);
     }
-    if matches!(furnace.family, RecipeFamily::ExperienceCollector) {
-        let mut items = vec![display_item(host, "minecraft:purple_stained_glass_pane", " "); 27];
-        for (index, &slot) in experience_collector::MENU_SLOTS.iter().enumerate() {
+    let small_menu_pane = match furnace.family {
+        RecipeFamily::ExperienceCollector => Some("minecraft:purple_stained_glass_pane"),
+        RecipeFamily::TreeGrowthAccelerator => Some("minecraft:cyan_stained_glass_pane"),
+        _ => None,
+    };
+    if let Some(pane) = small_menu_pane {
+        let mut items = vec![display_item(host, pane, " "); 27];
+        for (index, &slot) in furnace.menu_slots().iter().enumerate() {
             items[slot] = stack_in(host, data, index);
         }
         return items;
@@ -784,6 +811,7 @@ fn menu_items(
                 }
                 RecipeFamily::Reactor(_)
                 | RecipeFamily::ReactorPort
+                | RecipeFamily::TreeGrowthAccelerator
                 | RecipeFamily::ExperienceCollector => return items,
             };
             let mut bar = display_item(host, icon, &format!("{progress}%"));
@@ -1377,6 +1405,7 @@ fn find_recipe(
         | RecipeFamily::FluidPump
         | RecipeFamily::ExperienceCollector
         | RecipeFamily::ProduceCollector
+        | RecipeFamily::TreeGrowthAccelerator
         | RecipeFamily::Reactor(_)
         | RecipeFamily::ReactorPort => None,
     }?;

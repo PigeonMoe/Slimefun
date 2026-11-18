@@ -13,7 +13,7 @@ use mod_api::{
 };
 
 use crate::{
-    factory::{experience_collector, fluid_pump, reactors},
+    factory::{experience_collector, fluid_pump, reactors, tree_growth},
     geology,
     items::{item_id, network_item},
     machine::Settings,
@@ -345,9 +345,9 @@ impl Node {
             | Component::TrashCan
             | Component::ManualCrucible
             | Component::IgnitionChamber
+            | Component::EnhancedFurnace
             | Component::DuctTape
             | Component::WitherProofObsidian
-            | Component::EnhancedFurnace
             | Component::ReactorPort => Network::Independent,
             _ => Network::Cargo,
         }
@@ -380,9 +380,9 @@ fn accepts_carrier(component: Component, actual: &str) -> bool {
     let expected = match component {
         Component::ManualCrucible => return crate::crucible::carrier(actual),
         Component::IgnitionChamber => return actual == crate::items::IGNITION_CHAMBER.material(),
+        Component::EnhancedFurnace => return actual == "minecraft:furnace",
         Component::ReactorPort => return actual == reactors::REACTOR_ACCESS_PORT.material(),
         Component::WitherProofObsidian => {
-        Component::EnhancedFurnace => return actual == "minecraft:furnace",
             return actual == crate::enchantment_machines::WITHER_PROOF_OBSIDIAN.material();
         }
         Component::SolarGenerator { .. } => ["minecraft:daylight_detector"; 2],
@@ -1027,6 +1027,19 @@ pub(crate) fn tick(
             gps_signals.insert(pos, signal);
         }
         if let Component::ElectricMachine { .. } = node.component {
+            if node.id == tree_growth::TREE_GROWTH_ACCELERATOR.id() {
+                let target = host.transaction(|host, tx| {
+                    let mut data = block_data(host, level, pos).ok_or(())?;
+                    data.charge = data.charge.checked_sub(tree_growth::COST).ok_or(())?;
+                    let target = tree_growth::stage(host, tx, level, pos).ok_or(())?;
+                    write_data(host, pos, data).map_err(|_| ())?;
+                    Ok::<_, ()>(target)
+                });
+                if let Ok(target) = target {
+                    tree_growth::grow(host, level, target);
+                }
+                continue;
+            }
             let _ = host.transaction(|host, tx| {
                 let mut data = block_data(host, level, pos).ok_or(())?;
                 if node.id == fluid_pump::FLUID_PUMP.id() {
