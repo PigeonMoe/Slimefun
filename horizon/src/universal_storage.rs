@@ -624,16 +624,20 @@ mod tests {
             let mut inventory = live(host, "SHARED").unwrap().unwrap();
             assert_eq!(inventory.items.get(&17), Some(&item));
             assert_eq!(extract_slot(&mut inventory.items, 17, &resource, 2), 2);
+            assert_eq!(insert_slot(host, &mut inventory.items, 8, &resource, 1), 1);
             save(host, "SHARED", &inventory)
         })
         .unwrap();
         host.attachments = mod_api::Attachments::from_nbt(host.attachments.to_nbt());
         let active = live(&mut host, "SHARED").unwrap().unwrap();
         assert!(active.layout.has(17));
-        assert!(active.items.is_empty());
+        assert_eq!(active.items.get(&8), resource.to_stack(1).as_ref());
         assert!(live_stack(&mut host, "SHARED", 17).is_none());
         assert!(!restore_once(&mut host, "SHARED", |_| original()).unwrap());
-        assert!(live(&mut host, "SHARED").unwrap().unwrap().items.is_empty());
+        assert_eq!(
+            live(&mut host, "SHARED").unwrap().unwrap().items,
+            active.items
+        );
 
         let mut records = INVENTORIES
             .get_existing(&mut host as &mut dyn ServerHost, Holder::Server)
