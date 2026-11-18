@@ -209,6 +209,7 @@ impl ItemPart for NetworkPlacement {
         if let HostSide::Server(host) = host {
             if crate::crucible::refuses_placement(host, event)
                 || crate::composter::refuses_placement(host, event)
+                || crate::auto_crafter::refuses_placement(host, event)
                 || cargo_topology::block_invalid_placement(HostSide::Server(host), event)
             {
                 return Some(InteractionResult::Fail);
@@ -485,7 +486,12 @@ impl Networks {
                 cargo.imported_paper = true;
             }
         }
-        if node.component == Component::TrashCan {
+        if crate::auto_crafter::is_machine(id) {
+            host.transaction(|host, _| {
+                crate::auto_crafter::restore_paper(host, level, pos, row)?;
+                self.register(host, level, pos, node, data, true)
+            })?;
+        } else if node.component == Component::TrashCan {
             host.transaction(|host, _| {
                 trash::restore(host, pos, row)?;
                 self.register(host, level, pos, node, data, true)
@@ -1046,6 +1052,21 @@ pub(crate) fn tick(
             gps_signals.insert(pos, signal);
         }
         if let Component::ElectricMachine { .. } = node.component {
+            if crate::auto_crafter::is_machine(&node.id) {
+                let crafted = host.transaction(|host, tx| {
+                    let mut data = block_data(host, level, pos).ok_or(())?;
+                    data.charge = data
+                        .charge
+                        .checked_sub(crate::auto_crafter::COST)
+                        .ok_or(())?;
+                    crate::auto_crafter::stage(host, tx, level, pos)?;
+                    write_data(host, pos, data).map_err(|_| ())
+                });
+                if crafted.is_ok() {
+                    crate::auto_crafter::complete(host, level, pos);
+                }
+                continue;
+            }
             if node.id == tree_growth::TREE_GROWTH_ACCELERATOR.id() {
                 let target = host.transaction(|host, tx| {
                     let mut data = block_data(host, level, pos).ok_or(())?;

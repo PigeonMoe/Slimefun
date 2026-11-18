@@ -427,6 +427,9 @@ fn restore_network(
         .and_then(toml::Value::as_str)
         .ok_or("The Paper block has no Slimefun ID.")?;
     let mut networks = networks.lock().unwrap();
+    if crate::auto_crafter::is_machine(id) {
+        return networks.restore(host, level, pos, id, metadata, row);
+    }
     if !matches!(
         Component::for_item(id),
         Some(

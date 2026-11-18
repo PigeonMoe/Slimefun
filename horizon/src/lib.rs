@@ -14,6 +14,7 @@ mod advanced_processing;
 mod ancient_altar;
 mod auto_anvil;
 mod auto_brewer;
+mod auto_crafter;
 mod backpacks;
 mod book_binder;
 mod circuits;
@@ -229,6 +230,7 @@ impl Hooks for Slimefun {
         factory::register(registrar);
         backpacks::register(registrar);
         ancient_altar::register(registrar);
+        auto_crafter::register(registrar);
         self.universal.register(registrar);
     }
 
@@ -553,13 +555,19 @@ impl Hooks for Slimefun {
         }
         if event.click.hand == Hand::Main
             && let Some(level) = player.entity().level(host)
-            && ancient_altar::use_at(
+            && (auto_crafter::use_at(
                 host,
                 player,
                 level,
                 event.click.pos,
                 *event.use_item != TriState::False,
-            )
+            ) || ancient_altar::use_at(
+                host,
+                player,
+                level,
+                event.click.pos,
+                *event.use_item != TriState::False,
+            ))
         {
             *event.cancellation_result = InteractionResult::Consume;
             return Flow::Cancel;
@@ -690,11 +698,13 @@ impl Hooks for Slimefun {
     }
 
     fn menu_clicked(&self, host: &mut dyn ServerHost, event: &mut mod_api::MenuClickedEvent) {
+        auto_crafter::clicked(host, event);
         factory::VIEWERS.clicked(host, event);
         network_runtime::menu_click(&self.networks, host, event);
     }
 
     fn menu_closed(&self, _: &mut dyn ServerHost, event: &mut mod_api::MenuClosedEvent) {
+        auto_crafter::closed(event);
         self.backpacks.closed(event);
         self.universal.closed(event);
         factory::VIEWERS.closed(event);
@@ -754,6 +764,7 @@ impl Hooks for Slimefun {
     }
 
     fn server_stopping(&self, _: &mut dyn ServerHost, _: &mut ServerStoppingEvent) {
+        auto_crafter::clear();
         self.backpacks.clear();
         self.universal.clear();
         factory::VIEWERS.clear();

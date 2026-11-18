@@ -143,7 +143,7 @@ pub(crate) fn try_deposit_checked(
     })
 }
 
-fn double_chest_partner(
+pub(crate) fn double_chest_partner(
     [x, y, z]: [i32; 3],
     facing: Option<&str>,
     side: Option<&str>,

@@ -40,6 +40,12 @@ pub(crate) enum Component {
 
 impl Component {
     pub(crate) fn for_item(id: &str) -> Option<Self> {
+        if crate::auto_crafter::is_machine(id) {
+            return Some(Self::ElectricMachine {
+                capacity: crate::auto_crafter::CAPACITY,
+                carrier: "minecraft:player_head",
+            });
+        }
         if crate::enhanced_furnaces::by_id(id).is_some() {
             return Some(Self::EnhancedFurnace);
         }

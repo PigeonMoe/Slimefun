@@ -823,6 +823,27 @@ pub(crate) fn prepare_craft(
     Ok(())
 }
 
+pub(crate) fn prepare_automated_craft<'a>(
+    host: &mut dyn ServerHost,
+    tx: &Transaction,
+    mut inputs: impl Iterator<Item = &'a ItemStack>,
+    output: &mut ItemStack,
+) -> Result<(), String> {
+    let Some((size, _)) = item_id(output).as_deref().and_then(tier) else {
+        return Ok(());
+    };
+    let Some(source) = inputs.find(|stack| item_id(stack).as_deref().and_then(tier).is_some())
+    else {
+        return Ok(());
+    };
+    if let (Binding::Named(id), old_size) = backpack_item(host, source)? {
+        upgrade_bound(host, tx, id, old_size, size)?;
+        assign_item_id(output, id)?;
+    }
+    carry_soulbound(source, output)?;
+    Ok(())
+}
+
 const SOULBOUND_KEY: &str = "slimefun:soulbound";
 
 fn soulbound_marker(source: &ItemStack) -> Option<Tag> {

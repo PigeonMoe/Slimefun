@@ -351,6 +351,9 @@ fn attached_inventory(
         return Some((pos, InventoryKind::TrashCan));
     }
     if let Some(id) = factory_identity(host, level, pos) {
+        if crate::auto_crafter::is_machine(&id) {
+            return None;
+        }
         if id == crate::factory::experience_collector::XP_COLLECTOR.id() {
             return Some((pos, InventoryKind::ExperienceCollector));
         }

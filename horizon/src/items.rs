@@ -143,6 +143,7 @@ impl SlimefunItem {
         }
         crate::enchantment_machines::decorate(self.id, &mut components);
         crate::ancient_altar::decorate(self.id, &mut components);
+        crate::auto_crafter::decorate(self.id, &mut components);
         if let Some(texture) = &self.texture {
             components.insert(
                 "minecraft:profile".into(),
@@ -888,6 +889,7 @@ pub(crate) fn network_item(id: &str) -> Option<Kind> {
     .into_iter()
     .find(|kind| kind.id() == id)
     .or_else(|| crate::network_recipes::network_item(id))
+    .or_else(|| crate::auto_crafter::item_by_id(id))
     .or_else(|| crate::heated_pressure::network_item(id))
     .or_else(|| crate::electric_processing::machine(id).map(|spec| spec.item))
     .or_else(|| crate::advanced_processing::machine(id).map(|spec| spec.item))
