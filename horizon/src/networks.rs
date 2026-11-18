@@ -71,7 +71,13 @@ impl Component {
             "CARGO_NODE_INPUT" => Self::CargoInput,
             "CARGO_NODE_OUTPUT" => Self::CargoOutput { advanced: false },
             "CARGO_NODE_OUTPUT_ADVANCED" => Self::CargoOutput { advanced: true },
-            _ => return None,
+            _ => {
+                let machine = crate::electric_processing::machine(id)?;
+                Self::ElectricMachine {
+                    capacity: machine.capacity,
+                    carrier: machine.item.material(),
+                }
+            }
         })
     }
 

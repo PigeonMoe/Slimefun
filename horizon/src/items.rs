@@ -48,7 +48,7 @@ impl Kind {
         }
     }
 
-    fn material(self) -> &'static str {
+    pub(crate) fn material(self) -> &'static str {
         match self {
             Self::Vanilla(id) => id,
             Self::Slimefun(item) => item.material,
@@ -852,6 +852,7 @@ pub(crate) fn network_item(id: &str) -> Option<Kind> {
     .find(|kind| kind.id() == id)
     .or_else(|| crate::network_recipes::network_item(id))
     .or_else(|| crate::heated_pressure::network_item(id))
+    .or_else(|| crate::electric_processing::machine(id).map(|spec| spec.item))
 }
 
 item!(

@@ -12,6 +12,7 @@ use mod_api::{
 
 mod circuits;
 mod compressor;
+mod electric_processing;
 mod factory;
 mod gold_pan;
 mod hand_machine;
@@ -42,7 +43,6 @@ struct Slimefun {
     rolls: Rolls,
     chest: Mutex<Option<ItemKey>>,
     networks: Arc<Mutex<network_runtime::Networks>>,
-    network_item_keys: Mutex<Option<[ItemKey; 4]>>,
 }
 
 impl Default for Slimefun {
@@ -53,7 +53,6 @@ impl Default for Slimefun {
             rolls: Rolls::default(),
             chest: Mutex::new(None),
             networks: Arc::default(),
-            network_item_keys: Mutex::new(None),
         }
     }
 }
@@ -87,6 +86,21 @@ impl Slimefun {
             settings.legacy_ore_grinder = value;
         }
         if let Some(value) = table
+            .get("legacy-dust-washer")
+            .and_then(toml::Value::as_bool)
+        {
+            settings.legacy_dust_washer = value;
+        }
+        if let Some(values) = table
+            .get("electric-gold-pan-override-output-limit")
+            .and_then(toml::Value::as_array)
+            && let [first, second, third] = values.as_slice()
+            && let (Some(first), Some(second), Some(third)) =
+                (first.as_bool(), second.as_bool(), third.as_bool())
+        {
+            settings.gold_pan_override_output_limit = [first, second, third];
+        }
+        if let Some(value) = table
             .get("fire-breaking-chance")
             .and_then(toml::Value::as_integer)
             && let Ok(value @ 0..=100) = u32::try_from(value)
@@ -118,19 +132,20 @@ impl Hooks for Slimefun {
         let chest = registrar.item_key("minecraft:chest");
         registrar.item_part(chest, output_chest::ChestPlacement);
         *self.chest.lock().unwrap() = Some(chest);
-        let network_keys = [
-            registrar.item_key("minecraft:player_head"),
-            registrar.item_key("minecraft:daylight_detector"),
-            registrar.item_key("minecraft:furnace"),
-            registrar.item_key("minecraft:light_gray_stained_glass"),
-        ];
-        for key in network_keys {
+        for id in [
+            "minecraft:player_head",
+            "minecraft:daylight_detector",
+            "minecraft:furnace",
+        ]
+        .into_iter()
+        .chain(network_runtime::PLAIN_CARRIERS.iter().copied())
+        {
+            let key = registrar.item_key(id);
             registrar.item_part(
                 key,
                 network_runtime::NetworkPlacement(self.networks.clone()),
             );
         }
-        *self.network_item_keys.lock().unwrap() = Some(network_keys);
         network_runtime::register_cargo(registrar);
         factory::register(registrar);
     }
@@ -139,7 +154,7 @@ impl Hooks for Slimefun {
         event.configs.push(Config::new(
             "slimefun",
             ConfigKind::Server,
-            "double-ores = true\nlegacy-ore-washer = false\nlegacy-ore-grinder = true\nfire-breaking-chance = 34\noutput-chest-enabled = true\ndrop-from-golems = true\ngolem-drop-chance = 75\n",
+            "double-ores = true\nlegacy-ore-washer = false\nlegacy-dust-washer = false\nlegacy-ore-grinder = true\nelectric-gold-pan-override-output-limit = [false, false, false]\nfire-breaking-chance = 34\noutput-chest-enabled = true\ndrop-from-golems = true\ngolem-drop-chance = 75\n",
         ));
     }
 
@@ -155,9 +170,7 @@ impl Hooks for Slimefun {
         if let Some(chest) = *self.chest.lock().unwrap() {
             output_chest::restore_drop(level, event, chest);
         }
-        if let Some(keys) = *self.network_item_keys.lock().unwrap() {
-            network_runtime::restore_drop(level, event, keys);
-        }
+        network_runtime::restore_drop(level, event);
         factory::restore_drops(level, event);
         Flow::Continue
     }
@@ -287,6 +300,7 @@ impl Hooks for Slimefun {
                 "For the Juicer, place a dispenser below a nether brick fence and glass above the fence. Put fruit in the dispenser and right-click the fence.".into(),
                 "Craft an Electric Furnace and connect it to a powered Energy Regulator. Open the furnace to load vanilla smelting ingredients.".into(),
                 "The Electric Ore Grinder uses Grind Stone and Ore Crusher recipes. The Electric Ingot Pulverizer reverses single-dust smeltery recipes.".into(),
+                "Power an Electric Gold Pan, Electric Dust Washer and Electric Ingot Factory to turn gravel into sifted ore, dust and ingots. The Electric Press compacts materials and parts.".into(),
                 "The Heated Pressure Chamber uses two input slots to refine uranium, blistering ingots, and fuel ingredients. Use /sf recipe to find its inputs.".into(),
                 "Wash Sifted Ore by placing a dispenser on a wooden fence with an empty cauldron below it and right-clicking the fence.".into(),
                 "For a Makeshift Smeltery use a wooden fence above a dispenser, bricks on opposite sides of the dispenser, and fire below it. Use a nether brick fence and nether bricks for the regular Smeltery.".into(),
@@ -409,7 +423,7 @@ impl Hooks for Slimefun {
     fn level_tick_post(&self, host: HostSide<'_>, event: &mut LevelTickPostEvent) {
         if let HostSide::Server(host) = host {
             let settings = *self.settings.lock().unwrap();
-            network_runtime::tick(&self.networks, host, event.level, settings);
+            network_runtime::tick(&self.networks, host, event.level, settings, &self.rolls);
             factory::VIEWERS.refresh(host, event.level);
         }
     }
@@ -458,12 +472,28 @@ fn describe_recipe(id: &str, double_ores: bool) -> Vec<String> {
         );
     }
 
+    for timed in electric_processing::PRESSING
+        .iter()
+        .filter(|timed| outputs(timed.recipe.output.kind.id()))
+    {
+        let recipe = timed.recipe;
+        lines.push(format!(
+            "Electric Press | {} × {} -> {} × {}",
+            recipe.input.count,
+            recipe.input.kind.id(),
+            recipe.output.count,
+            recipe.output.kind.id()
+        ));
+    }
+
     for &kind in WASHER_DUSTS {
         if outputs(kind.id()) {
-            lines.push(format!(
-                "Ore Washer | 1 × SIFTED_ORE -> 1 × {} (one of nine dusts)",
-                kind.id()
-            ));
+            for machine in ["Ore Washer", "Electric Dust Washer"] {
+                lines.push(format!(
+                    "{machine} | 1 × SIFTED_ORE -> 1 × {} (one of nine dusts)",
+                    kind.id()
+                ));
+            }
         }
     }
     for recipe in WASHING
@@ -478,15 +508,22 @@ fn describe_recipe(id: &str, double_ores: bool) -> Vec<String> {
             recipe.output.kind.id(),
         ));
     }
+    if outputs(items::SALT.id()) {
+        lines.push("Electric Dust Washer | 1 × minecraft:sand -> 1 × SALT".into());
+    }
+    if outputs(items::PURE_ORE_CLUSTER.id()) {
+        lines.push("Electric Dust Washer | 1 × PULVERIZED_ORE -> 1 × PURE_ORE_CLUSTER".into());
+    }
+
     for recipe in ALLOY_RECIPES
         .iter()
         .chain(smelting())
         .filter(|recipe| outputs(recipe.output.kind.id()))
     {
-        let name = if machine::makeshift_recipe(recipe) {
-            "Smeltery or Makeshift Smeltery"
+        let machines: &[&str] = if machine::makeshift_recipe(recipe) {
+            &["Smeltery or Makeshift Smeltery", "Electric Ingot Factory"]
         } else {
-            "Smeltery"
+            &["Smeltery"]
         };
         let inputs = recipe
             .inputs
@@ -494,11 +531,13 @@ fn describe_recipe(id: &str, double_ores: bool) -> Vec<String> {
             .map(|stack| format!("{} × {}", stack.count, stack.kind.id()))
             .collect::<Vec<_>>()
             .join(" + ");
-        lines.push(format!(
-            "{name} | {inputs} -> {} × {}",
-            recipe.output.count,
-            recipe.output.kind.id()
-        ));
+        for machine in machines {
+            lines.push(format!(
+                "{machine} | {inputs} -> {} × {}",
+                recipe.output.count,
+                recipe.output.kind.id()
+            ));
+        }
     }
     for pan in gold_pan::PANS {
         for &(weight, kind) in pan.drops {
@@ -509,11 +548,12 @@ fn describe_recipe(id: &str, double_ores: bool) -> Vec<String> {
                     .map(|&(target, _)| target)
                     .collect::<Vec<_>>()
                     .join(" or ");
-                lines.push(format!(
-                    "{} | {targets} -> 1 × {} ({weight}%)",
-                    pan.research.name,
-                    kind.id()
-                ));
+                for machine in [pan.research.name, "Electric Gold Pan"] {
+                    lines.push(format!(
+                        "{machine} | {targets} -> 1 × {} ({weight}%)",
+                        kind.id()
+                    ));
+                }
             }
         }
     }

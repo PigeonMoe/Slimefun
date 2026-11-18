@@ -13,11 +13,17 @@ use crate::recipes::{
     BETTER_ELECTRIC_FURNACE_RESEARCH, BETTER_HEATED_PRESSURE_CHAMBER_RESEARCH, CRUSHING, DOUBLING,
     ELECTRIC_FURNACES_RESEARCH, ELECTRIC_ORE_GRINDING_RESEARCH, GRINDING,
     HEATED_PRESSURE_CHAMBER_RESEARCH, HIGH_TIER_ELECTRIC_INGOT_MACHINES_RESEARCH,
-    MEDIUM_TIER_ELECTRIC_INGOT_MACHINES_RESEARCH, Research, SingleRecipe, Stack, smelting,
+    MEDIUM_TIER_ELECTRIC_INGOT_MACHINES_RESEARCH, Research, SingleRecipe, Stack, WASHER_DUSTS,
+    smelting,
 };
 use crate::{
+    electric_processing::{self, Family, MachineSpec},
+    gold_pan::PANS,
+    items::{GOLD_PAN, Kind, PULVERIZED_ORE, PURE_ORE_CLUSTER, SALT, SIFTED_ORE},
     machine::{Settings, makeshift_recipe},
-    network_runtime, research,
+    network_runtime,
+    random::Rolls,
+    research,
 };
 
 type Position = [i32; 3];
@@ -78,6 +84,7 @@ fn chunk_pos([x, _, z]: Position) -> [i32; 2] {
 #[derive(Clone, Copy)]
 pub(crate) struct ElectricMachine {
     id: &'static str,
+    carrier: &'static str,
     pub title: &'static str,
     pub cost: u32,
     pub work_ticks: u32,
@@ -92,6 +99,7 @@ enum RecipeFamily {
     OreGrinder,
     IngotPulverizer,
     HeatedPressure,
+    Processing(&'static MachineSpec),
 }
 
 #[derive(Clone, Copy)]
@@ -185,7 +193,24 @@ impl FactoryViewers {
 impl ElectricMachine {
     pub fn for_item(id: &str) -> Option<Self> {
         use RecipeFamily::{Furnace, HeatedPressure, IngotPulverizer, OreGrinder};
-        let id = crate::items::network_item(id)?.id();
+        if let Some(spec) = electric_processing::machine(id) {
+            return Some(Self {
+                id: spec.item.id(),
+                carrier: spec.item.material(),
+                title: spec.title,
+                cost: spec.cost,
+                work_ticks: if matches!(spec.family, Family::IngotFactory) {
+                    16 / spec.speed
+                } else {
+                    0
+                },
+                research: spec.research,
+                family: RecipeFamily::Processing(spec),
+                speed: spec.speed,
+            });
+        }
+        let item = crate::items::network_item(id)?;
+        let id = item.id();
         let (title, cost, work_ticks, research, family) = match id {
             "ELECTRIC_FURNACE" => (
                 "Electric Furnace",
@@ -255,6 +280,7 @@ impl ElectricMachine {
         // Paper's MachineRecipe doubles recipe seconds, then AContainer divides by speed.
         Some(Self {
             id,
+            carrier: item.material(),
             title,
             cost,
             work_ticks,
@@ -268,30 +294,34 @@ impl ElectricMachine {
         })
     }
 
-    fn carrier(self) -> &'static str {
-        if matches!(self.family, RecipeFamily::HeatedPressure) {
-            "minecraft:light_gray_stained_glass"
-        } else {
-            "minecraft:furnace"
-        }
+    fn accepts_carrier(self, block: &str) -> bool {
+        block == self.carrier
+            || (self.carrier == "minecraft:player_head" && block == "minecraft:player_wall_head")
     }
 
     fn storage(self, level: LevelRef, pos: Position) -> Storage {
         Storage {
             level,
             pos,
-            plain: matches!(self.family, RecipeFamily::HeatedPressure),
+            plain: network_runtime::is_plain_carrier(self.carrier),
         }
     }
 }
 
 pub(crate) fn register(registrar: &mut dyn mod_api::Registrar) {
-    for material in ["minecraft:furnace", "minecraft:light_gray_stained_glass"] {
+    for material in [
+        "minecraft:furnace",
+        "minecraft:player_head",
+        "minecraft:player_wall_head",
+    ]
+    .into_iter()
+    .chain(network_runtime::PLAIN_CARRIERS.iter().copied())
+    {
         let block = registrar.block_key(material);
         registrar.block_capability_before_game(&ITEMS, &block, move |host, at, _, entity| {
             let id = network_runtime::factory_identity(host, at.level, at.pos)?;
-            let machine =
-                ElectricMachine::for_item(&id).filter(|machine| machine.carrier() == material)?;
+            let machine = ElectricMachine::for_item(&id)
+                .filter(|machine| machine.accepts_carrier(material))?;
             let storage = machine.storage(at.level, at.pos);
             if storage.plain == entity.is_some() {
                 return None;
@@ -328,7 +358,7 @@ pub(crate) fn open(
     let Some(data) = data_at(host, storage) else {
         return true;
     };
-    let Some(block) = host.block_key(furnace.carrier()) else {
+    let Some(block) = host.block_key(furnace.carrier) else {
         return true;
     };
     let entity = host.block_entity(level, pos);
@@ -430,6 +460,12 @@ fn menu_items(
                 RecipeFamily::OreGrinder | RecipeFamily::IngotPulverizer => {
                     ("minecraft:iron_pickaxe", 249)
                 }
+                RecipeFamily::Processing(spec) => match spec.family {
+                    Family::Press => ("minecraft:iron_hoe", 249),
+                    Family::GoldPan => ("minecraft:diamond_shovel", 1560),
+                    Family::DustWasher => ("minecraft:golden_shovel", 31),
+                    Family::IngotFactory => ("minecraft:flint_and_steel", 63),
+                },
             };
             let mut bar = display_item(host, icon, &format!("{progress}%"));
             if let Some(stack) = &mut bar {
@@ -729,6 +765,11 @@ impl RecipeRun {
     fn quantity(&self) -> u32 {
         self.inputs.iter().flatten().map(|(_, amount)| amount).sum()
     }
+
+    fn with_work_ticks(mut self, ticks: u32) -> Self {
+        self.work_override = Some(ticks);
+        self
+    }
 }
 
 fn furnace_recipe(host: &dyn Host, inputs: &[Option<ItemStack>; 2]) -> Option<RecipeRun> {
@@ -767,12 +808,12 @@ fn grinder_recipes(settings: Settings) -> impl Iterator<Item = SingleRecipe> {
         }))
 }
 
-fn pulverizer_recipes() -> impl Iterator<Item = SingleRecipe> {
+fn dust_to_ingot_recipes() -> impl Iterator<Item = SingleRecipe> {
     smelting()
         .filter(|recipe| makeshift_recipe(recipe))
         .map(|recipe| SingleRecipe {
-            input: recipe.output,
-            output: recipe.inputs[0],
+            input: recipe.inputs[0],
+            output: recipe.output,
         })
 }
 
@@ -833,11 +874,84 @@ fn heated_recipe(
     })
 }
 
+fn processing_recipe(
+    host: &dyn Host,
+    data: &Compound,
+    inputs: &[Option<ItemStack>; 2],
+    spec: &MachineSpec,
+    settings: Settings,
+    mut roll: impl FnMut(u32) -> Option<u32>,
+) -> Option<RecipeRun> {
+    match spec.family {
+        Family::Press => electric_processing::PRESSING.iter().find_map(|timed| {
+            let planned = single_recipe(host, inputs, std::iter::once(timed.recipe), false)?;
+            Some(planned.with_work_ticks(timed.seconds * 2 / spec.speed))
+        }),
+        Family::IngotFactory => single_recipe(host, inputs, dust_to_ingot_recipes(), false),
+        Family::GoldPan => {
+            if !settings.gold_pan_override_output_limit[spec.tier - 1] && !free_output(host, data) {
+                return None;
+            }
+            INPUT.into_iter().zip(inputs).find_map(|(slot, input)| {
+                let input = input.as_ref().filter(|item| {
+                    item.components().is_none() && item.damage_component().is_none()
+                })?;
+                let material = input.item().id(host);
+                let pan = PANS
+                    .iter()
+                    .find(|pan| pan.target_sound(&material).is_some())?;
+                let output = pan.drop_for(roll(100)?)?.stack(host, 1)?;
+                let seconds = if pan.item == GOLD_PAN { 3 } else { 4 };
+                fits(host, data, &output).then(|| {
+                    RecipeRun::single(slot, input.clone(), 1, output)
+                        .with_work_ticks((seconds / spec.speed) * 2)
+                })
+            })
+        }
+        Family::DustWasher => {
+            for (slot, input) in INPUT.into_iter().zip(inputs) {
+                let Some(input) = input.as_ref() else {
+                    continue;
+                };
+                let kind = if SIFTED_ORE.matches(host, input) {
+                    if !settings.legacy_dust_washer && !free_output(host, data) {
+                        return None;
+                    }
+                    *WASHER_DUSTS.get(roll(WASHER_DUSTS.len() as u32)? as usize)?
+                } else if PULVERIZED_ORE.matches(host, input) {
+                    PURE_ORE_CLUSTER
+                } else if Kind::Vanilla("minecraft:sand").matches(host, input) {
+                    SALT
+                } else {
+                    continue;
+                };
+                let Some(output) = kind.stack(host, 1) else {
+                    continue;
+                };
+                if fits(host, data, &output) {
+                    return Some(
+                        RecipeRun::single(slot, input.clone(), 1, output)
+                            .with_work_ticks((4 / spec.speed) * 2),
+                    );
+                }
+            }
+            None
+        }
+    }
+}
+
+fn free_output(host: &dyn Host, data: &Compound) -> bool {
+    OUTPUT
+        .into_iter()
+        .any(|index| stack_in(host, data, index).is_none())
+}
+
 fn find_recipe(
     host: &dyn Host,
     data: &Compound,
     machine: ElectricMachine,
     settings: Settings,
+    roll: impl FnMut(u32) -> Option<u32>,
 ) -> Option<RecipeRun> {
     let inputs = INPUT.map(|index| stack_in(host, data, index));
     if inputs.iter().all(Option::is_none) {
@@ -851,8 +965,19 @@ fn find_recipe(
             grinder_recipes(settings),
             !settings.legacy_ore_grinder,
         ),
-        RecipeFamily::IngotPulverizer => single_recipe(host, &inputs, pulverizer_recipes(), false),
+        RecipeFamily::IngotPulverizer => single_recipe(
+            host,
+            &inputs,
+            dust_to_ingot_recipes().map(|recipe| SingleRecipe {
+                input: recipe.output,
+                output: recipe.input,
+            }),
+            false,
+        ),
         RecipeFamily::HeatedPressure => heated_recipe(host, &inputs, machine.speed),
+        RecipeFamily::Processing(spec) => {
+            processing_recipe(host, data, &inputs, spec, settings, roll)
+        }
     }?;
     fits(host, data, &run.output).then_some(run)
 }
@@ -863,6 +988,7 @@ pub(crate) fn tick(
     host: &mut dyn ServerHost,
     level: LevelRef,
     settings: Settings,
+    rolls: &Rolls,
     pos: Position,
     id: &str,
     charge: u32,
@@ -905,7 +1031,9 @@ pub(crate) fn tick(
         inputs,
         output,
         work_override,
-    } = find_recipe(host, &data, furnace, settings)?;
+    } = find_recipe(host, &data, furnace, settings, |bound| {
+        rolls.next(host, level, bound)
+    })?;
     let saved_result = output.to_nbt(host)?;
     let work_ticks = work_override.unwrap_or(furnace.work_ticks) as i32;
     host.transaction(|host, tx| {
@@ -941,12 +1069,9 @@ pub(crate) fn prepare_paper_inventory(
         Some(current) if current == id => {}
         Some(_) => return Err("A different electric machine is installed.".into()),
         None => {
-            let expected = host
-                .block_key(machine.carrier())
-                .ok_or("The machine carrier is unavailable.")?;
             if !level
                 .block_state(host, pos)
-                .is_some_and(|state| state.block() == expected)
+                .is_some_and(|state| machine.accepts_carrier(&state.block().id(host)))
             {
                 return Err("Load the matching Paper machine block first.".into());
             }
@@ -955,7 +1080,10 @@ pub(crate) fn prepare_paper_inventory(
                     "The machine location is occupied by a different block inventory.".into(),
                 );
             }
-            if !storage.plain {
+            if !storage.plain && host.block_entity(level, pos).is_none() {
+                return Err("The resident machine block entity is unavailable.".into());
+            }
+            if machine.carrier == "minecraft:furnace" {
                 if level.block_property(host, pos, "lit").as_deref() != Some("false") {
                     return Err("Load the original, unlit Paper furnace block first.".into());
                 }
@@ -1139,5 +1267,242 @@ mod tests {
         assert!(BLISTERING_INGOT.matches(&host, &standard.output));
         let upgraded = heated_recipe(&host, &inputs, 5).unwrap();
         assert_eq!(upgraded.work_override, Some(12));
+    }
+
+    fn recipe_host<const N: usize>(items: [&str; N]) -> FakeHost {
+        let mut host = FakeHost::new();
+        host.registries
+            .resolve_items(items.map(|id| Identifier::parse(id).unwrap()))
+            .unwrap();
+        host
+    }
+
+    fn test_recipe(
+        host: &dyn Host,
+        id: &str,
+        data: &Compound,
+        settings: Settings,
+        roll: impl FnMut(u32) -> Option<u32>,
+    ) -> Option<RecipeRun> {
+        find_recipe(
+            host,
+            data,
+            ElectricMachine::for_item(id).unwrap(),
+            settings,
+            roll,
+        )
+    }
+
+    #[test]
+    fn electric_press_preserves_registration_priority_quantities_and_speed() {
+        let host = recipe_host([
+            "minecraft:flint",
+            "minecraft:cobblestone",
+            "minecraft:glass",
+            "minecraft:glass_pane",
+        ]);
+        let mut data = Compound::new();
+        let flint = Kind::Vanilla("minecraft:flint");
+        let glass = Kind::Vanilla("minecraft:glass");
+        let settings = Settings::default();
+        let run = |data: &Compound| {
+            test_recipe(
+                &host,
+                "ELECTRIC_PRESS_2",
+                data,
+                settings,
+                |_| unreachable!(),
+            )
+        };
+        assert_eq!(electric_processing::PRESSING.len(), 39);
+        assert!(write_stack(
+            &host,
+            &mut data,
+            INPUT[0],
+            glass.stack(&host, 1)
+        ));
+        assert!(write_stack(
+            &host,
+            &mut data,
+            INPUT[1],
+            flint.stack(&host, 6)
+        ));
+        let cobble = run(&data).unwrap();
+        assert!(Kind::Vanilla("minecraft:cobblestone").matches(&host, &cobble.output));
+        assert_eq!(
+            (
+                cobble.quantity(),
+                cobble.output.count(),
+                cobble.work_override
+            ),
+            (6, 1, Some(2))
+        );
+        assert!(cobble.inputs[0].is_none());
+        assert!(write_stack(
+            &host,
+            &mut data,
+            INPUT[1],
+            flint.stack(&host, 5)
+        ));
+        let panes = run(&data).unwrap();
+        assert!(Kind::Vanilla("minecraft:glass_pane").matches(&host, &panes.output));
+        assert_eq!(
+            (panes.quantity(), panes.output.count(), panes.work_override),
+            (1, 3, Some(3))
+        );
+    }
+
+    #[test]
+    fn electric_panning_only_rolls_on_eligible_inputs_and_respects_tier_output_limits() {
+        let host = recipe_host([
+            "minecraft:flint",
+            "minecraft:brick",
+            "minecraft:gravel",
+            "minecraft:soul_soil",
+            "minecraft:quartz",
+        ]);
+        let mut data = Compound::new();
+        let flint = Kind::Vanilla("minecraft:flint");
+        let brick = Kind::Vanilla("minecraft:brick");
+        assert!(write_stack(
+            &host,
+            &mut data,
+            OUTPUT[0],
+            flint.stack(&host, 63)
+        ));
+        assert!(write_stack(
+            &host,
+            &mut data,
+            OUTPUT[1],
+            brick.stack(&host, 1)
+        ));
+        assert!(write_stack(
+            &host,
+            &mut data,
+            INPUT[0],
+            Kind::Vanilla("minecraft:gravel").stack(&host, 5)
+        ));
+        let mut settings = Settings::default();
+        assert!(
+            test_recipe(&host, "ELECTRIC_GOLD_PAN_2", &data, settings, |_| {
+                panic!("Paper never rolls when both output slots are occupied by default")
+            })
+            .is_none()
+        );
+        settings.gold_pan_override_output_limit[1] = true;
+        let rolled = test_recipe(&host, "ELECTRIC_GOLD_PAN_2", &data, settings, |bound| {
+            assert_eq!(bound, 100);
+            Some(0)
+        })
+        .unwrap();
+        assert_eq!((rolled.quantity(), rolled.work_override), (1, Some(2)));
+        assert!(flint.matches(&host, &rolled.output));
+
+        assert!(write_stack(&host, &mut data, OUTPUT[1], None));
+        assert!(write_stack(
+            &host,
+            &mut data,
+            INPUT[0],
+            brick.stack(&host, 1)
+        ));
+        assert!(write_stack(
+            &host,
+            &mut data,
+            INPUT[1],
+            Kind::Vanilla("minecraft:soul_soil").stack(&host, 4)
+        ));
+        let mut calls = 0;
+        let nether = test_recipe(&host, "ELECTRIC_GOLD_PAN_3", &data, settings, |_| {
+            calls += 1;
+            Some(0)
+        })
+        .unwrap();
+        assert_eq!(calls, 1);
+        assert!(nether.inputs[0].is_none());
+        assert!(Kind::Vanilla("minecraft:quartz").matches(&host, &nether.output));
+        assert_eq!(nether.work_override, Some(0));
+    }
+
+    #[test]
+    fn electric_gravel_washing_and_ingot_processing_follow_the_paper_chain() {
+        use crate::items::{LEAD_DUST, LEAD_INGOT};
+
+        let host = recipe_host([
+            "minecraft:brick",
+            "minecraft:gravel",
+            "minecraft:gunpowder",
+            "minecraft:sand",
+            "minecraft:sugar",
+            "minecraft:iron_ingot",
+        ]);
+        let mut data = Compound::new();
+        let mut settings = Settings::default();
+        let gravel = Kind::Vanilla("minecraft:gravel").stack(&host, 1);
+        assert!(write_stack(&host, &mut data, INPUT[0], gravel));
+        let sifted =
+            test_recipe(&host, "ELECTRIC_GOLD_PAN", &data, settings, |_| Some(60)).unwrap();
+        assert!(SIFTED_ORE.matches(&host, &sifted.output));
+
+        let washer = "ELECTRIC_DUST_WASHER_2";
+        assert!(write_stack(&host, &mut data, INPUT[0], Some(sifted.output)));
+        assert!(write_stack(
+            &host,
+            &mut data,
+            INPUT[1],
+            Kind::Vanilla("minecraft:sand").stack(&host, 1)
+        ));
+        assert!(write_stack(
+            &host,
+            &mut data,
+            OUTPUT[0],
+            LEAD_DUST.stack(&host, 63)
+        ));
+        assert!(write_stack(
+            &host,
+            &mut data,
+            OUTPUT[1],
+            SALT.stack(&host, 63)
+        ));
+        assert!(
+            test_recipe(&host, washer, &data, settings, |_| {
+                panic!("nonlegacy dust washing waits for an empty output slot")
+            })
+            .is_none()
+        );
+        settings.legacy_dust_washer = true;
+        let dust = test_recipe(&host, washer, &data, settings, |bound| {
+            assert_eq!(bound, 9);
+            Some(7)
+        })
+        .unwrap();
+        assert!(LEAD_DUST.matches(&host, &dust.output));
+        assert_eq!(dust.work_override, Some(4));
+
+        assert!(write_stack(&host, &mut data, INPUT[0], None));
+        let salt = test_recipe(
+            &host,
+            washer,
+            &data,
+            Settings::default(),
+            |_| unreachable!(),
+        )
+        .unwrap();
+        assert_eq!((salt.quantity(), salt.output.count()), (1, 1));
+        assert!(SALT.matches(&host, &salt.output));
+
+        data.clear();
+        assert!(write_stack(&host, &mut data, INPUT[0], Some(dust.output)));
+        let factory = ElectricMachine::for_item("ELECTRIC_INGOT_FACTORY_3").unwrap();
+        let ingot = find_recipe(&host, &data, factory, settings, |_| unreachable!()).unwrap();
+        assert!(LEAD_INGOT.matches(&host, &ingot.output));
+        assert_eq!(
+            (
+                ingot.quantity(),
+                ingot.output.count(),
+                factory.work_ticks,
+                factory.cost
+            ),
+            (1, 1, 2, 20)
+        );
     }
 }

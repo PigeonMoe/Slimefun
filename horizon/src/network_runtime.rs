@@ -16,6 +16,7 @@ use crate::{
     items::{item_id, network_item},
     machine::Settings,
     networks::Component,
+    random::Rolls,
     storage::{coordinates, encoded_dimension},
 };
 
@@ -28,7 +29,9 @@ mod plain_network;
 
 pub(crate) use cargo_menu::{menu_click, menu_closed, register as register_cargo, use_node};
 use cargo_topology::{CargoSettings, FILTER_SLOTS};
-pub(crate) use plain_network::observe_plain_change;
+pub(crate) use plain_network::{
+    CARRIERS as PLAIN_CARRIERS, is_carrier as is_plain_carrier, observe_plain_change,
+};
 
 type Position = [i32; 3];
 type Nodes = BTreeMap<Position, Node>;
@@ -138,20 +141,14 @@ impl ItemPart for NetworkPlacement {
     }
 }
 
-pub(crate) fn restore_drop(
-    level: &dyn LevelHost,
-    event: &mut BlockDropsEvent<'_>,
-    keys: [ItemKey; 4],
-) {
+pub(crate) fn restore_drop(level: &dyn LevelHost, event: &mut BlockDropsEvent<'_>) {
     if let Some(id) = plain_network::take_drop(level, event) {
-        if let Some(item) = network_item(&id) {
-            if let Some(drop) = event
-                .drops
-                .iter_mut()
-                .find(|drop| drop.stack.item() == keys[3])
-            {
+        if let Some(item) = network_item(&id)
+            && let Some(key) = level.item_key_by_name(item.material())
+        {
+            if let Some(drop) = event.drops.iter_mut().find(|drop| drop.stack.item() == key) {
                 item.decorate(&mut drop.stack);
-            } else if let Some(mut stack) = ItemStack::new(keys[3], 1) {
+            } else if let Some(mut stack) = ItemStack::new(key, 1) {
                 item.decorate(&mut stack);
                 let pos =
                     [event.pos.x, event.pos.y, event.pos.z].map(|value| f64::from(value) + 0.5);
@@ -177,12 +174,9 @@ pub(crate) fn restore_drop(
     let Some(item) = network_item(&id) else {
         return;
     };
-    let key = match Component::for_item(&id) {
-        Some(Component::SolarGenerator { .. }) => keys[1],
-        Some(Component::ElectricMachine { .. }) => keys[2],
-        _ => keys[0],
-    };
-    if let Some(drop) = event.drops.iter_mut().find(|drop| drop.stack.item() == key) {
+    if let Some(key) = level.item_key_by_name(item.material())
+        && let Some(drop) = event.drops.iter_mut().find(|drop| drop.stack.item() == key)
+    {
         item.decorate(&mut drop.stack);
     }
     if let Some(Tag::Compound(cargo)) = data.get(&"cargo".into())
@@ -267,6 +261,10 @@ impl Node {
         };
         let expected = match self.component {
             Component::SolarGenerator { .. } => ["minecraft:daylight_detector"; 2],
+            Component::ElectricMachine {
+                carrier: "minecraft:player_head",
+                ..
+            } => ["minecraft:player_head", "minecraft:player_wall_head"],
             Component::ElectricMachine { carrier, .. } => [carrier; 2],
             Component::CargoInput | Component::CargoOutput { .. } => {
                 ["minecraft:player_wall_head"; 2]
@@ -347,13 +345,7 @@ impl Networks {
             return Err("Load the matching Paper network block in the active dimension.".into());
         }
         let component = node.component;
-        if matches!(
-            component,
-            Component::ElectricMachine {
-                carrier: plain_network::CARRIER,
-                ..
-            }
-        ) {
+        if is_plain_machine(component) {
             plain_network::prepare_placement(host, level, pos)
                 .map_err(|_| "The block's previous machine state could not be cleared.")?;
         }
@@ -537,7 +529,7 @@ fn block_data(host: &mut dyn ServerHost, level: LevelRef, pos: Position) -> Opti
     }
     if level
         .block(host, pos)
-        .is_some_and(|actual| Some(actual) == host.block_key(plain_network::CARRIER))
+        .is_some_and(|actual| is_plain_carrier(&actual.id(host)))
     {
         return plain_network::read(host, level, pos);
     }
@@ -555,17 +547,15 @@ fn write_data(
     pos: Position,
     data: BlockData,
 ) -> Result<(), AttachmentError> {
-    if matches!(
-        Component::for_item(&data.id),
-        Some(Component::ElectricMachine {
-            carrier: plain_network::CARRIER,
-            ..
-        })
-    ) {
+    if Component::for_item(&data.id).is_some_and(is_plain_machine) {
         plain_network::write(host, pos, &data)
     } else {
         NETWORK_STATE.set(host, Holder::BlockEntity(pos), data)
     }
+}
+
+fn is_plain_machine(component: Component) -> bool {
+    matches!(component, Component::ElectricMachine { carrier, .. } if is_plain_carrier(carrier))
 }
 
 pub(crate) fn tick(
@@ -573,6 +563,7 @@ pub(crate) fn tick(
     host: &mut dyn ServerHost,
     level: LevelRef,
     settings: Settings,
+    rolls: &Rolls,
 ) {
     if !level.in_place(host) {
         return;
@@ -619,7 +610,7 @@ pub(crate) fn tick(
             let _ = host.transaction(|host, _| {
                 let mut data = block_data(host, level, pos).ok_or(())?;
                 if let Some(charge) =
-                    crate::factory::tick(host, level, settings, pos, &node.id, data.charge)
+                    crate::factory::tick(host, level, settings, rolls, pos, &node.id, data.charge)
                 {
                     data.charge = charge;
                     write_data(host, pos, data).map_err(|_| ())?;

@@ -9,7 +9,16 @@ use mod_api::{
 
 use super::{BlockData, Position, saved_id};
 
-pub(super) const CARRIER: &str = "minecraft:light_gray_stained_glass";
+pub(crate) const CARRIERS: &[&str] = &[
+    "minecraft:light_gray_stained_glass",
+    "minecraft:blue_stained_glass",
+    "minecraft:brown_terracotta",
+    "minecraft:red_terracotta",
+];
+
+pub(crate) fn is_carrier(block: &str) -> bool {
+    CARRIERS.contains(&block)
+}
 
 static NODES: AttachmentType<Compound> = AttachmentType {
     namespace: "slimefun",
@@ -54,7 +63,9 @@ fn key([x, y, z]: Position) -> String {
 pub(crate) fn observe_plain_change(level: &dyn LevelHost, event: &BlockChangedEvent) {
     let old = level.state_block(event.old);
     let new = level.state_block(event.new);
-    if old == new || (old != Some(CARRIER) && new != Some(CARRIER)) {
+    let replaced_carrier = old.is_some_and(is_carrier);
+    let placed_carrier = new.is_some_and(is_carrier);
+    if old == new || !(replaced_carrier || placed_carrier) {
         return;
     }
     let address = (
@@ -62,13 +73,12 @@ pub(crate) fn observe_plain_change(level: &dyn LevelHost, event: &BlockChangedEv
         [event.pos.x, event.pos.y, event.pos.z],
     );
     let mut changes = RETIRED.lock().unwrap();
-    if new == Some(CARRIER) {
-        // A different newly placed glass block is never allowed to inherit an old node.
-        if let Some(change) = changes.get_mut(&address) {
-            *change = Change::Superseded;
-        }
-    } else {
-        changes.entry(address).or_insert(Change::Removed);
+    if replaced_carrier {
+        changes.entry(address.clone()).or_insert(Change::Removed);
+    }
+    if placed_carrier && let Some(change) = changes.get_mut(&address) {
+        // A different newly placed carrier cannot inherit the retired machine.
+        *change = Change::Superseded;
     }
 }
 
@@ -167,7 +177,8 @@ pub(super) fn clear() {
 }
 
 pub(super) fn take_drop(level: &dyn LevelHost, event: &BlockDropsEvent<'_>) -> Option<String> {
-    if level.state_block(event.state) != Some(CARRIER) {
+    let carrier = level.state_block(event.state)?;
+    if !is_carrier(carrier) {
         return None;
     }
     let pos = [event.pos.x, event.pos.y, event.pos.z];
@@ -176,6 +187,9 @@ pub(super) fn take_drop(level: &dyn LevelHost, event: &BlockDropsEvent<'_>) -> O
         return None;
     };
     let id = saved_id(node)?;
+    if crate::items::network_item(&id)?.material() != carrier {
+        return None;
+    }
     let address = (dimension(&event.dimension).to_owned(), pos);
     let mut retired = RETIRED.lock().unwrap();
     if retired

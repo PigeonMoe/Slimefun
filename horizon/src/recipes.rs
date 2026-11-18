@@ -101,11 +101,17 @@ pub(crate) struct Research {
 }
 
 pub(crate) fn crafting() -> impl Iterator<Item = &'static CraftingRecipe> {
-    CRAFTING.iter().chain(crate::network_recipes::CRAFTING)
+    CRAFTING
+        .iter()
+        .chain(crate::network_recipes::CRAFTING)
+        .chain(crate::electric_processing::CRAFTING)
 }
 
 pub(crate) fn researches() -> impl Iterator<Item = &'static Research> {
-    RESEARCHES.iter().chain(crate::network_recipes::RESEARCHES)
+    RESEARCHES
+        .iter()
+        .chain(crate::network_recipes::RESEARCHES)
+        .chain(crate::electric_processing::RESEARCHES)
 }
 
 pub(crate) fn smelting() -> impl Iterator<Item = &'static SmeltingRecipe> {

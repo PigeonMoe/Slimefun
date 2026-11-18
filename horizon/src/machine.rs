@@ -38,7 +38,9 @@ pub(crate) struct Dispenser {
 pub(crate) struct Settings {
     pub double_ores: bool,
     pub legacy_ore_washer: bool,
+    pub legacy_dust_washer: bool,
     pub legacy_ore_grinder: bool,
+    pub gold_pan_override_output_limit: [bool; 3],
     pub fire_breaking_chance: u32,
     pub drop_from_golems: bool,
     pub golem_drop_chance: u32,
@@ -49,7 +51,9 @@ impl Default for Settings {
         Self {
             double_ores: true,
             legacy_ore_washer: false,
+            legacy_dust_washer: false,
             legacy_ore_grinder: true,
+            gold_pan_override_output_limit: [false; 3],
             fire_breaking_chance: 34,
             drop_from_golems: true,
             golem_drop_chance: 75,
