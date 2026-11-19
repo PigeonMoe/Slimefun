@@ -67,6 +67,7 @@ mod random;
 mod recipes;
 mod research;
 mod soulbound_gear;
+mod stomper;
 mod storage;
 mod tape_measure;
 mod thermal_machines;
@@ -1050,6 +1051,22 @@ impl Hooks for Slimefun {
         event: &mut mod_api::PlayerBeeStingEvent,
     ) -> Flow {
         radiation::protect_bee_sting(host, event.player, &self.rolls)
+    }
+
+    fn player_fall_reaction(
+        &self,
+        _: &dyn mod_api::LoopContext,
+        event: &mut mod_api::PlayerFallReactionEvent<'_>,
+    ) -> Flow {
+        stomper::select(event)
+    }
+
+    fn player_fall_reaction_post(
+        &self,
+        host: &mut dyn ServerHost,
+        event: &mut mod_api::PlayerFallReactionPostEvent,
+    ) {
+        stomper::apply(host, event);
     }
 
     fn player_gliding_impact(

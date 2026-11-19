@@ -750,6 +750,13 @@ pub(crate) fn decorate(id: &str, components: &mut Compound) {
         "SCUBA_HELMET" => &[("Allows you to breathe underwater", "gray", false)],
         "HAZMAT_CHESTPLATE" => &[("Allows you to walk through fire and lava", "gray", false)],
         "FARMER_SHOES" => &[("Prevents you from trampling your Crops", "gold", true)],
+        "BOOTS_OF_THE_STOMPER" => &[
+            space,
+            ("All Fall Damage you receive", "blue", false),
+            ("will be applied to nearby Mobs/Players", "blue", false),
+            space,
+            soft,
+        ],
         "NIGHT_VISION_GOGGLES" => &[("+ Night Vision", "blue", false)],
         "ELYTRA_CAP" => &[
             ("This helmet will protect you from", "gray", false),
@@ -874,6 +881,11 @@ fn equipment_researched(
 ) -> bool {
     mode == mod_api::GameMode::Creative
         || persisted.is_some_and(|saved| research::unlocked_persisted(saved, unlock))
+}
+
+pub(crate) fn stomp_unlocked(boots: &mod_api::ItemStack, persisted: Option<&Compound>) -> bool {
+    crate::items::item_id(boots).as_deref() == Some("BOOTS_OF_THE_STOMPER")
+        && persisted.is_some_and(|saved| research::unlocked_persisted(saved, &STOMPER_RESEARCH))
 }
 
 pub(crate) fn footwear(event: &mut mod_api::PlayerFootwearReactionEvent<'_>) -> mod_api::Flow {
@@ -1034,6 +1046,19 @@ mod tests {
         assert!(footwear_rule("fall_damage", "ENDER_BOOTS").is_none());
         assert!(footwear_rule("fall_damage", "BOOTS_OF_THE_STOMPER").is_none());
         assert!(footwear_rule("farmland_trample", "SLIME_BOOTS").is_none());
+    }
+
+    #[test]
+    fn a_stomp_requires_the_original_boots_and_research() {
+        let mut host = FakeHost::new();
+        let key = Identifier::parse("minecraft:leather_boots").unwrap();
+        host.registries.resolve_items([key]).unwrap();
+        let boots = BOOTS_OF_THE_STOMPER.stack(&host, 1).unwrap();
+        let other = FARMER_SHOES.stack(&host, 1).unwrap();
+        let saved = Compound::from([("slimefun:boots_of_the_stomper".into(), Tag::Byte(1))]);
+        assert!(stomp_unlocked(&boots, Some(&saved)));
+        assert!(!stomp_unlocked(&boots, None));
+        assert!(!stomp_unlocked(&other, Some(&saved)));
     }
 
     #[test]
