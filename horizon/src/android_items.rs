@@ -6,6 +6,7 @@ use crate::{
     android_program::{self, Mode, Tier},
     factory::reactors::NUCLEAR_REACTOR,
     fuel_generators::{COAL_GENERATOR, COMBUSTION_REACTOR},
+    geology::{GPS_TRANSMITTER, GPS_TRANSMITTER_2, GPS_TRANSMITTER_3},
     heated_pressure::PLASTIC_SHEET,
     items::{BASIC_CIRCUIT_BOARD, ELECTRIC_MOTOR, HeadTexture, Kind, STEEL_INGOT, item, text},
     network_recipes::{ANDROID_MEMORY_CORE, BLISTERING_INGOT_3, POWER_CRYSTAL},
@@ -186,6 +187,21 @@ pub(crate) const RESEARCH: Research = Research {
     cost: 50,
 };
 
+const BUTCHER: Research = Research {
+    id: "butcher_androids",
+    name: "Butcher Androids",
+    cost: 32,
+};
+const ADVANCED_BUTCHER: Research = Research {
+    id: "advanced_butcher_android",
+    name: "Advanced Androids - Butcher",
+    cost: 30,
+};
+const EMPOWERED_BUTCHER: Research = Research {
+    id: "empowered_butcher_android",
+    name: "Empowered Androids - Butcher",
+    cost: 30,
+};
 const ADVANCED: Research = Research {
     id: "advanced_android",
     name: "Advanced Androids",
@@ -215,6 +231,9 @@ const EMPOWERED_FISHERMAN: Research = Research {
 pub(crate) const RESEARCHES: &[&Research] = &[
     &RESEARCH,
     &INTERFACES,
+    &BUTCHER,
+    &ADVANCED_BUTCHER,
+    &EMPOWERED_BUTCHER,
     &ADVANCED,
     &ADVANCED_FISHERMAN,
     &ADVANCED_FARMER,
@@ -237,6 +256,30 @@ const fn fisherman(frame: Kind, kind: Kind, research: &'static Research) -> Craf
             Some(ROD),
             Some(frame),
             Some(ROD),
+            None,
+            Some(ELECTRIC_MOTOR),
+            None,
+        ],
+        output: Stack { kind, count: 1 },
+        research,
+    }
+}
+
+const fn butcher(
+    frame: Kind,
+    gps: Kind,
+    kind: Kind,
+    research: &'static Research,
+) -> CraftingRecipe {
+    let sword = Kind::Vanilla("minecraft:diamond_sword");
+    CraftingRecipe {
+        inputs: [
+            None,
+            Some(gps),
+            None,
+            Some(sword),
+            Some(frame),
+            Some(sword),
             None,
             Some(ELECTRIC_MOTOR),
             None,
@@ -424,6 +467,24 @@ pub(crate) const CRAFTING: &[CraftingRecipe] = &[
         PROGRAMMABLE_ANDROID_3_FISHERMAN,
         &EMPOWERED_FISHERMAN,
     ),
+    butcher(
+        PROGRAMMABLE_ANDROID,
+        GPS_TRANSMITTER,
+        PROGRAMMABLE_ANDROID_BUTCHER,
+        &BUTCHER,
+    ),
+    butcher(
+        PROGRAMMABLE_ANDROID_2,
+        GPS_TRANSMITTER_2,
+        PROGRAMMABLE_ANDROID_2_BUTCHER,
+        &ADVANCED_BUTCHER,
+    ),
+    butcher(
+        PROGRAMMABLE_ANDROID_3,
+        GPS_TRANSMITTER_3,
+        PROGRAMMABLE_ANDROID_3_BUTCHER,
+        &EMPOWERED_BUTCHER,
+    ),
 ];
 
 pub(crate) fn item(id: &str) -> Option<Kind> {
@@ -448,8 +509,8 @@ pub(crate) fn item(id: &str) -> Option<Kind> {
     .find(|kind| kind.id() == id)
 }
 
-pub(crate) fn kind_and_research(mode: Mode) -> Option<(Kind, &'static Research)> {
-    Some(match mode {
+pub(crate) fn kind_and_research(mode: Mode) -> (Kind, &'static Research) {
+    match mode {
         Mode::Normal(Tier::Solid) => (PROGRAMMABLE_ANDROID, &RESEARCH),
         Mode::Farmer => (PROGRAMMABLE_ANDROID_FARMER, &RESEARCH),
         Mode::AdvancedFarmer => (PROGRAMMABLE_ANDROID_2_FARMER, &ADVANCED_FARMER),
@@ -460,20 +521,22 @@ pub(crate) fn kind_and_research(mode: Mode) -> Option<(Kind, &'static Research)>
         Mode::Fisherman(Tier::Liquid) => (PROGRAMMABLE_ANDROID_2_FISHERMAN, &ADVANCED_FISHERMAN),
         Mode::Normal(Tier::Nuclear) => (PROGRAMMABLE_ANDROID_3, &EMPOWERED),
         Mode::Fisherman(Tier::Nuclear) => (PROGRAMMABLE_ANDROID_3_FISHERMAN, &EMPOWERED_FISHERMAN),
-        Mode::Archived => return None,
-    })
+        Mode::Butcher(Tier::Solid) => (PROGRAMMABLE_ANDROID_BUTCHER, &BUTCHER),
+        Mode::Butcher(Tier::Liquid) => (PROGRAMMABLE_ANDROID_2_BUTCHER, &ADVANCED_BUTCHER),
+        Mode::Butcher(Tier::Nuclear) => (PROGRAMMABLE_ANDROID_3_BUTCHER, &EMPOWERED_BUTCHER),
+    }
 }
 
 pub(crate) fn lore(id: &str) -> Option<Tag> {
     let mode = android_program::mode(id)?;
-    let tier = mode.tier()?;
+    let tier = mode.tier();
     let function = match mode {
         Mode::Normal(_) => "None",
         Mode::Farmer | Mode::AdvancedFarmer => "Farming",
         Mode::Woodcutter => "Woodcutting",
         Mode::Miner => "Mining",
         Mode::Fisherman(_) => "Fishing",
-        Mode::Archived => return None,
+        Mode::Butcher(_) => "Slaughtering",
     };
     let mut lore = vec![
         Tag::String("".into()),
@@ -486,10 +549,18 @@ pub(crate) fn lore(id: &str) -> Option<Tag> {
             false,
         ));
     }
+    if matches!(mode, Mode::Butcher(_)) {
+        let damage = if tier == Tier::Nuclear {
+            20
+        } else {
+            4 * tier.number()
+        };
+        lore.push(text(&format!("⇨ Damage: {damage}"), "gray", false));
+    }
     let efficiency = match tier {
         Tier::Solid => "1.0",
         Tier::Liquid => "1.5",
-        Tier::Nuclear if matches!(mode, Mode::Fisherman(_)) => "8.0",
+        Tier::Nuclear if matches!(mode, Mode::Fisherman(_) | Mode::Butcher(_)) => "8.0",
         Tier::Nuclear => "3.0",
     };
     lore.push(text(

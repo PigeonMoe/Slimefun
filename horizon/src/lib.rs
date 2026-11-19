@@ -13,6 +13,7 @@ use mod_api::{
 
 mod advanced_processing;
 mod ancient_altar;
+mod android_butchery;
 mod android_fishing;
 mod android_items;
 mod android_library;
@@ -86,6 +87,7 @@ struct Slimefun {
     networks: Arc<Mutex<network_runtime::Networks>>,
     gps: gps_controls::Controls,
     androids: android_ui::Menus,
+    butcher_androids: android_butchery::Butchers,
     holograms: hologram_projector::Editors,
     transport: gps_transport::Transport,
     backpacks: backpacks::BackpackMenus,
@@ -108,6 +110,7 @@ impl Default for Slimefun {
             networks: Arc::default(),
             gps: gps_controls::Controls::default(),
             androids: android_ui::Menus::default(),
+            butcher_androids: android_butchery::Butchers::default(),
             holograms: hologram_projector::Editors::default(),
             transport: gps_transport::Transport::default(),
             backpacks: backpacks::BackpackMenus::default(),
@@ -1028,12 +1031,21 @@ impl Hooks for Slimefun {
         event: &mut mod_api::LivingDeathPostEvent<'_>,
     ) {
         self.radiation.death(host, event.entity);
+        self.butcher_androids.death(host, event.entity);
     }
 
     fn level_tick_post(&self, host: HostSide<'_>, event: &mut LevelTickPostEvent) {
         if let HostSide::Server(host) = host {
             let settings = *self.settings.lock().unwrap();
-            network_runtime::tick(&self.networks, host, event.level, settings, &self.rolls);
+            self.butcher_androids.tick(host, event.level, &self.rolls);
+            network_runtime::tick(
+                &self.networks,
+                host,
+                event.level,
+                settings,
+                &self.rolls,
+                &self.butcher_androids,
+            );
             factory::VIEWERS.refresh(host, event.level);
             self.crucibles.tick(host, event.level);
             self.industrial_miners.tick(host, event.level, &self.rolls);
@@ -1064,6 +1076,7 @@ impl Hooks for Slimefun {
     fn level_unload(&self, host: &mut dyn ServerHost, event: &mut mod_api::LevelUnloadEvent<'_>) {
         self.block_placers.unload(host, event.dimension);
         self.industrial_miners.unload(host, event.dimension);
+        self.butcher_androids.unload(host, event.dimension);
     }
 
     fn scheduled_task(&self, host: &mut dyn ServerHost, event: &mut ScheduledTaskEvent<'_>) {
@@ -1088,6 +1101,7 @@ impl Hooks for Slimefun {
         self.universal.clear();
         self.gps.clear();
         self.androids.clear();
+        self.butcher_androids.clear();
         self.holograms.clear();
         self.transport.clear();
         factory::VIEWERS.clear();

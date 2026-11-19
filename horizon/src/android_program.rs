@@ -11,7 +11,7 @@ pub(crate) enum Mode {
     Miner,
     Woodcutter,
     Fisherman(Tier),
-    Archived,
+    Butcher(Tier),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -32,13 +32,12 @@ impl Tier {
 }
 
 impl Mode {
-    pub fn tier(self) -> Option<Tier> {
-        Some(match self {
-            Self::Normal(tier) | Self::Fisherman(tier) => tier,
+    pub fn tier(self) -> Tier {
+        match self {
+            Self::Normal(tier) | Self::Fisherman(tier) | Self::Butcher(tier) => tier,
             Self::Farmer | Self::Miner | Self::Woodcutter => Tier::Solid,
             Self::AdvancedFarmer => Tier::Liquid,
-            Self::Archived => return None,
-        })
+        }
     }
 }
 
@@ -54,9 +53,9 @@ pub(crate) fn mode(id: &str) -> Option<Mode> {
         "PROGRAMMABLE_ANDROID_2_FISHERMAN" => Mode::Fisherman(Tier::Liquid),
         "PROGRAMMABLE_ANDROID_3_FISHERMAN" => Mode::Fisherman(Tier::Nuclear),
         "PROGRAMMABLE_ANDROID_MINER" => Mode::Miner,
-        "PROGRAMMABLE_ANDROID_BUTCHER"
-        | "PROGRAMMABLE_ANDROID_2_BUTCHER"
-        | "PROGRAMMABLE_ANDROID_3_BUTCHER" => Mode::Archived,
+        "PROGRAMMABLE_ANDROID_BUTCHER" => Mode::Butcher(Tier::Solid),
+        "PROGRAMMABLE_ANDROID_2_BUTCHER" => Mode::Butcher(Tier::Liquid),
+        "PROGRAMMABLE_ANDROID_3_BUTCHER" => Mode::Butcher(Tier::Nuclear),
         _ => return None,
     })
 }
@@ -77,6 +76,10 @@ pub(crate) enum Instruction {
     MoveAndDigUp,
     MoveAndDigForward,
     MoveAndDigDown,
+    AttackMobsAnimals,
+    AttackMobs,
+    AttackAnimals,
+    AttackAnimalsAdult,
     ChopTree,
     CatchFish,
     FarmForward,
@@ -113,6 +116,22 @@ const INSTRUCTIONS: &[(&str, &str, Instruction)] = &[
         "MOVE_AND_DIG_DOWN",
         "Dig and move downwards",
         Instruction::MoveAndDigDown,
+    ),
+    (
+        "ATTACK_MOBS_ANIMALS",
+        "Attack Mobs and Animals",
+        Instruction::AttackMobsAnimals,
+    ),
+    ("ATTACK_MOBS", "Attack Mobs", Instruction::AttackMobs),
+    (
+        "ATTACK_ANIMALS",
+        "Attack Animals",
+        Instruction::AttackAnimals,
+    ),
+    (
+        "ATTACK_ANIMALS_ADULT",
+        "Attack Adult Animals",
+        Instruction::AttackAnimalsAdult,
     ),
     ("CHOP_TREE", "Chop and Replant", Instruction::ChopTree),
     ("CATCH_FISH", "Catch Fish", Instruction::CatchFish),
@@ -174,9 +193,14 @@ impl Instruction {
             | Self::MoveAndDigForward
             | Self::MoveAndDigDown => mode == Mode::Miner,
             Self::CatchFish => matches!(mode, Mode::Fisherman(_)),
+            Self::AttackMobsAnimals
+            | Self::AttackMobs
+            | Self::AttackAnimals
+            | Self::AttackAnimalsAdult => matches!(mode, Mode::Butcher(_)),
+            Self::GoForward | Self::GoUp | Self::GoDown => !matches!(mode, Mode::Butcher(_)),
             Self::ChopTree => mode == Mode::Woodcutter,
             Self::FarmExoticForward | Self::FarmExoticDown => mode == Mode::AdvancedFarmer,
-            _ => mode != Mode::Archived,
+            _ => true,
         }
     }
 }
@@ -224,7 +248,8 @@ impl Script {
         self.tokens.join("-")
     }
 
-    pub fn can_run(&self, mode: Mode) -> bool {
+    #[cfg(test)]
+    fn can_run(&self, mode: Mode) -> bool {
         self.tokens.iter().all(|token| {
             Instruction::parse(token).is_some_and(|instruction| instruction.can_use(mode))
         })
@@ -373,11 +398,31 @@ mod tests {
     }
 
     #[test]
+    fn butcher_routines_cannot_move_and_normal_scripts_cannot_attack() {
+        let butcher = Mode::Butcher(Tier::Nuclear);
+        let attack = Script::parse(
+            "START-ATTACK_MOBS_ANIMALS-ATTACK_MOBS-ATTACK_ANIMALS-ATTACK_ANIMALS_ADULT-REPEAT",
+        )
+        .unwrap();
+        assert!(attack.can_run(butcher));
+        assert!(!attack.can_run(Mode::Normal(Tier::Nuclear)));
+        assert_eq!(
+            attack.advance(butcher, 3),
+            Some((Instruction::AttackAnimalsAdult, 4))
+        );
+        assert_eq!(
+            Script::parse("START-GO_FORWARD-REPEAT")
+                .unwrap()
+                .advance(butcher, 0),
+            None
+        );
+    }
+
+    #[test]
     fn archived_programs_keep_their_exact_paper_tokens_and_new_tokens() {
         let code = "START-ATTACK_ANIMALS-CATCH_FISH-EXTERNAL_STEP-REPEAT";
         let script = Script::parse(code).unwrap();
         assert_eq!(script.source(), code);
-        assert_eq!(script.advance(Mode::Archived, 0), None);
         assert_eq!(script.advance(Mode::Farmer, 0), None);
         assert!(Script::parse("WAIT-FARM_DOWN-REPEAT").is_none());
     }

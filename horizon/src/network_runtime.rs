@@ -1062,6 +1062,7 @@ pub(crate) fn tick(
     level: LevelRef,
     settings: Settings,
     rolls: &Rolls,
+    butchers: &crate::android_butchery::Butchers,
 ) {
     if !level.in_place(host) {
         return;
@@ -1113,6 +1114,7 @@ pub(crate) fn tick(
                 &node.id,
                 rolls,
                 settings.android_reduced_block_updates,
+                butchers,
             )
         {
             move_android(networks, host, level, &dimension, node, movement);

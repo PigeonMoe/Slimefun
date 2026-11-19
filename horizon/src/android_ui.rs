@@ -102,9 +102,8 @@ impl Menus {
             );
             return true;
         }
-        if let Some((_, required)) = android_items::kind_and_research(mode)
-            && !research::can_use(host, player, required)
-        {
+        let (_, required) = android_items::kind_and_research(mode);
+        if !research::can_use(host, player, required) {
             tell(
                 host,
                 player,
@@ -141,7 +140,7 @@ impl Menus {
                 "Programmable Android",
                 main_items(host, anchor.mode, &machine),
             ),
-            Screen::Memory => ("Script Editor", memory_items(host, anchor.mode)),
+            Screen::Memory => ("Script Editor", memory_items(host)),
             Screen::Script(script) => ("Script Editor", script_items(host, script)),
             Screen::Choices { .. } => ("Script Editor", choice_items(host, anchor.mode)),
             Screen::Library { page, rows } => {
@@ -251,7 +250,7 @@ impl Menus {
         let mut pause_notice = None;
         let next = match view.screen {
             Screen::Main if !shift => match slot {
-                15 if mode != Mode::Archived => {
+                15 => {
                     machine.paused = false;
                     save_or_close(
                         host,
@@ -261,14 +260,6 @@ impl Menus {
                         "Your Android is running its script.",
                     );
                     host.close_menu(event.uuid);
-                    return;
-                }
-                15 => {
-                    tell(
-                        host,
-                        player,
-                        "This archived Android mode retains its original script and inventory.",
-                    );
                     return;
                 }
                 17 => {
@@ -292,8 +283,8 @@ impl Menus {
             },
             Screen::Memory if !shift => match slot {
                 1 => Screen::Script(machine.script.clone()),
-                3 if mode != Mode::Archived => Screen::Script(Script::default()),
-                5 if mode != Mode::Archived => library_screen(0),
+                3 => Screen::Script(Script::default()),
+                5 => library_screen(0),
                 8 => Screen::Main,
                 _ => return,
             },
@@ -302,7 +293,7 @@ impl Menus {
                 let add = script.tokens().len() < MAX_LENGTH;
                 if slot == 0 || slot == last + usize::from(add) {
                     Screen::Main
-                } else if mode == Mode::Archived || slot > last {
+                } else if slot > last {
                     return;
                 } else if slot == last {
                     Screen::Choices {
@@ -560,15 +551,11 @@ fn main_items(
     );
     items[17] = head(host, "PAUSE", "Pause", &[]);
     let (fuel, examples) = match mode.tier() {
-        Some(Tier::Solid) => ("solid fuel", "e.g. coal or wood"),
-        Some(Tier::Liquid) => ("liquid fuel", "e.g. lava, oil or fuel"),
-        Some(Tier::Nuclear) => (
+        Tier::Solid => ("solid fuel", "e.g. coal or wood"),
+        Tier::Liquid => ("liquid fuel", "e.g. lava, oil or fuel"),
+        Tier::Nuclear => (
             "radioactive fuel",
             "e.g. uranium, neptunium or boosted uranium",
-        ),
-        None => (
-            "archived fuel",
-            "This Android retains its old fuel and inventory",
         ),
     };
     items[34] = head(
@@ -587,13 +574,11 @@ fn main_items(
     items
 }
 
-fn memory_items(host: &dyn Host, mode: Mode) -> Vec<Option<ItemStack>> {
+fn memory_items(host: &dyn Host) -> Vec<Option<ItemStack>> {
     let mut items = vec![None; 54];
     items[1] = head(host, "GO_FORWARD", "> Edit Script", &[]);
-    if mode != Mode::Archived {
-        items[3] = head(host, "NEW", "> Create new Script", &[]);
-        items[5] = head(host, "GO_DOWN", "> Download a Script", &[]);
-    }
+    items[3] = head(host, "NEW", "> Create new Script", &[]);
+    items[5] = head(host, "GO_DOWN", "> Download a Script", &[]);
     items[8] = head(host, "TURN_LEFT", "> Back", &[]);
     items
 }
@@ -624,9 +609,7 @@ fn library_items(
     );
     items[50] = head(host, "GO_FORWARD", "Next page", &pages);
     items[53] = head(host, "TURN_LEFT", "> Back", &[]);
-    let Some((kind, _)) = android_items::kind_and_research(mode) else {
-        return items;
-    };
+    let (kind, _) = android_items::kind_and_research(mode);
     for (slot, entry) in rows.iter().filter_map(|&id| library.get(id)).enumerate() {
         let author = host
             .player(entry.author)
@@ -697,6 +680,7 @@ fn head(host: &dyn Host, key: &str, name: &str, lore: &[String]) -> Option<ItemS
     let key = match key {
         "FARM_EXOTIC_FORWARD" => "FARM_FORWARD",
         "FARM_EXOTIC_DOWN" => "FARM_DOWN",
+        key if key.starts_with("ATTACK_") => "ATTACK",
         _ => key.strip_prefix("MOVE_AND_").unwrap_or(key),
     };
     if let Some((_, texture)) = SKINS.iter().find(|(id, _)| *id == key) {
@@ -707,6 +691,13 @@ fn head(host: &dyn Host, key: &str, name: &str, lore: &[String]) -> Option<ItemS
 }
 
 const SKINS: &[(&str, HeadTexture)] = &[
+    (
+        "ATTACK",
+        HeadTexture {
+            profile: [848262164, -1705363576, -1088649931, -1349646514],
+            value: "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHBzOi8vdGV4dHVyZXMubWluZWNyYWZ0Lm5ldC90ZXh0dXJlL2M3ZTZjNDBmNjhiNzc1ZjJlZmNkN2JkOTkxNmIzMjc4NjlkY2YyN2UyNGM4NTVkMGExOGUwN2FjMDRmZTEifX19",
+        },
+    ),
     (
         "CHOP_TREE",
         HeadTexture {

@@ -10,6 +10,7 @@ use mod_api::{
 };
 
 use crate::{
+    android_butchery::{Butchers, Target},
     android_fishing, android_mining,
     android_program::{self, Facing, Instruction, Script, Tier},
     android_woodcutting,
@@ -508,9 +509,10 @@ pub(crate) fn tick(
     item: &str,
     rolls: &Rolls,
     reduced_block_updates: bool,
+    butchers: &Butchers,
 ) -> Option<Movement> {
     let mode = android_program::mode(item)?;
-    let tier = mode.tier()?;
+    let tier = mode.tier();
     let mut state = data(host, level, pos)?;
     if state.paused {
         return None;
@@ -565,6 +567,18 @@ pub(crate) fn tick(
         }
         Instruction::CatchFish => {
             android_fishing::fish(host, level, pos, tier, rolls);
+        }
+        Instruction::AttackMobsAnimals
+        | Instruction::AttackMobs
+        | Instruction::AttackAnimals
+        | Instruction::AttackAnimalsAdult => {
+            let target = match instruction {
+                Instruction::AttackMobs => Target::Monsters,
+                Instruction::AttackAnimals => Target::Animals,
+                Instruction::AttackAnimalsAdult => Target::AdultAnimals,
+                _ => Target::All,
+            };
+            butchers.attack(host, level, pos, facing, tier, target);
         }
         Instruction::ChopTree => {
             let target = offset(pos, facing.offset())?;

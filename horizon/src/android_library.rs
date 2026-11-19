@@ -62,14 +62,12 @@ pub(crate) struct Entries {
 
 impl Entries {
     pub fn available(&self, mode: Mode) -> Vec<usize> {
-        let Some(category) = category(mode) else {
-            return Vec::new();
-        };
+        let category = category(mode);
         let mut matches: Vec<_> = self
             .entries
             .iter()
             .enumerate()
-            .filter(|(_, entry)| entry.category == "NONE" || entry.category == category)
+            .filter(|(_, entry)| matches_category(entry, category))
             .collect();
         matches.sort_by_key(|(_, entry)| {
             (
@@ -98,15 +96,12 @@ impl Entries {
         title: &str,
         script: &Script,
     ) -> Result<(), String> {
-        let category = category(mode).ok_or("This Android type does not share scripts yet.")?;
+        let category = category(mode);
         let name = clean_name(title).ok_or("Enter a script name of at most 1024 bytes.")?;
         if !valid_text(author_name) {
             return Err("The script author's name is unavailable.".into());
         }
         let code = script.source();
-        if !script.can_run(mode) {
-            return Err("This Android cannot run all of the instructions in this script.".into());
-        }
         if self.has_code(mode, &code) {
             return Err("This script was already uploaded.".into());
         }
@@ -135,23 +130,28 @@ impl Entries {
             .entries
             .get_mut(id)
             .ok_or("This script no longer exists.")?;
-        let script = Script::parse(&entry.code)
-            .filter(|script| script.can_run(mode))
-            .ok_or("This script contains instructions that this Android cannot run.")?;
+        if !matches_category(entry, category(mode)) {
+            return Err("This script belongs to another Android type.".into());
+        }
+        let script = Script::parse(&entry.code).ok_or("This Paper script is invalid.")?;
         entry.downloads = entry.downloads.saturating_add(1);
         Ok(script)
     }
 }
 
-fn category(mode: Mode) -> Option<&'static str> {
+fn matches_category(entry: &Entry, category: &str) -> bool {
+    entry.category == "NONE" || entry.category == category
+}
+
+fn category(mode: Mode) -> &'static str {
     match mode {
-        Mode::Normal(_) => Some("NONE"),
-        Mode::Fisherman(_) => Some("FISHERMAN"),
-        Mode::Farmer => Some("FARMER"),
-        Mode::AdvancedFarmer => Some("ADVANCED_FARMER"),
-        Mode::Woodcutter => Some("WOODCUTTER"),
-        Mode::Miner => Some("MINER"),
-        Mode::Archived => None,
+        Mode::Normal(_) => "NONE",
+        Mode::Fisherman(_) => "FISHERMAN",
+        Mode::Butcher(_) => "FIGHTER",
+        Mode::Farmer => "FARMER",
+        Mode::AdvancedFarmer => "ADVANCED_FARMER",
+        Mode::Woodcutter => "WOODCUTTER",
+        Mode::Miner => "MINER",
     }
 }
 
@@ -364,6 +364,20 @@ mod tests {
         let restored = parse(encode(&library).as_bytes()).unwrap();
         assert_eq!(restored.get(0), library.get(0));
         assert_eq!(restored.get(1).unwrap().downloads, 1);
+    }
+
+    #[test]
+    fn butcher_can_download_a_paper_general_script_without_unlocking_movement() {
+        let mut library = Entries::default();
+        let walk = Script::parse("START-GO_FORWARD-REPEAT").unwrap();
+        library
+            .upload(Mode::Normal(Tier::Solid), 1, "Juniper", "Walk", &walk)
+            .unwrap();
+        let butcher = Mode::Butcher(Tier::Solid);
+        assert_eq!(library.available(butcher), vec![0]);
+        let loaded = library.download(0, butcher).unwrap();
+        assert_eq!(loaded, walk);
+        assert_eq!(loaded.advance(butcher, 0), None);
     }
 
     #[test]
