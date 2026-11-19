@@ -191,6 +191,7 @@ impl SlimefunItem {
         crate::medical::decorate(self.id, &mut components);
         crate::magic_eye::decorate(self.id, &mut components);
         crate::snacks::decorate(self.id, &mut components);
+        crate::smelters_pickaxe::decorate(self.id, &mut components);
         crate::elemental_staves::decorate(self.id, &mut components);
         crate::armor_forge::decorate(self.id, &mut components);
         crate::auto_crafter::decorate(self.id, &mut components);

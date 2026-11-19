@@ -71,6 +71,7 @@ mod rainbow;
 mod random;
 mod recipes;
 mod research;
+mod smelters_pickaxe;
 mod snacks;
 mod soulbound_gear;
 mod soulbound_rune;
@@ -101,6 +102,7 @@ struct Slimefun {
     settings: Mutex<Settings>,
     item_clicks: item_clicks::ItemClicks,
     snacks: snacks::Snacks,
+    smelters_pickaxes: smelters_pickaxe::SmeltersPickaxes,
     rolls: Rolls,
     chest: Mutex<Option<ItemKey>>,
     networks: Arc<Mutex<network_runtime::Networks>>,
@@ -130,6 +132,7 @@ impl Default for Slimefun {
             settings: Mutex::new(Settings::default()),
             item_clicks: item_clicks::ItemClicks::default(),
             snacks: snacks::Snacks::default(),
+            smelters_pickaxes: smelters_pickaxe::SmeltersPickaxes::default(),
             rolls: Rolls::default(),
             chest: Mutex::new(None),
             networks: Arc::default(),
@@ -372,6 +375,7 @@ impl Hooks for Slimefun {
         self.read_config(event.config, false);
     }
 
+    #[listener(priority = -100)]
     fn break_block(
         &self,
         host: &mut dyn ServerHost,
@@ -391,7 +395,15 @@ impl Hooks for Slimefun {
         {
             return Flow::Cancel;
         }
-        Flow::Continue
+        self.smelters_pickaxes.prepare(host, player, level, event, &self.rolls)
+    }
+
+    fn player_destroyed_block(
+        &self,
+        host: &mut dyn ServerHost,
+        event: &mut mod_api::PlayerDestroyedBlockEvent,
+    ) {
+        self.smelters_pickaxes.destroyed(host, event, &self.rolls);
     }
 
     fn block_drops(&self, level: &dyn LevelHost, event: &mut BlockDropsEvent<'_>) -> Flow {
@@ -406,6 +418,7 @@ impl Hooks for Slimefun {
         ancient_altar::restore_drops(level, event);
         rainbow::placed::drop_item(level, event);
         hologram_projector::restore_drop(level, event);
+        self.smelters_pickaxes.drop_items(event);
         Flow::Continue
     }
 
@@ -1173,6 +1186,7 @@ impl Hooks for Slimefun {
     fn server_tick(&self, host: &mut dyn ServerHost, event: &mut mod_api::ServerTickEvent) {
         if let mod_api::ServerTickPhase::ServerTickStart { world_running } = event.phase {
             self.radiation.begin_tick(|| host.server_monotonic_millis());
+            self.smelters_pickaxes.begin_tick();
             if world_running {
                 rainbow::placed::begin_tick();
             }
@@ -1259,6 +1273,7 @@ impl Hooks for Slimefun {
 
     fn scheduled_task(&self, host: &mut dyn ServerHost, event: &mut ScheduledTaskEvent<'_>) {
         self.snacks.due(host, event);
+        self.smelters_pickaxes.due(host, event);
         self.soulbound_rituals.due(host, event);
         self.elevators.due(host, event);
         self.block_placers.due(host, event, &self.networks);
@@ -1276,6 +1291,7 @@ impl Hooks for Slimefun {
     fn server_stopping(&self, host: &mut dyn ServerHost, _: &mut ServerStoppingEvent) {
         self.item_clicks.clear();
         self.snacks.clear();
+        self.smelters_pickaxes.clear();
         self.soulbound_rituals.clear();
         self.elevators.clear();
         self.block_placers.clear();
