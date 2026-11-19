@@ -4,7 +4,7 @@ use std::{collections::BTreeMap, ops::Range, sync::Mutex};
 
 use mod_api::{
     AttachmentError, Compound, HostSide, HostTransaction, ITEMS, ItemKey, ItemResource, ItemStack,
-    LevelRef, ServerHost, Tag, UseOnEvent,
+    LevelRef, ServerHost, Tag, Text, UseOnEvent,
 };
 
 use super::{
@@ -177,15 +177,37 @@ pub(super) fn block_invalid_placement(host: HostSide<'_>, event: &UseOnEvent<'_>
     let Some(id) = item_id(event.stack) else {
         return false;
     };
-    if !matches!(
-        Component::for_item(&id),
-        Some(Component::CargoInput | Component::CargoOutput { .. })
-    ) {
+    let Some(component) = Component::for_item(&id) else {
         return false;
-    }
+    };
+    let required = match component {
+        Component::CargoManager | Component::CargoConnector => {
+            &crate::network_recipes::CARGO_BASICS
+        }
+        Component::CargoInput | Component::CargoOutput { advanced: false } => {
+            &crate::network_recipes::CARGO_NODES
+        }
+        Component::CargoOutput { advanced: true } => {
+            &crate::network_recipes::ADVANCED_OUTPUT_NODE
+        }
+        _ => return false,
+    };
     let Some(player) = host.player(event.player) else {
         return false;
     };
+    if !crate::research::can_use(host, player, required) {
+        let _ = player.tell(
+            host,
+            Text::literal(format!(
+                "Unlock {} with /sf research {}.",
+                required.name, required.id
+            )),
+        );
+        return true;
+    }
+    if !matches!(component, Component::CargoInput | Component::CargoOutput { .. }) {
+        return false;
+    }
     let Some(level) = player.entity().level(host) else {
         return false;
     };

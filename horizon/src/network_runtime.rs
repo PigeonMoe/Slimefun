@@ -228,6 +228,7 @@ impl ItemPart for NetworkPlacement {
                 crate::heated_pressure::NETHER_ICE_COOLANT_CELL,
                 reactors::NEPTUNIUM,
                 crate::network_recipes::ANDROID_MEMORY_CORE,
+                crate::network_recipes::CARGO_MOTOR,
                 crate::infused::INFUSED_MAGNET,
                 crate::elemental_staves::LAVA_CRYSTAL,
                 crate::portable_crafter::PORTABLE_CRAFTER,
