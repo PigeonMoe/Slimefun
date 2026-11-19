@@ -502,7 +502,7 @@ impl Hooks for Slimefun {
     ) -> Flow {
         if event.kind == "minecraft:wither"
             && let Some(level) = host.level(host.dimension())
-            && network_runtime::wither_proof_obsidian_at(host, level, event.pos)
+            && network_runtime::blast_resistant_at(host, level, event.pos, true)
         {
             Flow::Cancel
         } else {
@@ -518,7 +518,7 @@ impl Hooks for Slimefun {
         if let Some(level) = host.level(event.dimension) {
             event
                 .blocks
-                .retain(|pos| !network_runtime::wither_proof_obsidian_at(host, level, *pos));
+                .retain(|pos| !network_runtime::blast_resistant_at(host, level, *pos, false));
         }
     }
 

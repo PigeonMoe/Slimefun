@@ -57,6 +57,14 @@ item!(
     None,
     None
 );
+item!(
+    WITHER_PROOF_GLASS,
+    "purple_stained_glass",
+    "Wither-Proof Glass",
+    "dark_purple",
+    None,
+    None
+);
 
 const ENCHANTING: Research = Research {
     id: "auto_enchanting",
@@ -73,7 +81,17 @@ const WITHER_PROOF: Research = Research {
     name: "Wither-Proof Obsidian",
     cost: 21,
 };
-pub(crate) const RESEARCHES: &[Research] = &[ENCHANTING, ADVANCED_ENCHANTING, WITHER_PROOF];
+const GLASS_PROTECTION: Research = Research {
+    id: "wither_proof_glass",
+    name: "Wither-Proof Glass",
+    cost: 20,
+};
+pub(crate) const RESEARCHES: &[Research] = &[
+    ENCHANTING,
+    ADVANCED_ENCHANTING,
+    WITHER_PROOF,
+    GLASS_PROTECTION,
+];
 
 const fn machine(item: Kind, title: &'static str, family: Family, advanced: bool) -> Machine {
     let (capacity, cost, speed, research) = if advanced {
@@ -137,7 +155,9 @@ pub(crate) fn decorate(id: &str, components: &mut Compound) {
     }
 
     let empty = Tag::String("".into());
-    let lore = if id == WITHER_PROOF_OBSIDIAN.id() {
+    let lore = if id == HARDENED_GLASS.id() {
+        vec![empty, line(&[("Withstands Explosions", "white")])]
+    } else if id == WITHER_PROOF_OBSIDIAN.id() || id == WITHER_PROOF_GLASS.id() {
         vec![
             empty,
             line(&[("Withstands Explosions", "white")]),
@@ -201,6 +221,24 @@ pub(crate) const CRAFTING: &[CraftingRecipe] = &[
             count: 4,
         },
         research: &WITHER_PROOF,
+    },
+    CraftingRecipe {
+        inputs: [
+            Some(LEAD_INGOT),
+            Some(WITHER_PROOF_OBSIDIAN),
+            Some(LEAD_INGOT),
+            Some(WITHER_PROOF_OBSIDIAN),
+            Some(HARDENED_GLASS),
+            Some(WITHER_PROOF_OBSIDIAN),
+            Some(LEAD_INGOT),
+            Some(WITHER_PROOF_OBSIDIAN),
+            Some(LEAD_INGOT),
+        ],
+        output: Stack {
+            kind: WITHER_PROOF_GLASS,
+            count: 4,
+        },
+        research: &GLASS_PROTECTION,
     },
     CraftingRecipe {
         inputs: [

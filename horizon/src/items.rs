@@ -929,6 +929,8 @@ pub(crate) fn network_item(id: &str) -> Option<Kind> {
         crate::composter::COMPOSTER,
         crate::auto_anvil::DUCT_TAPE,
         crate::enchantment_machines::WITHER_PROOF_OBSIDIAN,
+        crate::enchantment_machines::WITHER_PROOF_GLASS,
+        crate::network_recipes::HARDENED_GLASS,
         ELECTRIC_FURNACE,
         ELECTRIC_FURNACE_2,
         ELECTRIC_FURNACE_3,

@@ -35,7 +35,7 @@ pub(crate) enum Component {
     CargoConnector,
     TrashCan,
     ReactorPort,
-    WitherProofObsidian,
+    BlastResistant(crate::items::Kind),
     DuctTape,
     CargoInput,
     CargoOutput {
@@ -98,7 +98,13 @@ impl Component {
         Some(match id {
             "ANDROID_INTERFACE_ITEMS" | "ANDROID_INTERFACE_FUEL" => Self::AndroidInterface,
             "REACTOR_ACCESS_PORT" => Self::ReactorPort,
-            "WITHER_PROOF_OBSIDIAN" => Self::WitherProofObsidian,
+            "WITHER_PROOF_OBSIDIAN" => {
+                Self::BlastResistant(crate::enchantment_machines::WITHER_PROOF_OBSIDIAN)
+            }
+            "WITHER_PROOF_GLASS" => {
+                Self::BlastResistant(crate::enchantment_machines::WITHER_PROOF_GLASS)
+            }
+            "HARDENED_GLASS" => Self::BlastResistant(crate::network_recipes::HARDENED_GLASS),
             "DUCT_TAPE" => Self::DuctTape,
             "INFUSED_HOPPER" => Self::InfusedHopper,
             "TRASH_CAN_BLOCK" => Self::TrashCan,
@@ -244,7 +250,8 @@ impl Component {
             Self::CargoConnector => "Cargo connector | Paper connection range 5".into(),
             Self::TrashCan => "Trash can | Seven input slots".into(),
             Self::ReactorPort => "Reactor Access Port | Three blocks above a Reactor".into(),
-            Self::WitherProofObsidian => "Wither-Proof Obsidian".into(),
+            Self::BlastResistant(crate::items::Kind::Slimefun(item)) => item.name.into(),
+            Self::BlastResistant(crate::items::Kind::Vanilla(item)) => item.into(),
             Self::DuctTape => "Duct Tape".into(),
             Self::CargoInput => cargo_terminal("Cargo input", metadata),
             Self::CargoOutput { advanced: false } => cargo_terminal("Cargo output", metadata),

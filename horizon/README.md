@@ -209,6 +209,8 @@ Auto Anvil 和 Auto Anvil Mk.II 用一份 Duct Tape 修理一件有损耗的物�
 
 Book Binder 以书架为载体，将两本附魔书合成一本。相同附魔等阶时提升一级，等级与冲突检查读取服务器当前的附魔注册表。默认沿用 Paper 上限。可在 `slimefun-server.toml` 的 `[book-binder]` 表调整 `bypass-vanilla-max-level`、`has-custom-max-level` 与 `custom-max-level`。
 
+Hardened Glass 能抵抗爆炸，凋灵仍可直接拆除它。Wither-Proof Glass 和 Wither-Proof Obsidian 也能抵抗凋灵直接拆除。三者放置后随区块保留原 Slimefun 标记，现有 Paper 世界可用 `restore-network` 或 `restore-chunk` 恢复。
+
 Enhanced Furnace I–XI、Reinforced Furnace 和 Carbonado Edged Furnace 使用原版熔炉界面和库存。各档沿用 Paper 的燃料倍率、加速间隔与指定矿石的幸运产量。普通熔炉、高炉和烟熏炉不受这些规则影响。迁移时用 `/sf storage restore-network` 恢复世界中原有熔炉的 Slimefun 标记，燃料、库存和烹饪状态保留在原版存档中。
 
 灌魔磁铁在魔法工作台制作。研究 `infused_magnet` 后，库存中携带磁铁并按住 Shift，每八刻吸取附近可拾取的物品，默认半径六格。用它和古代符文可在古代祭坛合成灌魔漏斗。漏斗把附近物品移到入口，保留原版漏斗库存、红石及货运行为。默认半径 3.5 格。`[infused-hopper]` 支持 `radius`、`silent`、`toggleable-with-redstone`，`[infused-magnet]` 支持 `pickup-radius`。

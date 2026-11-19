@@ -376,7 +376,7 @@ impl Node {
             | Component::EnhancedFurnace
             | Component::InfusedHopper
             | Component::DuctTape
-            | Component::WitherProofObsidian
+            | Component::BlastResistant(_)
             | Component::ReactorPort => Network::Independent,
             _ => Network::Cargo,
         }
@@ -417,9 +417,7 @@ fn accepts_carrier(component: Component, actual: &str) -> bool {
         Component::EnhancedFurnace => return actual == "minecraft:furnace",
         Component::InfusedHopper => return actual == "minecraft:hopper",
         Component::ReactorPort => return actual == reactors::REACTOR_ACCESS_PORT.material(),
-        Component::WitherProofObsidian => {
-            return actual == crate::enchantment_machines::WITHER_PROOF_OBSIDIAN.material();
-        }
+        Component::BlastResistant(kind) => return actual == kind.material(),
         Component::SolarGenerator { .. } => ["minecraft:daylight_detector"; 2],
         Component::ElectricMachine { carrier, .. } | Component::FuelGenerator { carrier, .. } => {
             if carrier == "minecraft:player_head" {
@@ -993,16 +991,35 @@ pub(crate) fn manual_composter_at(
     (block_data(host, level, pos)?.id == crate::composter::COMPOSTER.id()).then_some(state)
 }
 
-pub(crate) fn wither_proof_obsidian_at(
+pub(crate) fn blast_resistant_at(
     host: &mut dyn ServerHost,
     level: LevelRef,
     pos: Position,
+    direct_wither: bool,
 ) -> bool {
-    let obsidian = crate::enchantment_machines::WITHER_PROOF_OBSIDIAN;
-    level
-        .block(host, pos)
-        .is_some_and(|block| block.id(host) == obsidian.material())
-        && plain_network::read(host, level, pos).is_some_and(|data| data.id == obsidian.id())
+    let Some(material) = level.block(host, pos).map(|block| block.id(host)) else {
+        return false;
+    };
+    if !matches!(
+        material.as_str(),
+        "minecraft:obsidian" | "minecraft:purple_stained_glass" | "minecraft:light_gray_stained_glass"
+    ) {
+        return false;
+    }
+    blast_resistant_marker(
+        plain_network::read(host, level, pos),
+        &material,
+        direct_wither,
+    )
+}
+
+fn blast_resistant_marker(data: Option<BlockData>, material: &str, direct_wither: bool) -> bool {
+    let Some(Component::BlastResistant(kind)) = data.and_then(|data| Component::for_item(&data.id))
+    else {
+        return false;
+    };
+    material == kind.material()
+        && (!direct_wither || kind != crate::network_recipes::HARDENED_GLASS)
 }
 
 pub(crate) fn ignition_chamber_at(
@@ -1067,7 +1084,7 @@ fn is_plain_node(component: Component) -> bool {
         Component::ManualCrucible
             | Component::ManualComposter
             | Component::ReactorPort
-            | Component::WitherProofObsidian
+            | Component::BlastResistant(_)
             | Component::GpsDevice(_)
     ) {
         return true;
@@ -1605,6 +1622,36 @@ mod tests {
         let record = plain_network::read_persisted(&mut reopened, position).unwrap();
         assert_eq!(record.id, "COMPOSTER");
         assert!(plain_network::read_persisted(&mut reopened, [0, 63, 18]).is_none());
+    }
+
+    #[test]
+    fn paper_blast_protection_uses_the_saved_identity_and_distinguishes_wither_attacks() {
+        use crate::enchantment_machines::{WITHER_PROOF_GLASS, WITHER_PROOF_OBSIDIAN};
+        use crate::network_recipes::HARDENED_GLASS;
+
+        let mut host = FakeHost::new();
+        for (x, (kind, wither_proof)) in [
+            (HARDENED_GLASS, false),
+            (WITHER_PROOF_GLASS, true),
+            (WITHER_PROOF_OBSIDIAN, true),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let pos = [x as i32, 70, 0];
+            assert!(!blast_resistant_marker(None, kind.material(), false));
+            let (node, data) = imported(kind.id(), &toml::Table::new()).unwrap();
+            assert!(is_plain_node(node.component));
+            assert_eq!(network_item(kind.id()), Some(kind));
+            write_data(&mut host, pos, data).unwrap();
+            let mut marker = || plain_network::read_persisted(&mut host, pos);
+            assert!(blast_resistant_marker(marker(), kind.material(), false));
+            assert_eq!(
+                blast_resistant_marker(marker(), kind.material(), true),
+                wither_proof
+            );
+            assert!(!blast_resistant_marker(marker(), "minecraft:stone", false));
+        }
     }
 
     #[test]
