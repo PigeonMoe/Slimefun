@@ -116,6 +116,7 @@ pub(crate) fn crafting_container(material: &str) -> Option<Kind> {
 pub(crate) fn crafting() -> impl Iterator<Item = &'static CraftingRecipe> {
     CRAFTING
         .iter()
+        .chain([&crate::climbing_pick::CRAFTING])
         .chain(crate::armor_forge::CRAFTING)
         .chain(crate::auto_crafter::CRAFTING)
         .chain([&crate::composter::CRAFTING])
@@ -216,7 +217,7 @@ pub(crate) fn researches() -> impl Iterator<Item = &'static Research> {
         .chain([&crate::beheading::RESEARCH, &crate::explosive_tools::RESEARCH])
         .chain(crate::jet_boots::RESEARCHES.iter().copied())
         .chain(crate::jetpack::RESEARCHES.iter().copied())
-        .chain([&crate::lumber_axe::RESEARCH])
+        .chain([&crate::lumber_axe::RESEARCH, &crate::climbing_pick::RESEARCH])
         .chain([&crate::rainbow::RESEARCH])
         .chain(crate::auto_anvil::RESEARCHES)
         .chain(crate::enhanced_furnaces::RESEARCHES)

@@ -32,6 +32,7 @@ mod beheading;
 mod block_placer;
 mod book_binder;
 mod circuits;
+mod climbing_pick;
 mod composter;
 mod compressor;
 mod crucible;
@@ -113,6 +114,7 @@ struct Slimefun {
     magnets: infused::Magnets,
     settings: Mutex<Settings>,
     item_clicks: item_clicks::ItemClicks,
+    climbing: climbing_pick::Climbing,
     snacks: snacks::Snacks,
     jet_boots: sneak_equipment::Task<jet_boots::JetBoots>,
     jetpacks: sneak_equipment::Task<jetpack::Flight>,
@@ -151,6 +153,7 @@ impl Default for Slimefun {
             magnets: infused::Magnets::default(),
             settings: Mutex::new(Settings::default()),
             item_clicks: item_clicks::ItemClicks::default(),
+            climbing: climbing_pick::Climbing::default(),
             snacks: snacks::Snacks::default(),
             jet_boots: sneak_equipment::Task::default(),
             jetpacks: sneak_equipment::Task::default(),
@@ -187,6 +190,7 @@ impl Slimefun {
             *settings = Settings::default();
             enchantment_machines::configure(&toml::Table::new());
             self.radiation.configure(None);
+            self.climbing.configure(None);
             self.block_placers.configure(None);
             output_chest::set_enabled(true);
             self.crucibles.configure(false);
@@ -336,6 +340,8 @@ impl Slimefun {
         {
             settings.block_ticker_delay = delay;
         }
+        self.climbing
+            .configure(table.get("climbing-pick").and_then(toml::Value::as_table));
         if let Some(network) = table.get("networks").and_then(toml::Value::as_table) {
             if let Some(budget) = network
                 .get("max-size")
@@ -411,11 +417,12 @@ impl Hooks for Slimefun {
         event.configs.push(Config::new(
             "slimefun",
             ConfigKind::Server,
-            &format!("{}{}{}{}",
+            &format!("{}{}{}{}{}",
             "double-ores = true\ncrucible-allow-water-in-nether = false\nlegacy-ore-washer = false\nlegacy-dust-washer = false\nlegacy-ore-grinder = true\nelectric-gold-pan-override-output-limit = [false, false, false]\nfreezer-use-vanilla-ratios = [false, false, false]\nfire-breaking-chance = 34\noutput-chest-enabled = true\ndrop-from-golems = true\ngolem-drop-chance = 75\n\n[guide]\nreceive-on-first-join = true\n\n[researches]\nfree-in-creative-mode = true\nenable-fireworks = true\ndisable-learning-animation = false\n\n[URID]\ncustom-ticker-delay = 10\n\n[networks]\nmax-size = 200\nenable-visualizer = true\ncargo-ticker-delay = 0\n\n[wind-staff]\npower = 4\n\n[book-binder]\nbypass-vanilla-max-level = false\nhas-custom-max-level = false\ncustom-max-level = 15\n\n[portable-teleporter]\nteleportation-cost = 10\n\n[produce-collector]\nrange = 2\n\n[pickaxe-of-vein-mining]\nmax-blocks = 16\n\n[pickaxe-of-the-seeker]\nmax-range = 5\n\n[blade-of-vampires]\nchance = 45\n\n[reinforced-spawner]\nallow-spawn-eggs = true\n\n[ancient-altar]\nstep-delay = 8\n\n[miner-android]\nreduced-block-updates = true\n\n[industrial-miner]\ncan-mine-ancient-debris = false\ncan-mine-deepslate-ores = true\n\n[advanced-industrial-miner]\ncan-mine-ancient-debris = false\ncan-mine-deepslate-ores = true\n",
                 enchantment_machines::default_config(),
                 beheading::DEFAULT_CONFIG,
-                explosive_tools::DEFAULT_CONFIG),
+                explosive_tools::DEFAULT_CONFIG,
+                climbing_pick::DEFAULT_CONFIG),
         ));
     }
 
@@ -897,6 +904,7 @@ impl Hooks for Slimefun {
             return fertilizer;
         }
         if *event.use_item != TriState::False && let Some(held) = event.click.stack {
+            self.climbing.use_on(host, player, event, &self.rolls);
             if self.guide.right_click(host, player, held) {
                 *event.cancellation_result = InteractionResult::Consume;
                 return Flow::Cancel;
@@ -1503,6 +1511,7 @@ impl Hooks for Slimefun {
 
     fn scheduled_task(&self, host: &mut dyn ServerHost, event: &mut ScheduledTaskEvent<'_>) {
         self.snacks.due(host, event);
+        self.climbing.due(event);
         self.jet_boots.due(event);
         self.jetpacks.due(event);
         self.smelters_pickaxes.due(host, event);
@@ -1522,6 +1531,7 @@ impl Hooks for Slimefun {
 
     fn server_stopping(&self, host: &mut dyn ServerHost, _: &mut ServerStoppingEvent) {
         self.item_clicks.clear();
+        self.climbing.clear();
         self.snacks.clear();
         self.jet_boots.clear();
         self.jetpacks.clear();
