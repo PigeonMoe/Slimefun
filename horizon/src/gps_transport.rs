@@ -308,7 +308,7 @@ impl Transport {
             return true;
         };
         let cost = self.cost.load(Ordering::Relaxed);
-        let Some(replacement) = charging_bench::discharge(host, &stack, cost) else {
+        let Some(replacement) = charging_bench::discharge(host, &stack, cost as f32) else {
             tell(host, player, "The Portable Teleporter needs more charge.");
             return true;
         };

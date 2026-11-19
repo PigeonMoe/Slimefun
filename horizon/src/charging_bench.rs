@@ -71,14 +71,6 @@ fn rechargeable(id: &str) -> Option<(&'static str, f32)> {
         "REINFORCED_ALLOY_JETPACK" => ("minecraft:leather_chestplate", 100.0),
         "CARBONADO_JETPACK" => ("minecraft:leather_chestplate", 150.0),
         "ARMORED_JETPACK" => ("minecraft:iron_chestplate", 50.0),
-        "DURALUMIN_JETBOOTS" => ("minecraft:leather_boots", 20.0),
-        "SOLDER_JETBOOTS" => ("minecraft:leather_boots", 30.0),
-        "BILLON_JETBOOTS" => ("minecraft:leather_boots", 40.0),
-        "STEEL_JETBOOTS" => ("minecraft:leather_boots", 50.0),
-        "DAMASCUS_STEEL_JETBOOTS" => ("minecraft:leather_boots", 75.0),
-        "REINFORCED_ALLOY_JETBOOTS" => ("minecraft:leather_boots", 100.0),
-        "CARBONADO_JETBOOTS" => ("minecraft:leather_boots", 125.0),
-        "ARMORED_JETBOOTS" => ("minecraft:iron_boots", 50.0),
         "DURALUMIN_MULTI_TOOL" => ("minecraft:shears", 20.0),
         "SOLDER_MULTI_TOOL" => ("minecraft:shears", 30.0),
         "BILLON_MULTI_TOOL" => ("minecraft:shears", 40.0),
@@ -87,7 +79,7 @@ fn rechargeable(id: &str) -> Option<(&'static str, f32)> {
         "REINFORCED_ALLOY_MULTI_TOOL" => ("minecraft:shears", 75.0),
         "CARBONADO_MULTI_TOOL" => ("minecraft:shears", 100.0),
         "PORTABLE_TELEPORTER" => ("minecraft:compass", 50.0),
-        _ => return None,
+        _ => return crate::jet_boots::charge_spec(id),
     })
 }
 
@@ -206,7 +198,10 @@ pub(crate) fn charge_lore(current: f32, maximum: f32) -> Tag {
     ])
 }
 
-pub(crate) fn discharge(host: &dyn Host, stack: &ItemStack, amount: u32) -> Option<ItemStack> {
+pub(crate) fn discharge(host: &dyn Host, stack: &ItemStack, amount: f32) -> Option<ItemStack> {
+    if !amount.is_finite() || amount < 0.0 {
+        return None;
+    }
     match update_charge(host, stack, Change::Remove(amount))? {
         Action::Charge(stack) => Some(stack),
         _ => None,
@@ -229,7 +224,7 @@ pub(crate) fn recharge(host: &dyn Host, stack: &ItemStack, amount: f32) -> Optio
 
 enum Change {
     Add(f32),
-    Remove(u32),
+    Remove(f32),
 }
 
 fn update_charge(host: &dyn Host, stack: &ItemStack, change: Change) -> Option<Action> {
@@ -271,7 +266,7 @@ fn update_charge(host: &dyn Host, stack: &ItemStack, change: Change) -> Option<A
         _ => return None,
     };
     let charge = match change {
-        Change::Remove(amount) if current >= amount as f32 => current - amount as f32,
+        Change::Remove(amount) if current >= amount => current - amount,
         Change::Remove(_) => return None,
         Change::Add(_) if current >= maximum => return Some(Action::ReturnFull),
         Change::Add(amount) => (current + amount).min(maximum),
@@ -406,10 +401,10 @@ mod tests {
             Some(15.25),
             charge_lore(0.0, 50.0),
         );
-        let debited = discharge(&host, &stack, 10).unwrap();
+        let debited = discharge(&host, &stack, 10.0).unwrap();
         assert_charge(&debited, 5.25, 50.0);
-        assert!(discharge(&host, &debited, 10).is_none());
-        assert_charge(&discharge(&host, &debited, 0).unwrap(), 5.25, 50.0);
+        assert!(discharge(&host, &debited, 10.0).is_none());
+        assert_charge(&discharge(&host, &debited, 0.0).unwrap(), 5.25, 50.0);
     }
 
     #[test]

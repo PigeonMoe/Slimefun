@@ -57,6 +57,7 @@ mod industrial_miner;
 mod item_clicks;
 mod infused;
 mod items;
+mod jet_boots;
 mod juice;
 mod machine;
 mod magic_eye;
@@ -102,6 +103,7 @@ struct Slimefun {
     settings: Mutex<Settings>,
     item_clicks: item_clicks::ItemClicks,
     snacks: snacks::Snacks,
+    jet_boots: jet_boots::JetBoots,
     smelters_pickaxes: smelters_pickaxe::SmeltersPickaxes,
     rolls: Rolls,
     chest: Mutex<Option<ItemKey>>,
@@ -132,6 +134,7 @@ impl Default for Slimefun {
             settings: Mutex::new(Settings::default()),
             item_clicks: item_clicks::ItemClicks::default(),
             snacks: snacks::Snacks::default(),
+            jet_boots: jet_boots::JetBoots::default(),
             smelters_pickaxes: smelters_pickaxe::SmeltersPickaxes::default(),
             rolls: Rolls::default(),
             chest: Mutex::new(None),
@@ -428,6 +431,20 @@ impl Hooks for Slimefun {
         hologram_projector::observe_change(level, event);
         rainbow::placed::changed(level, event);
         network_runtime::observe_gps_change(&self.networks, level, event);
+    }
+
+    #[listener(priority = -100)]
+    fn entity_interact(
+        &self,
+        host: HostSide<'_>,
+        event: &mut mod_api::EntityInteractEvent<'_>,
+    ) -> Option<InteractionResult> {
+        let HostSide::Server(host) = host else {
+            return None;
+        };
+        (matches!(event.kind, "minecraft:cow" | "minecraft:mooshroom")
+            && event.stack.is_some_and(|held| jet_boots::STEEL_THRUSTER.matches(host, held)))
+            .then_some(InteractionResult::Consume)
     }
 
     fn entity_place(
@@ -727,6 +744,10 @@ impl Hooks for Slimefun {
             return Flow::Continue;
         };
         if *event.use_item != TriState::False && let Some(held) = event.click.stack {
+            if jet_boots::STEEL_THRUSTER.matches(host, held) {
+                *event.cancellation_result = InteractionResult::Fail;
+                return Flow::Cancel;
+            }
             if medical::use_supply(host, player, event.click.hand, held)
                 || magic_eye::use_held(host, player, held)
             {
@@ -932,6 +953,7 @@ impl Hooks for Slimefun {
             event.click.hand,
             event.click.stack,
         )
+            || jet_boots::STEEL_THRUSTER.matches(host, event.click.stack)
             || medical::HEAVY_CREAM.matches(host, event.click.stack)
             || medical::use_supply(host, player, event.click.hand, event.click.stack)
             || magic_eye::use_held(host, player, event.click.stack)
@@ -994,10 +1016,11 @@ impl Hooks for Slimefun {
 
     fn player_logged_out(
         &self,
-        _: &mut dyn ServerHost,
+        host: &mut dyn ServerHost,
         event: &mut mod_api::PlayerLoggedOutEvent<'_>,
     ) {
         self.item_clicks.logout(event.player);
+        self.jet_boots.forget(host, event.player);
         self.bee_wings.stop(event.player);
         self.gps.logout(event.player);
         self.androids.logout(event.player);
@@ -1064,6 +1087,7 @@ impl Hooks for Slimefun {
     fn player_toggle_sneak(&self, host: &mut dyn ServerHost, event: &mut mod_api::PlayerToggleSneakEvent<'_>) {
         if let Some(player) = host.player(event.player) {
             self.magnets.toggle(host, player, event.sneaking, self.settings.lock().unwrap().infused);
+            self.jet_boots.toggle(host, player, event.sneaking);
         }
     }
 
@@ -1197,6 +1221,12 @@ impl Hooks for Slimefun {
         }
     }
 
+    fn player_tick_pre(&self, host: HostSide<'_>, event: &mut mod_api::PlayerTickPreEvent) {
+        if let HostSide::Server(host) = host {
+            self.jet_boots.tick(host, event.player, &self.rolls);
+        }
+    }
+
     fn player_tick_post(&self, host: HostSide<'_>, event: &mut mod_api::PlayerTickPostEvent) {
         if let HostSide::Server(host) = host {
             self.radiation.player_tick(host, event.player);
@@ -1277,6 +1307,7 @@ impl Hooks for Slimefun {
 
     fn scheduled_task(&self, host: &mut dyn ServerHost, event: &mut ScheduledTaskEvent<'_>) {
         self.snacks.due(host, event);
+        self.jet_boots.due(event);
         self.smelters_pickaxes.due(host, event);
         self.soulbound_rituals.due(host, event);
         self.elevators.due(host, event);
@@ -1295,6 +1326,7 @@ impl Hooks for Slimefun {
     fn server_stopping(&self, host: &mut dyn ServerHost, _: &mut ServerStoppingEvent) {
         self.item_clicks.clear();
         self.snacks.clear();
+        self.jet_boots.clear();
         self.smelters_pickaxes.clear();
         self.soulbound_rituals.clear();
         self.elevators.clear();
