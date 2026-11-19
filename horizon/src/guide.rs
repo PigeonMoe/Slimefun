@@ -144,6 +144,7 @@ struct Reader {
 pub(crate) struct Guide {
     readers: Mutex<BTreeMap<u128, Reader>>,
     receive_on_first_join: AtomicBool,
+    show_hidden_groups_in_search: AtomicBool,
     learning: learning::Learning,
 }
 
@@ -152,6 +153,7 @@ impl Default for Guide {
         Self {
             readers: Mutex::new(BTreeMap::new()),
             receive_on_first_join: AtomicBool::new(true),
+            show_hidden_groups_in_search: AtomicBool::new(false),
             learning: learning::Learning::default(),
         }
     }
@@ -169,6 +171,12 @@ impl Guide {
             .and_then(toml::Value::as_bool)
             .unwrap_or(true);
         self.receive_on_first_join.store(receive, Ordering::Relaxed);
+        let show_hidden = section
+            .and_then(|section| section.get("show-hidden-item-groups-in-search"))
+            .and_then(toml::Value::as_bool)
+            .unwrap_or(false);
+        self.show_hidden_groups_in_search
+            .store(show_hidden, Ordering::Relaxed);
     }
 
     pub(crate) fn first_join(&self, host: &mut dyn ServerHost, uuid: u128) {
@@ -248,12 +256,17 @@ impl Guide {
         true
     }
 
-    fn show(&self, host: &mut dyn ServerHost, player: PlayerRef, path: Vec<Page>) {
+    fn show(&self, host: &mut dyn ServerHost, player: PlayerRef, mut path: Vec<Page>) {
+        let month = host.server_local_minute()[1];
+        if matches!(path.last(), Some(Page::Group(group, _)) if !group.in_season(month)) {
+            path = vec![Page::Main];
+        }
         let Some(page) = path.last() else {
             return;
         };
         let research = player.persistent_data(host);
-        let mut menu = render(host, research.as_ref(), page);
+        let show_hidden = self.show_hidden_groups_in_search.load(Ordering::Relaxed);
+        let mut menu = render(host, research.as_ref(), page, month, show_hidden);
         if matches!(page, Page::Info) {
             let options = [Preference::Fireworks, Preference::Animation]
                 .into_iter()
@@ -458,7 +471,13 @@ fn learned(host: &dyn Host, player: PlayerRef, topic: &Research) -> bool {
         .is_some_and(|data| research::unlocked(data, topic))
 }
 
-fn render(host: &dyn Host, saved: Option<&Compound>, screen: &Page) -> Menu {
+fn render(
+    host: &dyn Host,
+    saved: Option<&Compound>,
+    screen: &Page,
+    month: i32,
+    show_hidden: bool,
+) -> Menu {
     let mut menu = Menu {
         slots: vec![None; 54],
         actions: std::array::from_fn(|_| None),
@@ -495,6 +514,7 @@ fn render(host: &dyn Host, saved: Option<&Compound>, screen: &Page) -> Menu {
         Page::Main => {
             for (slot, group) in GROUPS
                 .iter()
+                .filter(|group| group.in_season(month))
                 .filter(|group| group_entries(group).next().is_some())
                 .enumerate()
             {
@@ -642,7 +662,7 @@ fn render(host: &dyn Host, saved: Option<&Compound>, screen: &Page) -> Menu {
             }
         }
         Page::Search(query) => {
-            for (slot, (group, entry)) in search_matches(query).enumerate() {
+            for (slot, (group, entry)) in search_matches(query, month, show_hidden).enumerate() {
                 let mut item = entry_icon(host, entry);
                 let group = colored_lore(&format!("&8⇨ &f{}", group.name));
                 if let Some(item) = &mut item {
@@ -693,10 +713,15 @@ fn search_title(query: &str) -> String {
     format!("Searching for: {plain}")
 }
 
-fn search_matches(query: &str) -> impl Iterator<Item = (&'static Group, &'static Entry)> {
+fn search_matches(
+    query: &str,
+    month: i32,
+    show_hidden: bool,
+) -> impl Iterator<Item = (&'static Group, &'static Entry)> {
     let query = strip_colors(query).to_lowercase();
     GROUPS
         .iter()
+        .filter(move |group| show_hidden || group.in_season(month))
         .flat_map(|group| named_group_entries(group).map(move |(id, entry)| (group, id, entry)))
         .filter_map(move |(group, id, entry)| {
             (id.to_ascii_lowercase().contains(&query)
@@ -712,6 +737,9 @@ fn color_code(color: &str) -> char {
     match color {
         "aqua" => 'b',
         "red" => 'c',
+        "green" => 'a',
+        "gold" => '6',
+        "light_purple" => 'd',
         _ => '7',
     }
 }
@@ -929,7 +957,7 @@ mod tests {
             .iter()
             .find(|group| group.key == "basicMachines")
             .unwrap();
-        let menu = render(&host, None, &Page::Group(basic, 1));
+        let menu = render(&host, None, &Page::Group(basic, 1), 1, false);
         assert_eq!(menu.slots.len(), 54);
         let craft = lookup("ENHANCED_CRAFTING_TABLE").unwrap();
         assert!(menu.actions.iter().any(|action| matches!(
@@ -942,12 +970,12 @@ mod tests {
             "PlayerPersisted".into(),
             Tag::compound([("slimefun:grind_stone", Tag::Byte(1))]),
         )]);
-        let menu = render(&host, Some(&learned), &Page::Group(basic, 1));
+        let menu = render(&host, Some(&learned), &Page::Group(basic, 1), 1, false);
         let grind = lookup("GRIND_STONE").unwrap();
         assert!(menu.actions.iter().any(|action| matches!(
             action, Some(Action::Push(Page::Recipe(entry))) if std::ptr::eq(*entry, grind)
         )));
-        let recipe = render(&host, None, &Page::Recipe(craft));
+        let recipe = render(&host, None, &Page::Recipe(craft), 1, false);
         let shown = |slot: usize| {
             recipe.slots[slot]
                 .as_ref()
@@ -991,7 +1019,7 @@ mod tests {
             .resolve_items(MATERIALS.iter().map(|id| Identifier::parse(id).unwrap()))
             .unwrap();
         let table = lookup("TABLE_SAW").unwrap();
-        let menu = render(&host, None, &Page::Recipe(table));
+        let menu = render(&host, None, &Page::Recipe(table), 1, false);
         for (slot, material) in [
             (12, "smooth_stone_slab"),
             (13, "stonecutter"),
@@ -1019,7 +1047,7 @@ mod tests {
         ] {
             let miner = lookup(id).unwrap();
             assert_eq!(miner.research.unwrap().cost, cost);
-            let shown = render(&host, None, &Page::Recipe(miner));
+            let shown = render(&host, None, &Page::Recipe(miner), 1, false);
             assert_eq!(
                 shown.slots[13].as_ref().unwrap().item().id(&host),
                 "minecraft:chest"
@@ -1062,7 +1090,7 @@ mod tests {
         );
         assert_eq!(sifted.research.unwrap().id, "ore_washer");
         let circuit = lookup("BASIC_CIRCUIT_BOARD").unwrap();
-        let shown = render(&host, None, &Page::Recipe(circuit));
+        let shown = render(&host, None, &Page::Recipe(circuit), 1, false);
         let head = shown.slots[13].as_ref().unwrap();
         assert_eq!(head.item().id(&host), "minecraft:player_head");
         assert!(
@@ -1081,15 +1109,55 @@ mod tests {
     fn paper_search_accepts_display_names_and_ids_and_limits_the_first_35() {
         let craft = lookup("ENHANCED_CRAFTING_TABLE").unwrap();
         for query in ["§aENHANCED_crafting_TABLE", "enhanced crafting table"] {
-            assert!(search_matches(query).any(|(_, entry)| std::ptr::eq(entry, craft)));
+            assert!(search_matches(query, 1, false).any(|(_, entry)| std::ptr::eq(entry, craft)));
         }
-        assert_eq!(search_matches("").count(), 35);
-        assert_eq!(search_matches("does not exist").count(), 0);
+        assert_eq!(search_matches("", 1, false).count(), 35);
+        assert_eq!(search_matches("does not exist", 1, false).count(), 0);
         assert_eq!(search_title("§bCoal"), "Searching for: Coal");
         assert_eq!(
             search_title("012345678901234567890"),
             "Searching for: 0123456789012345..."
         );
+    }
+
+    #[test]
+    fn seasonal_groups_follow_the_server_month_and_paper_search_setting() {
+        let mut host = FakeHost::new();
+        host.registries
+            .resolve_items(
+                ["minecraft:player_head", "minecraft:jack_o_lantern"]
+                    .map(|material| Identifier::parse(material).unwrap()),
+            )
+            .unwrap();
+        let groups = |month, show_hidden| {
+            render(&host, None, &Page::Main, month, show_hidden)
+                .actions
+                .into_iter()
+                .filter_map(|action| match action {
+                    Some(Action::Push(Page::Group(group, _))) => Some(group.key),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        for (key, month, query) in [
+            ("christmas", 12, "hot chocolate"),
+            ("halloween", 10, "rainbow_wool_halloween"),
+            ("valentinesDay", 2, "rainbow_wool_valentine"),
+        ] {
+            assert!(!groups(11, true).contains(&key));
+            assert!(groups(month, false).contains(&key));
+            assert!(!search_matches(query, 11, false).any(|(group, _)| group.key == key));
+            assert!(search_matches(query, month, false).any(|(group, _)| group.key == key));
+            assert!(search_matches(query, 11, true).any(|(group, _)| group.key == key));
+        }
+        let guide = Guide::default();
+        let config: toml::Table = "[guide]\nshow-hidden-item-groups-in-search = true"
+            .parse()
+            .unwrap();
+        guide.configure(config.get("guide"), None);
+        assert!(guide.show_hidden_groups_in_search.load(Ordering::Relaxed));
+        guide.configure(None, None);
+        assert!(!guide.show_hidden_groups_in_search.load(Ordering::Relaxed));
     }
 
     #[test]

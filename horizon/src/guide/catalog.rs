@@ -120,6 +120,18 @@ pub(super) struct Group {
     pub color: &'static str,
     pub icon: &'static str,
     pub parent: Option<&'static str>,
+    pub month: Option<i32>,
+}
+
+impl Group {
+    const fn seasonal(mut self, month: i32) -> Self {
+        self.month = Some(month);
+        self
+    }
+
+    pub(super) fn in_season(&self, month: i32) -> bool {
+        self.month.is_none_or(|expected| expected == month)
+    }
 }
 
 macro_rules! group {
@@ -133,6 +145,7 @@ macro_rules! group {
             icon: concat!("minecraft:", $icon),
             color: $color,
             parent: $parent,
+            month: None,
         }
     };
 }
@@ -145,11 +158,44 @@ pub(super) const GROUPS: &[Group] = &[
     group!("tools", "Tools", "diamond_pickaxe"),
     group!("resources", "Resources", "lapis_lazuli"),
     group!("food", "Food", "cookie"),
+    group!(
+        "birthday",
+        "TheBusyBiscuit's Birthday &7(26th October)",
+        "firework_rocket",
+        "green",
+        None
+    )
+    .seasonal(10),
+    group!(
+        "christmas",
+        "Christmas &7(December only)",
+        "player_head",
+        "green",
+        None
+    )
+    .seasonal(12),
+    group!(
+        "halloween",
+        "Halloween &7(31st October)",
+        "jack_o_lantern",
+        "gold",
+        None
+    )
+    .seasonal(10),
     group!("magicalResources", "Magical Items", "firework_star"),
     group!("magicalArmor", "Magical Armor", "diamond_helmet"),
     group!("misc", "Miscellaneous", "player_head"),
     group!("armor", "Armor", "chainmail_chestplate"),
     group!("technicalComponents", "Technical Components", "blaze_rod"),
+    group!("easter", "Easter &7(April)", "player_head", "gold", None).seasonal(4),
+    group!(
+        "valentinesDay",
+        "Valentine's Day &7(14th February)",
+        "player_head",
+        "light_purple",
+        None
+    )
+    .seasonal(2),
     group!("magicalGadgets", "Magical Gadgets", "elytra"),
     group!(
         "technicalGadgets",
