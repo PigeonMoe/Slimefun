@@ -7,6 +7,7 @@ pub(crate) const ID_KEY: &str = "slimefun:slimefun_item";
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Kind {
     Vanilla(&'static str),
+    Potion(&'static str),
     Slimefun(&'static SlimefunItem),
 }
 
@@ -44,6 +45,7 @@ impl Kind {
     pub fn id(self) -> &'static str {
         match self {
             Self::Vanilla(id) => id,
+            Self::Potion(_) => "minecraft:potion",
             Self::Slimefun(item) => item.id,
         }
     }
@@ -51,13 +53,14 @@ impl Kind {
     pub(crate) const fn material(self) -> &'static str {
         match self {
             Self::Vanilla(id) => id,
+            Self::Potion(_) => "minecraft:potion",
             Self::Slimefun(item) => item.material,
         }
     }
 
     pub fn juice(self) -> Option<&'static JuiceProfile> {
         match self {
-            Self::Vanilla(_) => None,
+            Self::Vanilla(_) | Self::Potion(_) => None,
             Self::Slimefun(item) => item.juice.as_ref(),
         }
     }
@@ -71,6 +74,7 @@ impl Kind {
         }
         match self {
             Self::Vanilla(_) => stack.components().is_none() && stack.damage_component().is_none(),
+            Self::Potion(expected) => matches_potion(stack, expected),
             Self::Slimefun(item) => item_id(stack).as_deref() == Some(item.id),
         }
     }
@@ -84,11 +88,49 @@ impl Kind {
     pub fn stack(self, host: &dyn Host, count: u32) -> Option<ItemStack> {
         let material = Identifier::parse(self.material()).ok()?;
         let mut stack = ItemStack::new(host.item_key(&material)?, count)?;
-        if let Self::Slimefun(item) = self {
-            stack.set_components(item.components()).ok()?;
+        match self {
+            Self::Slimefun(item) => stack.set_components(item.components()).ok()?,
+            Self::Potion(potion) => stack
+                .set_components(Compound::from([(
+                    "minecraft:potion_contents".into(),
+                    Tag::compound([("potion", string(potion))]),
+                )]))
+                .ok()?,
+            Self::Vanilla(_) => {}
         }
         Some(stack)
     }
+}
+
+fn matches_potion(stack: &ItemStack, expected: &str) -> bool {
+    let Some(components) = stack.components().map(|patch| patch.as_nbt()) else {
+        return false;
+    };
+    let potion = components
+        .get(&"minecraft:potion_contents".into())
+        .and_then(|contents| match contents {
+            Tag::String(_) => Some(contents),
+            _ => contents.get("potion"),
+        });
+    let Some(Tag::String(potion)) = potion else {
+        return false;
+    };
+    let Ok(potion) = potion.to_string() else {
+        return false;
+    };
+    let has_lore = matches!(
+        components.get(&"minecraft:lore".into()),
+        Some(Tag::List(lines)) if !lines.is_empty()
+    );
+    let has_model = match components.get(&"minecraft:custom_model_data".into()) {
+        Some(Tag::Int(_)) => true,
+        Some(model) => matches!(model.get("floats"), Some(Tag::List(floats)) if !floats.is_empty()),
+        None => false,
+    };
+    potion.trim_start_matches("minecraft:") == expected.trim_start_matches("minecraft:")
+        && !has_lore
+        && !has_model
+        && !components.contains_key(&"minecraft:custom_name".into())
 }
 
 impl SlimefunItem {
@@ -193,6 +235,7 @@ impl SlimefunItem {
         crate::elevator::decorate(self.id, &mut components);
         crate::medical::decorate(self.id, &mut components);
         crate::magic_eye::decorate(self.id, &mut components);
+        crate::zombie_pills::decorate(self.id, &mut components);
         if self.id == crate::infernal_bonemeal::INFERNAL_BONEMEAL.id() {
             components.insert("minecraft:lore".into(), crate::infernal_bonemeal::lore());
         }

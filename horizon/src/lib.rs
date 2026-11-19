@@ -90,6 +90,7 @@ mod storage;
 mod tape_measure;
 mod thermal_machines;
 mod universal_storage;
+mod zombie_pills;
 
 use compressor::DelayedCrafts;
 use machine::{Machine, Settings};
@@ -532,6 +533,9 @@ impl Hooks for Slimefun {
         let HostSide::Server(host) = host else {
             return None;
         };
+        if let Some(result) = zombie_pills::interact(host, event) {
+            return Some(result);
+        }
         (matches!(event.kind, "minecraft:cow" | "minecraft:mooshroom")
             && event.stack.is_some_and(|held| jet_boots::STEEL_THRUSTER.matches(host, held)))
             .then_some(InteractionResult::Consume)
@@ -858,6 +862,12 @@ impl Hooks for Slimefun {
         let HostSide::Server(host) = host else {
             return Flow::Continue;
         };
+        if event.click.stack.is_some_and(|stack| {
+            zombie_pills::MAGICAL_ZOMBIE_PILLS.matches(host, stack)
+        }) {
+            *event.cancellation_result = InteractionResult::Fail;
+            return Flow::Cancel;
+        }
         if *event.use_block == TriState::False {
             return Flow::Continue;
         }

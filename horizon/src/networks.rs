@@ -256,7 +256,7 @@ impl Component {
             Self::TrashCan => "Trash can | Seven input slots".into(),
             Self::ReactorPort => "Reactor Access Port | Three blocks above a Reactor".into(),
             Self::BlastResistant(crate::items::Kind::Slimefun(item)) => item.name.into(),
-            Self::BlastResistant(crate::items::Kind::Vanilla(item)) => item.into(),
+            Self::BlastResistant(kind) => kind.id().into(),
             Self::IngredientHead => "Slimefun cooking ingredient".into(),
             Self::DuctTape => "Duct Tape".into(),
             Self::CargoInput => cargo_terminal("Cargo input", metadata),

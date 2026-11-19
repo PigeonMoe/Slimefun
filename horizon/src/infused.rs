@@ -36,7 +36,7 @@ item!(
             }),
             None => None,
         },
-        Kind::Vanilla(_) => None,
+        Kind::Vanilla(_) | Kind::Potion(_) => None,
     }
 );
 

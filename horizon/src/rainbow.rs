@@ -294,7 +294,7 @@ pub(crate) fn decorate(id: &str, patch: &mut Compound) {
     if record.palette != Palette::All
         && let Some((name, variant)) = match record.kind {
             Kind::Slimefun(item) => item.name.split_once(" ("),
-            Kind::Vanilla(_) => None,
+            Kind::Vanilla(_) | Kind::Potion(_) => None,
         }
     {
         patch.insert(

@@ -715,7 +715,7 @@ fn entry_name(entry: &Entry) -> String {
         Some(label) => label.to_owned(),
         None => match entry.item.kind {
             Kind::Slimefun(item) => item.name.to_owned(),
-            Kind::Vanilla(id) => id.trim_start_matches("minecraft:").replace('_', " "),
+            Kind::Vanilla(id) | Kind::Potion(id) => id.trim_start_matches("minecraft:").replace('_', " "),
         },
     }
 }

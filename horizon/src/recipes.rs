@@ -207,7 +207,7 @@ pub(crate) fn researches() -> impl Iterator<Item = &'static Research> {
         .chain(crate::enchantment_machines::RESEARCHES)
         .chain(crate::elemental_staves::RESEARCHES.iter().copied())
         .chain([&crate::magic_eye::RESEARCH])
-        .chain([&crate::infernal_bonemeal::RESEARCH])
+        .chain([&crate::infernal_bonemeal::RESEARCH, &crate::zombie_pills::RESEARCH])
         .chain(crate::snacks::RESEARCHES.iter().copied())
         .chain([&crate::smelters_pickaxe::RESEARCH])
         .chain([&crate::spawner_repair::CONTAINMENT, &crate::spawner_repair::REPAIRING])
@@ -235,7 +235,7 @@ pub(crate) fn magic_crafting() -> impl Iterator<Item = &'static CraftingRecipe> 
         .chain([&crate::spawner_repair::TOOL])
         .chain(crate::magic_weapons::CRAFTING)
         .chain(crate::ore_tools::CRAFTING)
-        .chain([&crate::infused::MAGIC])
+        .chain([&crate::infused::MAGIC, &crate::zombie_pills::CRAFTING])
 }
 
 pub(crate) fn smelting() -> impl Iterator<Item = &'static SmeltingRecipe> {
