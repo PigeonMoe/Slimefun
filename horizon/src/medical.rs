@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use mod_api::{
-    ActiveEffect, Compound, Flow, GameMode, Hand, HostTransaction, ItemPlace, ItemResource,
-    ItemStack, LivingEntityUseItemFinishEvent, LivingEntityUseItemStartEvent, LivingRef, PlayerRef,
-    ServerHost, SoundSource, Tag, Text,
+    ActiveEffect, Compound, Flow, GameMode, Hand, ItemStack, LivingEntityUseItemFinishEvent,
+    LivingEntityUseItemStartEvent, LivingRef, PlayerRef, ServerHost, SoundSource, Tag, Text,
 };
 
 use crate::{
@@ -240,19 +239,8 @@ pub(crate) fn use_supply(
     if health <= 0.0 || !treatment.useful(health, max_health, fire) {
         return false;
     }
-    if mode != GameMode::Creative {
-        let slot = ItemPlace::PlayerHand {
-            player: player.uuid(),
-            hand,
-        };
-        let paid = host.transaction(|host, tx| {
-            (slot.extract(host, tx, &ItemResource::of(item), 1) == 1)
-                .then_some(())
-                .ok_or(())
-        });
-        if paid.is_err() {
-            return true;
-        }
+    if mode != GameMode::Creative && !crate::item_clicks::consume_one(host, player, hand, item) {
+        return true;
     }
     match treatment {
         Treatment::Wrap { amplifier } => {

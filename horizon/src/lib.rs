@@ -71,6 +71,7 @@ mod rainbow;
 mod random;
 mod recipes;
 mod research;
+mod snacks;
 mod soulbound_gear;
 mod soulbound_rune;
 mod stomper;
@@ -99,6 +100,7 @@ struct Slimefun {
     magnets: infused::Magnets,
     settings: Mutex<Settings>,
     item_clicks: item_clicks::ItemClicks,
+    snacks: snacks::Snacks,
     rolls: Rolls,
     chest: Mutex<Option<ItemKey>>,
     networks: Arc<Mutex<network_runtime::Networks>>,
@@ -127,6 +129,7 @@ impl Default for Slimefun {
             magnets: infused::Magnets::default(),
             settings: Mutex::new(Settings::default()),
             item_clicks: item_clicks::ItemClicks::default(),
+            snacks: snacks::Snacks::default(),
             rolls: Rolls::default(),
             chest: Mutex::new(None),
             networks: Arc::default(),
@@ -719,9 +722,11 @@ impl Hooks for Slimefun {
                 *event.cancellation_result = InteractionResult::Consume;
                 return Flow::Cancel;
             }
-            if elemental_staves::use_staff(host, player, held, || {
-                self.settings.lock().unwrap().wind_power
-            }) {
+            if snacks::use_sugar(host, player, event.click.hand, held, Some(event.click.pos))
+                || elemental_staves::use_staff(host, player, held, || {
+                    self.settings.lock().unwrap().wind_power
+                })
+            {
                 self.item_clicks
                     .record_block_use(host, event.click.player, event.click.hand, held);
             }
@@ -917,6 +922,7 @@ impl Hooks for Slimefun {
             || medical::HEAVY_CREAM.matches(host, event.click.stack)
             || medical::use_supply(host, player, event.click.hand, event.click.stack)
             || magic_eye::use_held(host, player, event.click.stack)
+            || snacks::use_sugar(host, player, event.click.hand, event.click.stack, None)
             || elemental_staves::use_staff(host, player, event.click.stack, || {
                 self.settings.lock().unwrap().wind_power
             })
@@ -1095,6 +1101,10 @@ impl Hooks for Slimefun {
                 if result != Flow::Continue {
                     return result;
                 }
+                let result = snacks::start(host, event);
+                if result != Flow::Continue {
+                    return result;
+                }
                 juice::start(host, event)
             }
             _ => Flow::Continue,
@@ -1110,6 +1120,7 @@ impl Hooks for Slimefun {
             juice::finish(host, event);
             thermal_machines::finish_eating_jerky(host, event);
             medical::finish(host, event);
+            self.snacks.finish(host, event, &self.rolls);
         }
     }
 
@@ -1247,6 +1258,7 @@ impl Hooks for Slimefun {
     }
 
     fn scheduled_task(&self, host: &mut dyn ServerHost, event: &mut ScheduledTaskEvent<'_>) {
+        self.snacks.due(host, event);
         self.soulbound_rituals.due(host, event);
         self.elevators.due(host, event);
         self.block_placers.due(host, event, &self.networks);
@@ -1263,6 +1275,7 @@ impl Hooks for Slimefun {
 
     fn server_stopping(&self, host: &mut dyn ServerHost, _: &mut ServerStoppingEvent) {
         self.item_clicks.clear();
+        self.snacks.clear();
         self.soulbound_rituals.clear();
         self.elevators.clear();
         self.block_placers.clear();

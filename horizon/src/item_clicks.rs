@@ -2,7 +2,9 @@
 
 use std::{collections::BTreeMap, sync::Mutex};
 
-use mod_api::{Hand, ItemKey, ItemStack, ServerHost};
+use mod_api::{
+    Hand, HostTransaction, ItemKey, ItemPlace, ItemResource, ItemStack, PlayerRef, ServerHost,
+};
 
 use crate::items::item_id;
 
@@ -76,11 +78,62 @@ impl ItemClicks {
     }
 }
 
+pub(crate) fn consume_one(
+    host: &mut dyn ServerHost,
+    player: PlayerRef,
+    hand: Hand,
+    item: &ItemStack,
+) -> bool {
+    let held = ItemPlace::PlayerHand {
+        player: player.uuid(),
+        hand,
+    };
+    host.transaction(|host, tx| {
+        (held.extract(host, tx, &ItemResource::of(item), 1) == 1)
+            .then_some(())
+            .ok_or(())
+    })
+    .is_ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::medical::{BANDAGE, RAG};
     use mod_api::{Identifier, testing::FakeHost};
+
+    #[test]
+    fn right_click_consumption_removes_exactly_one_identical_item_from_the_clicked_hand() {
+        use crate::snacks::MAGIC_SUGAR;
+        use mod_api::prelude::PlayersHost;
+
+        let mut host = FakeHost::new();
+        host.registries
+            .resolve_items([Identifier::parse(MAGIC_SUGAR.material()).unwrap()])
+            .unwrap();
+        let plain_sugar = crate::items::Kind::Vanilla("minecraft:sugar")
+            .stack(&host, 2)
+            .unwrap();
+        let enchanted_sugar = MAGIC_SUGAR.stack(&host, 2).unwrap();
+        let joined = host.join(59, 15);
+        joined.slots.insert(0, plain_sugar.clone());
+        joined.slots.insert(-106, enchanted_sugar.clone());
+        let player = host.player(59).unwrap();
+
+        assert!(!consume_one(
+            &mut host,
+            player,
+            Hand::Main,
+            &enchanted_sugar
+        ));
+        assert!(consume_one(&mut host, player, Hand::Off, &enchanted_sugar));
+        let player = host.players.get(59).unwrap();
+        assert_eq!(player.slots.get(&0), Some(&plain_sugar));
+        assert_eq!(
+            player.slots.get(&-106),
+            MAGIC_SUGAR.stack(&host, 1).as_ref()
+        );
+    }
 
     #[test]
     fn the_same_hand_and_identity_suppress_only_the_following_predicted_packet() {
