@@ -197,6 +197,8 @@ Book Binder 以书架为载体，将两本附魔书合成一本。相同附魔�
 
 Enhanced Furnace I–XI、Reinforced Furnace 和 Carbonado Edged Furnace 使用原版熔炉界面和库存。各档沿用 Paper 的燃料倍率、加速间隔与指定矿石的幸运产量。普通熔炉、高炉和烟熏炉不受这些规则影响。迁移时用 `/sf storage restore-network` 恢复世界中原有熔炉的 Slimefun 标记，燃料、库存和烹饪状态保留在原版存档中。
 
+灌魔磁铁在魔法工作台制作。研究 `infused_magnet` 后，库存中携带磁铁并按住 Shift，每八刻吸取附近可拾取的物品，默认半径六格。用它和古代符文可在古代祭坛合成灌魔漏斗。漏斗把附近物品移到入口，保留原版漏斗库存、红石及货运行为。默认半径 3.5 格。`[infused-hopper]` 支持 `radius`、`silent`、`toggleable-with-redstone`，`[infused-magnet]` 支持 `pickup-radius`。
+
 全息投影器放置后显示可编辑文字。只有放置者能打开编辑器，在聊天中输入原 Minecraft 颜色代码，或用时钟按每次 0.1 格调整高度。迁移 Paper 投影器时可用 `/sf storage restore-network`，沿用所有者 UUID、文字和偏移，并接管原位置的投影实体。
 
 将货运输入或输出节点挂到库存方块侧面，再右键配置频道。输入和高级输出节点可放置白名单或黑名单物品。输入节点另可启用轮询和智能填充。空白名单不转移物品。货运支持普通库存和已移植的电动机器，每次按实际源、目标库存位置检查 Horizon 的库存转移许可。目标只能接收部分物品时，源端保留余量。

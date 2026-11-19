@@ -203,6 +203,7 @@ impl ItemPart for NetworkPlacement {
                 crate::heated_pressure::NETHER_ICE_COOLANT_CELL,
                 reactors::NEPTUNIUM,
                 crate::network_recipes::ANDROID_MEMORY_CORE,
+                crate::infused::INFUSED_MAGNET,
                 trash::PORTABLE_DUSTBIN,
             ]
             .iter()
@@ -367,6 +368,7 @@ impl Node {
             | Component::ManualComposter
             | Component::IgnitionChamber
             | Component::EnhancedFurnace
+            | Component::InfusedHopper
             | Component::DuctTape
             | Component::WitherProofObsidian
             | Component::ReactorPort => Network::Independent,
@@ -407,6 +409,7 @@ fn accepts_carrier(component: Component, actual: &str) -> bool {
         Component::AndroidInterface => return actual == "minecraft:dispenser",
         Component::IgnitionChamber => return actual == crate::items::IGNITION_CHAMBER.material(),
         Component::EnhancedFurnace => return actual == "minecraft:furnace",
+        Component::InfusedHopper => return actual == "minecraft:hopper",
         Component::ReactorPort => return actual == reactors::REACTOR_ACCESS_PORT.material(),
         Component::WitherProofObsidian => {
             return actual == crate::enchantment_machines::WITHER_PROOF_OBSIDIAN.material();
@@ -1117,6 +1120,9 @@ pub(crate) fn tick(
     for (&pos, &(node, _)) in &active {
         if node.component == Component::TrashCan {
             trash::clear(host, pos);
+        }
+        if node.component == Component::InfusedHopper {
+            crate::infused::tick_hopper(host, level, pos, settings.infused);
         }
         if node.component == Component::Android
             && let Some(movement) = crate::android_machine::tick(

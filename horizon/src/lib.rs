@@ -36,8 +36,8 @@ mod compressor;
 mod crucible;
 mod electric_processing;
 mod enchantment_machines;
-mod energy_gadgets;
 mod enhanced_furnaces;
+mod energy_gadgets;
 mod factory;
 mod food_machines;
 mod fuel_generators;
@@ -52,6 +52,7 @@ mod heated_pressure;
 mod hologram_projector;
 mod ignition_chamber;
 mod industrial_miner;
+mod infused;
 mod items;
 mod juice;
 mod machine;
@@ -83,6 +84,7 @@ struct Slimefun {
     crucibles: crucible::Crucibles,
     industrial_miners: industrial_miner::Miners,
     solar_helmet: energy_gadgets::SolarHelmet,
+    magnets: infused::Magnets,
     settings: Mutex<Settings>,
     rolls: Rolls,
     chest: Mutex<Option<ItemKey>>,
@@ -107,6 +109,7 @@ impl Default for Slimefun {
             crucibles: crucible::Crucibles::default(),
             industrial_miners: industrial_miner::Miners::default(),
             solar_helmet: energy_gadgets::SolarHelmet::default(),
+            magnets: infused::Magnets::default(),
             settings: Mutex::new(Settings::default()),
             rolls: Rolls::default(),
             chest: Mutex::new(None),
@@ -161,6 +164,7 @@ impl Slimefun {
         self.solar_helmet.configure(table.get("solar-helmet"));
         settings.book_binder = book_binder::Rules::read_config(&table);
         enchantment_machines::configure(&table);
+        settings.infused = infused::Settings::read_config(&table);
         if let Some(value) = table
             .get("miner-android")
             .and_then(|section| section.get("reduced-block-updates"))
@@ -282,6 +286,7 @@ impl Hooks for Slimefun {
             "minecraft:player_head",
             "minecraft:daylight_detector",
             "minecraft:furnace",
+            "minecraft:hopper",
             "minecraft:smoker",
             "minecraft:enchanting_table",
             "minecraft:dropper",
@@ -441,9 +446,7 @@ impl Hooks for Slimefun {
     }
 
     fn piston_pre(&self, level: &dyn LevelHost, event: &mut mod_api::PistonPreEvent<'_>) -> Flow {
-        if network_runtime::protect_piston(level, event)
-            || hologram_projector::piston_protected(level, event)
-        {
+        if network_runtime::protect_piston(level, event) || hologram_projector::piston_protected(level, event) {
             Flow::Cancel
         } else {
             Flow::Continue
@@ -890,6 +893,7 @@ impl Hooks for Slimefun {
         self.bee_wings.stop(event.player);
         self.gps.logout(event.player);
         self.androids.logout(event.player);
+        self.magnets.stop(event.player);
         self.holograms.logout(event.player);
         self.transport.logout(event.player);
     }
@@ -942,6 +946,12 @@ impl Hooks for Slimefun {
     ) {
         self.transport
             .teleported(host, event.player, event.dimension, event.to);
+    }
+
+    fn player_toggle_sneak(&self, host: &mut dyn ServerHost, event: &mut mod_api::PlayerToggleSneakEvent<'_>) {
+        if let Some(player) = host.player(event.player) {
+            self.magnets.toggle(host, player, event.sneaking, self.settings.lock().unwrap().infused);
+        }
     }
 
     fn entity_toggle_glide(
@@ -1082,6 +1092,7 @@ impl Hooks for Slimefun {
             auto_crafter::refresh(host, event.level);
             armor_forge::tick_equipment(host, event.level);
             self.solar_helmet.tick(host, event.level);
+            self.magnets.tick(host, event.level);
             self.bee_wings.tick(host, event.level);
             self.transport.tick(&self.networks, host, event.level);
         }
@@ -1129,6 +1140,7 @@ impl Hooks for Slimefun {
         self.universal.clear();
         self.gps.clear();
         self.androids.clear();
+        self.magnets.clear();
         self.butcher_androids.clear();
         self.holograms.clear();
         self.transport.clear();

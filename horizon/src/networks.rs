@@ -16,6 +16,7 @@ pub(crate) enum Component {
     ManualComposter,
     IgnitionChamber,
     EnhancedFurnace,
+    InfusedHopper,
     EnergyConnector,
     Capacitor(u32),
     ElectricMachine {
@@ -99,6 +100,7 @@ impl Component {
             "REACTOR_ACCESS_PORT" => Self::ReactorPort,
             "WITHER_PROOF_OBSIDIAN" => Self::WitherProofObsidian,
             "DUCT_TAPE" => Self::DuctTape,
+            "INFUSED_HOPPER" => Self::InfusedHopper,
             "TRASH_CAN_BLOCK" => Self::TrashCan,
             "GPS_GEO_SCANNER" => Self::GeoScanner,
             "GPS_CONTROL_PANEL" => Self::GpsControlPanel,
@@ -199,6 +201,7 @@ impl Component {
             }
             Self::ManualCrucible => "Manual Crucible".into(),
             Self::ManualComposter => "Manual Composter".into(),
+            Self::InfusedHopper => "Infused Hopper".into(),
             Self::IgnitionChamber => "Automatic Ignition Chamber".into(),
             Self::EnhancedFurnace => {
                 "Enhanced furnace | Native input, fuel and output slots".into()

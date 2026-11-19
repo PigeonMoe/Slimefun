@@ -111,6 +111,9 @@ impl SlimefunItem {
                 text("", "white", false), text("Projects an Editable Hologram", "white", false),
             ]));
         }
+        if let Some(lore) = crate::infused::lore(self.id) {
+            components.insert("minecraft:lore".into(), lore);
+        }
         if let Some(lore) = crate::energy_gadgets::lore(self.id) {
             components.insert("minecraft:lore".into(), lore);
         }
@@ -902,6 +905,7 @@ item!(
 pub(crate) fn network_item(id: &str) -> Option<Kind> {
     [
         crate::block_placer::BLOCK_PLACER,
+        crate::infused::INFUSED_HOPPER,
         ENERGY_REGULATOR,
         ENERGY_CONNECTOR,
         SMALL_CAPACITOR,

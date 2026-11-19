@@ -229,6 +229,7 @@ pub(crate) const CRAFTING: &[CraftingRecipe] = &[
         1,
         &NECROMANCY,
     ),
+    crate::infused::ALTAR,
 ];
 
 const fn altar_recipe(
@@ -1342,7 +1343,10 @@ mod tests {
     #[test]
     fn the_paper_ring_accepts_rotations_but_not_mirrors_or_a_different_catalyst() {
         let mut host = FakeHost::new();
-        let essence = CRAFTING.last().unwrap();
+        let essence = CRAFTING
+            .iter()
+            .find(|recipe| recipe.output.kind == ESSENCE_OF_AFTERLIFE)
+            .unwrap();
         host.registries
             .resolve_items(
                 essence

@@ -143,6 +143,7 @@ pub(crate) fn researches() -> impl Iterator<Item = &'static Research> {
         .chain([&crate::auto_crafter::RESEARCH])
         .chain([&crate::composter::RESEARCH])
         .chain([&crate::block_placer::RESEARCH])
+        .chain([&crate::infused::HOPPER_RESEARCH, &crate::infused::MAGNET_RESEARCH])
         .chain([
             &crate::industrial_miner::RESEARCH,
             &crate::industrial_miner::ADVANCED_RESEARCH,
@@ -188,6 +189,7 @@ pub(crate) fn magic_crafting() -> impl Iterator<Item = &'static CraftingRecipe> 
         .into_iter()
         .chain(crate::backpacks::MAGIC_CRAFTING)
         .chain(crate::ancient_altar::MAGIC_CRAFTING)
+        .chain([&crate::infused::MAGIC])
 }
 
 pub(crate) fn smelting() -> impl Iterator<Item = &'static SmeltingRecipe> {
