@@ -218,10 +218,126 @@ fn paper_lore(stack: &ItemStack) -> Option<&[Tag]> {
     }
 }
 
+fn paper_text(tag: &Tag) -> Option<String> {
+    let mut output = String::new();
+    let mut formatted = false;
+    append_paper_text(tag, &mut output, &mut formatted, 0)?;
+    Some(output)
+}
+
+// Paper's legacy ItemMeta accessors visit literal components in order and
+// preserve their color and formatting codes, ignoring hover and click events.
+fn append_paper_text(
+    tag: &Tag,
+    output: &mut String,
+    formatted: &mut bool,
+    depth: usize,
+) -> Option<()> {
+    if depth >= 32 {
+        return None;
+    }
+    let (literal, color) = match tag {
+        Tag::List(children) => {
+            for child in children {
+                append_paper_text(child, output, formatted, depth + 1)?;
+            }
+            return Some(());
+        }
+        Tag::String(literal) => (literal.to_string().ok()?, None),
+        Tag::Compound(_) => {
+            let Tag::String(literal) = tag.get("text")? else {
+                return None;
+            };
+            let color = match tag.get("color") {
+                Some(Tag::String(color)) => Some(color.to_string().ok()?),
+                None => None,
+                _ => return None,
+            };
+            (literal.to_string().ok()?, color)
+        }
+        _ => return None,
+    };
+    if let Some(color) = color {
+        const COLORS: [&str; 16] = [
+            "black",
+            "dark_blue",
+            "dark_green",
+            "dark_aqua",
+            "dark_red",
+            "dark_purple",
+            "gold",
+            "gray",
+            "dark_gray",
+            "blue",
+            "green",
+            "aqua",
+            "red",
+            "light_purple",
+            "yellow",
+            "white",
+        ];
+        const RGB: [u32; 16] = [
+            0x000000, 0x0000aa, 0x00aa00, 0x00aaaa, 0xaa0000, 0xaa00aa, 0xffaa00, 0xaaaaaa,
+            0x555555, 0x5555ff, 0x55ff55, 0x55ffff, 0xff5555, 0xff55ff, 0xffff55, 0xffffff,
+        ];
+        let rgb = color
+            .strip_prefix('#')
+            .filter(|hex| hex.len() == 6)
+            .and_then(|hex| u32::from_str_radix(hex, 16).ok());
+        let legacy = COLORS
+            .iter()
+            .position(|&name| name == color)
+            .or_else(|| RGB.iter().position(|value| Some(*value) == rgb));
+        if let Some(index) = legacy {
+            output.push('§');
+            output.push(char::from_digit(index as u32, 16)?);
+        } else {
+            output.push_str("§x");
+            for digit in format!("{:06x}", rgb?).chars() {
+                output.push('§');
+                output.push(digit);
+            }
+        }
+        *formatted = true;
+    } else if !literal.is_empty() && *formatted {
+        output.push_str("§r");
+        *formatted = false;
+    }
+    for (style, code) in [
+        ("bold", 'l'),
+        ("italic", 'o'),
+        ("underlined", 'n'),
+        ("strikethrough", 'm'),
+        ("obfuscated", 'k'),
+    ] {
+        if matches!(tag.get(style), Some(Tag::Byte(value)) if *value != 0) {
+            output.push('§');
+            output.push(code);
+            *formatted = true;
+        }
+    }
+    output.push_str(&literal);
+    if let Some(extra) = tag.get("extra") {
+        append_paper_text(extra, output, formatted, depth + 1)?;
+    }
+    Some(())
+}
+
+fn same_text(a: &Tag, b: &Tag) -> bool {
+    a == b || matches!((paper_text(a), paper_text(b)), (Some(a), Some(b)) if a == b)
+}
+
 fn same_lore(a: &ItemStack, b: &ItemStack) -> bool {
     let lines = |line: &&Tag| !crate::soulbound_rune::is_soulbound_lore(line);
+    fn comparable(line: &Tag) -> Result<String, &Tag> {
+        paper_text(line).ok_or(line)
+    }
     match (paper_lore(a), paper_lore(b)) {
-        (Some(a), Some(b)) => a.iter().filter(lines).eq(b.iter().filter(lines)),
+        (Some(a), Some(b)) => a
+            .iter()
+            .filter(lines)
+            .map(comparable)
+            .eq(b.iter().filter(lines).map(comparable)),
         (None, None) => true,
         _ => false,
     }
@@ -265,8 +381,16 @@ fn similar(host: &dyn ServerHost, a: &ItemStack, b: &ItemStack, check_lore: bool
     }
     let has_meta =
         |stack: &ItemStack| stack.components().is_some() || stack.damage_component().is_some();
+    let same_name = match (
+        component(a, "minecraft:custom_name"),
+        component(b, "minecraft:custom_name"),
+    ) {
+        (Some(a), Some(b)) => same_text(a, b),
+        (None, None) => true,
+        _ => false,
+    };
     has_meta(a) == has_meta(b)
-        && component(a, "minecraft:custom_name") == component(b, "minecraft:custom_name")
+        && same_name
         && paper_model_data(a) == paper_model_data(b)
         && (!check_lore || same_lore(a, b))
         && (potion_type(a) == potion_type(b)
@@ -838,6 +962,49 @@ mod tests {
         assert!(!filter.accepts(&host, &make(vec![label], model(13.0, 5.0))));
         let gray_only = restored_filter(&host, &make(vec![gray], model(12.0, 5.0)));
         assert!(!gray_only.accepts(&host, &make(Vec::new(), model(12.0, 5.0))));
+    }
+
+    #[test]
+    fn restored_filter_compares_paper_text_instead_of_the_component_tag_shape() {
+        let mut host = FakeHost::new();
+        let id = "minecraft:stick";
+        host.registries
+            .resolve_items([Identifier::parse(id).unwrap()])
+            .unwrap();
+        let make = |name: Tag, line: Tag| {
+            let mut stack = ItemStack::new(item_key(&host, id).unwrap(), 1).unwrap();
+            stack
+                .set_components(Compound::from([
+                    ("minecraft:custom_name".into(), name),
+                    ("minecraft:lore".into(), Tag::List(vec![line])),
+                ]))
+                .unwrap();
+            stack
+        };
+        let original = make(
+            Tag::String("Archived Cargo".into()),
+            crate::items::text("Restricted", "green", false),
+        );
+        let name = Tag::compound([
+            ("text", Tag::String("Archived Cargo".into())),
+            ("italic", Tag::Byte(0)),
+        ]);
+        let equivalent = Tag::compound([
+            ("text", Tag::String("".into())),
+            (
+                "extra",
+                Tag::List(vec![Tag::compound([
+                    ("text", Tag::String("Restricted".into())),
+                    ("color", Tag::String("#55ff55".into())),
+                ])]),
+            ),
+        ]);
+        let filter = restored_filter(&host, &original);
+        assert!(filter.accepts(&host, &make(name.clone(), equivalent)));
+        assert!(!filter.accepts(
+            &host,
+            &make(name, crate::items::text("Restricted", "aqua", false))
+        ));
     }
 
     #[test]
