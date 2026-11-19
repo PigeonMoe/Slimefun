@@ -117,13 +117,19 @@ pub(super) fn lookup(id: &str) -> Option<&'static Entry> {
 }
 
 pub(super) fn group_entries(group: &Group) -> impl Iterator<Item = &'static Entry> {
+    named_group_entries(group).map(|(_, entry)| entry)
+}
+
+pub(super) fn named_group_entries(
+    group: &Group,
+) -> impl Iterator<Item = (&'static str, &'static Entry)> {
     include_str!("stock.tsv")
         .lines()
         .filter_map(|line| line.split_once('\t'))
         .find(|(key, _)| *key == group.key)
         .into_iter()
         .flat_map(|(_, ids)| ids.split_ascii_whitespace())
-        .filter_map(lookup)
+        .filter_map(|id| Some((id, lookup(id)?)))
 }
 
 const GRIND_STONE: Research = Research {

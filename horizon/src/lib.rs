@@ -594,6 +594,8 @@ impl Hooks for Slimefun {
             Command::new("sf guide"),
             Command::new("slimefun open_guide"),
             Command::new("sf open_guide"),
+            Command::new("slimefun search [query:text]"),
+            Command::new("sf search [query:text]"),
             Command::new("slimefun status"),
             Command::new("sf status"),
             Command::new("slimefun recipe <item:text>"),
@@ -678,6 +680,20 @@ impl Hooks for Slimefun {
             return Flow::Continue;
         }
         let lines = match path.next() {
+            Some("search") => {
+                match (&*event.source, event.command.argument("query")) {
+                    (CommandSource::Player { player, .. }, Some(CommandArgumentValue::String(query))) => {
+                        self.guide.search(host, *player, query);
+                    }
+                    (CommandSource::Player { .. }, _) => {
+                        let _ = host.commands().feedback(Text::literal("Usage: /sf search <SearchTerm>"));
+                    }
+                    _ => {
+                        let _ = host.commands().feedback(Text::literal("Only players can use this command."));
+                    }
+                }
+                return Flow::Cancel;
+            }
             Some(action @ ("guide" | "open_guide")) => {
                 if let CommandSource::Player { player, .. } = *event.source {
                     if action == "guide" {
@@ -1108,7 +1124,11 @@ impl Hooks for Slimefun {
             event.replies.push(reply);
             return Flow::Cancel;
         }
-        Flow::Continue
+        if self.guide.chat(host, event.player, event.raw_text) {
+            Flow::Cancel
+        } else {
+            Flow::Continue
+        }
     }
 
     #[listener(priority = -100)]
