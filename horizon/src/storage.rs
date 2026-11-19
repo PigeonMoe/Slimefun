@@ -361,6 +361,10 @@ fn at(
         if action == "restore-inventory" && !row.contains_key("paper_inventory") {
             return Err("There is no archived Paper inventory at that position.".into());
         }
+        if action == "restore-network" && id == crate::spawner_repair::REINFORCED_SPAWNER.id() {
+            return crate::spawner_repair::restore_paper(host, level, pos)
+                .map(|restored| vec![restored]);
+        }
         if let Some(kind) = ancient_altar::paper_device(id) {
             return ancient_altar::restore_paper(host, level, pos, kind, row)
                 .map(|restored| vec![restored]);
@@ -534,6 +538,7 @@ fn restore_chunk(
             let id = record_id(row)?;
             (id == "OUTPUT_CHEST"
                 || id == block_placer::BLOCK_PLACER.id()
+                || id == crate::spawner_repair::REINFORCED_SPAWNER.id()
                 || id == crate::network_recipes::HOLOGRAM_PROJECTOR.id()
                 || Component::for_item(id).is_some()
                 || crate::rainbow::block(id).is_some()
@@ -566,6 +571,8 @@ fn restore_chunk(
             crate::hologram_projector::restore_paper(host, level, pos, row)
         } else if unsupported_menu {
             Err("This block has archived items without a supported menu.".into())
+        } else if id == crate::spawner_repair::REINFORCED_SPAWNER.id() {
+            crate::spawner_repair::restore_paper(host, level, pos)
         } else if crate::rainbow::block(id).is_some() {
             crate::rainbow::placed::restore_paper(host, level, pos, id)
         } else if id == "OUTPUT_CHEST" {

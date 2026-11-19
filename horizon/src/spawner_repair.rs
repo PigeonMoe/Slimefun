@@ -330,6 +330,36 @@ pub(crate) fn place_repaired(
     .is_ok()
 }
 
+/// Reattach the Paper identity to the migrated vanilla spawner in place.
+pub(crate) fn restore_paper(
+    host: &mut dyn ServerHost,
+    level: LevelRef,
+    pos: [i32; 3],
+) -> Result<String, String> {
+    if !level.in_place(host) || !level.is_loaded(host, pos) {
+        return Err("Load the Paper spawner in the active dimension first.".into());
+    }
+    if !level
+        .block(host, pos)
+        .is_some_and(|block| block.id(host) == CARRIER)
+    {
+        return Err("The archived Reinforced Spawner needs its existing spawner block.".into());
+    }
+    let entity = host
+        .block_entity(level, pos)
+        .ok_or("The existing spawner data is unavailable.")?;
+    if !marker_is_repaired(host.block_entity_saved_attachment(
+        entity,
+        REPAIRED.namespace,
+        REPAIRED.name,
+    )) {
+        REPAIRED
+            .set(host, Holder::BlockEntity(pos), true)
+            .map_err(|error| format!("Could not save the Paper spawner identity: {error:?}"))?;
+    }
+    Ok("Restored REINFORCED_SPAWNER without replacing its native configuration.".into())
+}
+
 struct Placement;
 
 #[mod_api::horizon_part]
@@ -499,13 +529,13 @@ impl Spawners {
             return;
         };
         let level = candidate.level;
-        let mut xyz = event.pos.map(|p| f64::from(p) + 0.5);
+        let mut xyz = event.pos.map(f64::from);
         if let Some(mut random) = level.random(host) {
-            xyz = event
-                .pos
-                .map(|p| f64::from(p) + f64::from(random.next_float() * 0.7) + 0.15);
+            // CraftWorld.dropItemNaturally samples once per axis around the block origin.
+            xyz = xyz.map(|p| p + (random.next_double() * 0.5 - 0.25));
             let _ = level.set_random(host, random);
         }
+        xyz[1] -= 0.125; // Half the vanilla item entity's height.
         let _ = level.spawn_item(host, xyz[0], xyz[1], xyz[2], stack, 10);
     }
 
