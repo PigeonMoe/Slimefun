@@ -3167,9 +3167,58 @@ mod tests {
     }
 
     #[test]
+    fn both_smeltery_tiers_turn_old_paper_chocolate_milk_into_one_hot_drink() {
+        use crate::items::{CHRISTMAS_CHOCOLATE_MILK, CHRISTMAS_HOT_CHOCOLATE, ID_KEY};
+
+        let host = recipe_host(["minecraft:potion"]);
+        let archived = ItemStack::from_nbt(
+            &host,
+            &Compound::from([
+                ("id".into(), Tag::String("minecraft:potion".into())),
+                ("count".into(), Tag::Int(1)),
+                (
+                    "components".into(),
+                    Tag::compound([(
+                        "minecraft:custom_data",
+                        Tag::compound([(
+                            "PublicBukkitValues",
+                            Tag::compound([(
+                                ID_KEY,
+                                Tag::String("CHRISTMAS_CHOCOLATE_MILK".into()),
+                            )]),
+                        )]),
+                    )]),
+                ),
+            ]),
+        )
+        .unwrap();
+        assert!(CHRISTMAS_CHOCOLATE_MILK.matches(&host, &archived));
+        for (id, index, shown_slot, cost, work, required) in [
+            ("ELECTRIC_SMELTERY", SMELTERY_INPUT[0], 10, 10, 24, 250),
+            ("ELECTRIC_SMELTERY_2", SMELTERY_INPUT[5], 29, 20, 8, 180),
+        ] {
+            let machine = ElectricMachine::for_item(id).unwrap();
+            assert_eq!(machine.menu_slots()[index], shown_slot);
+            let mut data = Compound::new();
+            assert!(write_stack(&host, &mut data, index, Some(archived.clone())));
+            let plan =
+                find_recipe(&host, &data, machine, Settings::default(), false, |_| None).unwrap();
+            assert_eq!(plan.inputs[index], Some((archived.clone(), 1)));
+            assert_eq!(plan.outputs.len(), 1);
+            assert_eq!(plan.outputs[0].count(), 1);
+            assert!(CHRISTMAS_HOT_CHOCOLATE.matches(&host, &plan.outputs[0]));
+            assert_eq!((machine.cost, plan.work_override), (cost, Some(work)));
+            let spent = (0..=work).rev().fold(required, |charge, remaining| {
+                pending_charge(machine, remaining, charge).unwrap()
+            });
+            assert_eq!(spent, 0);
+        }
+    }
+
+    #[test]
     fn electric_smeltery_uses_the_paper_slots_and_prioritizes_the_six_ingredient_alloy() {
         let recipes = advanced_processing::smeltery_recipes();
-        assert_eq!(recipes.len(), 32);
+        assert_eq!(recipes.len(), 33);
         let reinforced = recipes[0];
         assert_eq!(reinforced.output.kind, crate::items::REINFORCED_ALLOY_INGOT);
         assert_eq!(reinforced.inputs.len(), 6);

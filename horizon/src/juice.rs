@@ -5,7 +5,9 @@ use mod_api::{
     ServerHost, Text,
 };
 
-use crate::items::{GOLDEN_APPLE_JUICE, Kind};
+use crate::items::{
+    CHRISTMAS_CHOCOLATE_MILK, CHRISTMAS_HOT_CHOCOLATE, CHRISTMAS_MILK, GOLDEN_APPLE_JUICE, Kind,
+};
 use crate::recipes::{GOLDEN_POTION, JUICER, JUICING};
 use crate::research;
 
@@ -19,10 +21,12 @@ pub(crate) fn start(host: &mut dyn ServerHost, event: &LivingEntityUseItemStartE
     let Some(player) = host.players().acting_player() else {
         return Flow::Continue;
     };
-    let required = if juice == GOLDEN_APPLE_JUICE {
-        &GOLDEN_POTION
-    } else {
-        &JUICER
+    let required = match juice {
+        CHRISTMAS_MILK | CHRISTMAS_CHOCOLATE_MILK | CHRISTMAS_HOT_CHOCOLATE => {
+            return Flow::Continue;
+        }
+        GOLDEN_APPLE_JUICE => &GOLDEN_POTION,
+        _ => &JUICER,
     };
     if !research::can_use(host, player, required) {
         let message = format!("Unlock this research with /sf research {}.", required.id);
@@ -68,6 +72,11 @@ fn identify(host: &dyn ServerHost, stack: &ItemStack) -> Option<Kind> {
     JUICING
         .iter()
         .map(|recipe| recipe.output.kind)
+        .chain([
+            CHRISTMAS_MILK,
+            CHRISTMAS_CHOCOLATE_MILK,
+            CHRISTMAS_HOT_CHOCOLATE,
+        ])
         .find(|kind| kind.id() == id && kind.matches(host, stack))
 }
 
@@ -76,6 +85,103 @@ mod tests {
     use mod_api::{Compound, Identifier, Tag, testing::FakeHost};
 
     use super::*;
+
+    #[test]
+    fn christmas_drinks_keep_paper_effects_and_split_the_crafted_batches() {
+        use mod_api::HostTransaction;
+
+        let mut host = FakeHost::new();
+        host.registries
+            .resolve_items([Identifier::parse("minecraft:potion").unwrap()])
+            .unwrap();
+        host.registries
+            .item_component("minecraft:potion", "minecraft:max_stack_size", Tag::Int(1));
+        let level = host.level.level();
+        host.players.join(1, 2, level);
+        host.players.acting = Some(1);
+        for (drink, color, effect_ticks, hunger) in [
+            (CHRISTMAS_MILK, 0xffffff, 4, "2.5"),
+            (CHRISTMAS_CHOCOLATE_MILK, 0x800000, 11, "6.0"),
+            (CHRISTMAS_HOT_CHOCOLATE, 0x800000, 13, "7.0"),
+        ] {
+            let stack = drink.stack(&host, 1).unwrap();
+            assert_eq!(identify(&host, &stack), Some(drink));
+            let patch = stack.components().unwrap().as_nbt();
+            let potion = patch.get(&"minecraft:potion_contents".into()).unwrap();
+            assert_eq!(potion.get("custom_color"), Some(&Tag::Int(color)));
+            let Some(Tag::List(effects)) = potion.get("custom_effects") else {
+                panic!("the Paper drink has no saturation effect");
+            };
+            assert_eq!(effects[0].get("duration"), Some(&Tag::Int(effect_ticks)));
+            let Some(Tag::List(lines)) = patch.get(&"minecraft:lore".into()) else {
+                panic!("the Paper drink has no hunger lore");
+            };
+            assert!(
+                crate::network_runtime::paper_text(&lines[1])
+                    .unwrap()
+                    .contains(hunger)
+            );
+            assert!(patch.contains_key(&"!minecraft:use_remainder".into()));
+            assert!(matches!(
+                start(
+                    &mut host,
+                    &LivingEntityUseItemStartEvent {
+                        stack: &stack,
+                        entity: None,
+                        hand: mod_api::Hand::Main,
+                        duration: 32,
+                        cancelled: false,
+                    }
+                ),
+                Flow::Continue
+            ));
+        }
+
+        for (x, kind, count, inputs) in [
+            (
+                1,
+                CHRISTMAS_MILK,
+                4,
+                ["minecraft:milk_bucket", "minecraft:glass_bottle"],
+            ),
+            (
+                2,
+                CHRISTMAS_CHOCOLATE_MILK,
+                2,
+                ["CHRISTMAS_MILK", "minecraft:cocoa_beans"],
+            ),
+        ] {
+            let recipe = crate::recipes::crafting()
+                .find(|recipe| recipe.output.kind == kind)
+                .unwrap();
+            assert_eq!(recipe.output.count, count);
+            assert_eq!(
+                recipe.inputs[..2]
+                    .iter()
+                    .map(|kind| kind.unwrap().id())
+                    .collect::<Vec<_>>(),
+                inputs
+            );
+            assert!(recipe.inputs[2..].iter().all(Option::is_none));
+            assert!(recipe.research.id.is_empty());
+
+            let pos = [x, 64, 1];
+            host.level.block_entity(pos).with_items(9);
+            let batch = kind.stack(&host, count).unwrap();
+            host.transaction(|host, tx| {
+                assert_eq!(
+                    crate::machine::deposit_into(host, tx, level, pos, 9, &batch, count),
+                    0
+                );
+                Ok::<_, ()>(())
+            })
+            .unwrap();
+            let one = kind.stack(&host, 1).unwrap();
+            let slots = &host.level.block_entity(pos).items.as_ref().unwrap().slots;
+            assert_eq!(slots.iter().flatten().count() as u32, count);
+            assert!(slots.iter().flatten().all(|stack| stack == &one));
+        }
+    }
 
     #[test]
     fn juicer_produces_seven_drinkable_paper_potions_without_remainders() {

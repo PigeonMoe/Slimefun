@@ -405,6 +405,7 @@ const SMELTERY_REGISTRATION: &[&str] = &[
     "SYNTHETIC_EMERALD",
     "REDSTONE_ALLOY",
     "MAGNET",
+    "CHRISTMAS_HOT_CHOCOLATE",
 ];
 
 pub(crate) fn smeltery_recipes() -> &'static [&'static SmeltingRecipe] {

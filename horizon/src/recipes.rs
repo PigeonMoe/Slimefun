@@ -368,6 +368,42 @@ const GOLD_BLOCK: Option<Kind> = Some(crate::items::GOLD_24K_BLOCK);
 
 pub(crate) const CRAFTING: &[CraftingRecipe] = &[
     CraftingRecipe {
+        inputs: [
+            Some(vanilla!("milk_bucket")),
+            Some(vanilla!("glass_bottle")),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ],
+        output: Stack {
+            kind: crate::items::CHRISTMAS_MILK,
+            count: 4,
+        },
+        research: &NO_RESEARCH,
+    },
+    CraftingRecipe {
+        inputs: [
+            Some(crate::items::CHRISTMAS_MILK),
+            Some(vanilla!("cocoa_beans")),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ],
+        output: Stack {
+            kind: crate::items::CHRISTMAS_CHOCOLATE_MILK,
+            count: 2,
+        },
+        research: &NO_RESEARCH,
+    },
+    CraftingRecipe {
         inputs: [Some(GOLD_24K); 9],
         output: stack(crate::items::GOLD_24K_BLOCK, 1),
         research: &GOLDEN_CITY,
@@ -1160,6 +1196,10 @@ pub(crate) const ALLOY_RECIPES: &[SmeltingRecipe] = &[
 ];
 
 pub(crate) const SMELTING: &[SmeltingRecipe] = &[
+    smelt(
+        &[stack(crate::items::CHRISTMAS_CHOCOLATE_MILK, 1)],
+        crate::items::CHRISTMAS_HOT_CHOCOLATE,
+    ),
     smelt(
         &[
             stack(SYNTHETIC_DIAMOND, 1),

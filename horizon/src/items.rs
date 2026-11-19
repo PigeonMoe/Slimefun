@@ -351,7 +351,11 @@ impl SlimefunItem {
                             (
                                 "extra",
                                 Tag::List(vec![
-                                    text("3.0", "aqua", true),
+                                    text(
+                                        &format!("{:.1}", (f64::from(juice.duration) + 1.0) / 2.0),
+                                        "aqua",
+                                        true,
+                                    ),
                                     text(" Hunger", "gray", true),
                                 ]),
                             ),
@@ -437,6 +441,31 @@ macro_rules! juice {
         });
     };
 }
+
+juice!(
+    CHRISTMAS_MILK,
+    "Glass of Milk",
+    "gold",
+    0xffffff,
+    "minecraft:saturation",
+    4
+);
+juice!(
+    CHRISTMAS_CHOCOLATE_MILK,
+    "Chocolate Milk",
+    "gold",
+    0x800000,
+    "minecraft:saturation",
+    11
+);
+juice!(
+    CHRISTMAS_HOT_CHOCOLATE,
+    "Hot Chocolate",
+    "gold",
+    0x800000,
+    "minecraft:saturation",
+    13
+);
 
 juice!(APPLE_JUICE, "Apple Juice", "red", 0xff0000);
 juice!(CARROT_JUICE, "Carrot Juice", "gold", 0xffa500);
