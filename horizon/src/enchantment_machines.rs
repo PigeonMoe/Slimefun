@@ -6,11 +6,16 @@ use crate::{
     advanced_processing::{Family, Machine, Plan},
     items::{
         CARBONADO, ELECTRIC_MOTOR, Kind, LEAD_INGOT, REINFORCED_PLATE, SYNTHETIC_DIAMOND, item,
-        item_id,
     },
     network_recipes::{BIG_CAPACITOR, BLISTERING_INGOT_3, HARDENED_GLASS},
     recipes::{CraftingRecipe, Research, Stack},
 };
+
+#[path = "enchantment_settings.rs"]
+mod settings;
+
+use settings::{MachineRules, Rules};
+pub(crate) use settings::{configure, default_config};
 
 item!(
     AUTO_ENCHANTER,
@@ -307,87 +312,149 @@ fn book_slot(host: &dyn Host, inputs: [&ItemStack; 2], book_kind: Kind) -> Optio
     }
 }
 
-fn enchant(host: &dyn Host, target: &ItemStack, book: &ItemStack) -> Option<(Vec<ItemStack>, u32)> {
-    let mut applied = levels(host, target, DIRECT)?;
-    let mut transfers = 0;
-    for (id, amount) in levels(host, book, STORED)? {
-        let amount = level(&amount)?;
-        if host.enchantment_supports(&id.to_string().ok()?, target.item())
-            && applied.get(&id).and_then(level).unwrap_or(0) < amount
-        {
-            // AutoEnchanter uses unsafe Bukkit writes after checking the material,
-            // so mutually exclusive enchantments and over-level books are allowed.
-            applied.insert(id, Tag::Int(amount));
-            transfers += 1;
+type Attempt<T> = Option<Result<T, i32>>;
+
+fn select_levels(
+    incoming: Compound,
+    rules: &MachineRules,
+    viewed: bool,
+    applies: impl Fn(&str) -> bool,
+) -> Attempt<Compound> {
+    let mut selected = Compound::new();
+    for (id, raw) in incoming {
+        if !applies(&id.to_string().ok()?) {
+            continue;
+        }
+        let amount = level(&raw)?;
+        if let Some(limit) = rules.level_limit().filter(|limit| amount > *limit) {
+            if viewed {
+                return Some(Err(limit));
+            }
+        } else {
+            selected.insert(id, Tag::Int(amount));
         }
     }
-    if transfers == 0 {
+    Some(Ok(selected))
+}
+
+fn enchant(
+    host: &dyn Host,
+    target: &ItemStack,
+    book: &ItemStack,
+    rules: &MachineRules,
+    viewed: bool,
+) -> Attempt<(Vec<ItemStack>, u32)> {
+    let mut applied = levels(host, target, DIRECT)?;
+    let incoming = levels(host, book, STORED)?;
+    // Paper counts every enchantment already present on both the item and book,
+    // including one that will also be replaced by the new enchantment.
+    let overlap = applied
+        .keys()
+        .filter(|id| incoming.contains_key(*id))
+        .count();
+    let mut selected = match select_levels(incoming, rules, viewed, |id| {
+        host.enchantment_supports(id, target.item())
+    })? {
+        Ok(selected) => selected,
+        Err(limit) => return Some(Err(limit)),
+    };
+    if !rules.override_levels {
+        selected.retain(|id, amount| {
+            applied.get(id).and_then(level).unwrap_or(0) < level(amount).unwrap_or(0)
+        });
+    }
+    let transfers = u32::try_from(selected.len()).ok()?;
+    if transfers == 0
+        || rules
+            .count_limit()
+            .is_some_and(|limit| selected.len() + overlap > limit)
+    {
         return None;
     }
-
+    // Paper uses unsafe Bukkit writes after the material and configured limits
+    // check, including for mutually exclusive or over-vanilla-level enchantments.
+    applied.extend(selected);
     let item = ItemResource::of(target)
         .with_component(host, &ComponentId::new(DIRECT)?, Tag::Compound(applied))
         .ok()?
         .to_stack(1)?;
-    Some((vec![item, BOOK.stack(host, 1)?], transfers))
+    Some(Ok((vec![item, BOOK.stack(host, 1)?], transfers)))
 }
 
-fn disenchant(host: &dyn Host, target: &ItemStack) -> Option<(Vec<ItemStack>, u32)> {
-    // Paper's EnchantedItem flag defaults to false for Staff of Fire.
-    if item_id(target).as_deref() == Some("STAFF_FIRE") {
-        return None;
-    }
+fn disenchant(
+    host: &dyn Host,
+    target: &ItemStack,
+    rules: &MachineRules,
+    viewed: bool,
+) -> Attempt<(Vec<ItemStack>, u32)> {
     let mut applied = levels(host, target, DIRECT)?;
-    let transfers = u32::try_from(applied.len()).ok()?;
-    if transfers == 0 {
+    let selected = match select_levels(applied.clone(), rules, viewed, |_| true)? {
+        Ok(selected) => selected,
+        Err(limit) => return Some(Err(limit)),
+    };
+    let transfers = u32::try_from(selected.len()).ok()?;
+    if transfers == 0
+        || rules
+            .count_limit()
+            .is_some_and(|limit| selected.len() > limit)
+    {
         return None;
     }
-    for value in applied.values_mut() {
-        *value = Tag::Int(level(value)?);
-    }
+    applied.retain(|id, _| !selected.contains_key(id));
 
-    let book = ENCHANTED_BOOK.stack(host, 1)?;
-    let mut book_patch = Compound::from([(STORED.into(), Tag::Compound(applied))]);
+    let mut book = ENCHANTED_BOOK.stack(host, 1)?;
+    let mut book_patch = Compound::from([(STORED.into(), Tag::Compound(selected))]);
     let repair = ComponentId::new(REPAIR_COST)?;
     if let Some(cost @ Tag::Int(cost_ticks)) = ItemResource::of(target).value(host, &repair)
         && cost_ticks > 0
     {
         book_patch.insert(REPAIR_COST.into(), cost);
     }
-    let mut book = book;
     book.apply_components(&book_patch).ok()?;
 
-    // Vanilla's default, reached by clearing the patch, has no enchantments
-    // or anvil penalty. Preserve that representation for ordinary stacks.
     let defaults = ItemStack::new(target.item(), 1)?;
-    let direct = ComponentId::new(DIRECT)?;
     let mut clean = ItemResource::of(target).to_stack(1)?;
-    for (id, has_nonempty_default) in [
-        (
-            direct,
-            matches!(host.item_default_component(target.item(), DIRECT), Some(Tag::Compound(levels)) if !levels.is_empty()),
-        ),
-        (
-            repair,
-            matches!(host.item_default_component(target.item(), REPAIR_COST), Some(Tag::Int(cost)) if cost > 0),
-        ),
-    ] {
-        if has_nonempty_default {
-            clean = ItemResource::of(&clean)
-                .without_component(host, &id)
-                .to_stack(1)?;
-        } else {
-            clean.copy_component_from(&defaults, id.as_str());
-        }
+    if applied.is_empty() {
+        clear_component(host, &mut clean, &defaults, DIRECT)?;
+    } else {
+        clean = ItemResource::of(&clean)
+            .with_component(host, &ComponentId::new(DIRECT)?, Tag::Compound(applied))
+            .ok()?
+            .to_stack(1)?;
     }
-    Some((vec![clean, book], transfers))
+    clear_component(host, &mut clean, &defaults, REPAIR_COST)?;
+    Some(Ok((vec![clean, book], transfers)))
 }
 
-pub(crate) fn next(
+fn clear_component(
+    host: &dyn Host,
+    stack: &mut ItemStack,
+    defaults: &ItemStack,
+    id: &str,
+) -> Option<()> {
+    let has_nonempty_default = match host.item_default_component(stack.item(), id) {
+        Some(Tag::Compound(levels)) => !levels.is_empty(),
+        Some(Tag::Int(cost)) => cost > 0,
+        _ => false,
+    };
+    if has_nonempty_default {
+        *stack = ItemResource::of(stack)
+            .without_component(host, &ComponentId::new(id)?)
+            .to_stack(1)?;
+    } else {
+        stack.copy_component_from(defaults, id);
+    }
+    Some(())
+}
+
+fn evaluate(
     host: &dyn Host,
     machine: &Machine,
     inputs: &[Option<ItemStack>],
-) -> Option<Plan> {
+    config: &Rules,
+    viewed: bool,
+) -> Attempt<Plan> {
+    let rules = config.machine(machine)?;
     let (book_kind, seconds) = match machine.family {
         Family::AutoEnchanter => (ENCHANTED_BOOK, 75u32),
         Family::AutoDisenchanter => (BOOK, 90u32),
@@ -399,15 +466,22 @@ pub(crate) fn next(
     let slots = [first, second];
     let book = book_slot(host, slots, book_kind)?;
     let target = slots[1 - book];
-    let (outputs, transfers) = match machine.family {
-        Family::AutoEnchanter => enchant(host, target, slots[book]),
-        Family::AutoDisenchanter => disenchant(host, target),
+    if !config.allows_item(target, machine.family) || !rules.accepts_lore(host, target) {
+        return None;
+    }
+    let attempt = match machine.family {
+        Family::AutoEnchanter => enchant(host, target, slots[book], rules, viewed),
+        Family::AutoDisenchanter => disenchant(host, target, rules, viewed),
         _ => return None,
     }?;
+    let (outputs, transfers) = match attempt {
+        Ok(outputs) => outputs,
+        Err(limit) => return Some(Err(limit)),
+    };
     // MachineRecipe takes seconds and converts them into two Slimefun ticks per second.
     let work_ticks = (seconds.checked_mul(transfers)? / machine.speed).checked_mul(2)?;
     i32::try_from(work_ticks).ok()?;
-    Some(Plan {
+    Some(Ok(Plan {
         consumed: slots
             .into_iter()
             .enumerate()
@@ -415,5 +489,363 @@ pub(crate) fn next(
             .collect(),
         outputs,
         work_ticks,
+    }))
+}
+
+pub(crate) fn next(
+    host: &dyn Host,
+    machine: &Machine,
+    inputs: &[Option<ItemStack>],
+    viewed: bool,
+) -> Option<Plan> {
+    settings::with_rules(|config| evaluate(host, machine, inputs, config, viewed)?.ok())
+}
+
+pub(crate) fn warning(
+    host: &dyn Host,
+    machine: &Machine,
+    inputs: &[Option<ItemStack>],
+) -> Option<i32> {
+    settings::with_rules(|config| {
+        config.machine(machine)?.level_limit()?;
+        evaluate(host, machine, inputs, config, true)?.err()
     })
+}
+
+pub(crate) fn warning_item(host: &dyn Host, limit: i32) -> Option<ItemStack> {
+    let mut barrier = Kind::Vanilla("minecraft:barrier").stack(host, 1)?;
+    barrier
+        .apply_components(&Compound::from([
+            (
+                "minecraft:custom_name".into(),
+                crate::items::text(" ", "white", false),
+            ),
+            (
+                "minecraft:lore".into(),
+                Tag::List(vec![crate::items::text(
+                    &format!("Cannot (dis)enchant an enchantment level higher than {limit}!"),
+                    "red",
+                    false,
+                )]),
+            ),
+        ]))
+        .ok()?;
+    Some(barrier)
+}
+
+#[cfg(test)]
+mod tests {
+    use mod_api::testing::FakeHost;
+
+    use super::*;
+
+    const SWORD: &str = "minecraft:diamond_sword";
+
+    fn host() -> FakeHost {
+        let mut host = FakeHost::new();
+        host.registries
+            .resolve_items(
+                [
+                    SWORD,
+                    "minecraft:book",
+                    "minecraft:enchanted_book",
+                    "minecraft:barrier",
+                ]
+                .map(|item| Identifier::parse(item).unwrap()),
+            )
+            .unwrap();
+        for id in [
+            "minecraft:sharpness",
+            "minecraft:smite",
+            "minecraft:vanishing_curse",
+        ] {
+            host.registries.allow_enchantment(id, SWORD);
+        }
+        host
+    }
+
+    fn item(
+        host: &dyn Host,
+        kind: Kind,
+        component: &str,
+        enchantments: &[(&str, i32)],
+    ) -> ItemStack {
+        let mut item = kind.stack(host, 1).unwrap();
+        let values: Compound = enchantments
+            .iter()
+            .map(|&(id, amount)| (id.into(), Tag::Int(amount)))
+            .collect();
+        item.set_components(Compound::from([(component.into(), Tag::Compound(values))]))
+            .unwrap();
+        item
+    }
+
+    fn machine(id: &str) -> &'static Machine {
+        MACHINES
+            .iter()
+            .find(|machine| machine.item.id() == id)
+            .unwrap()
+    }
+
+    fn config(text: &str) -> Rules {
+        Rules::read(&text.parse().unwrap(), &Rules::default())
+    }
+
+    #[test]
+    fn auto_enchanter_tiers_match_paper_equal_lower_and_counting_overlap() {
+        let host = host();
+        let sword = item(
+            &host,
+            Kind::Vanilla(SWORD),
+            DIRECT,
+            &[("minecraft:sharpness", 6)],
+        );
+        let book = item(
+            &host,
+            ENCHANTED_BOOK,
+            STORED,
+            &[("minecraft:sharpness", 4), ("minecraft:smite", 2)],
+        );
+        let inputs = [Some(book), Some(sword.clone())];
+        let one = machine("AUTO_ENCHANTER");
+        let two = machine("AUTO_ENCHANTER_2");
+        let rules = config(
+            r#"
+[enchantment-machines.AUTO_ENCHANTER]
+override-existing-enchants-lvl = true
+[enchantment-machines.AUTO_ENCHANTER_2]
+use-max-enchants = true
+max-enchants = 2
+"#,
+        );
+        let selected = evaluate(&host, one, &inputs, &rules, false)
+            .unwrap()
+            .ok()
+            .unwrap();
+        assert_eq!(selected.work_ticks, 300);
+        assert_eq!(
+            levels(&host, &selected.outputs[0], DIRECT)
+                .unwrap()
+                .get(&"minecraft:sharpness".into()),
+            Some(&Tag::Int(4))
+        );
+        let selected = evaluate(&host, two, &inputs, &rules, false)
+            .unwrap()
+            .ok()
+            .unwrap();
+        assert_eq!(selected.work_ticks, 50);
+        assert_eq!(
+            levels(&host, &selected.outputs[0], DIRECT)
+                .unwrap()
+                .get(&"minecraft:sharpness".into()),
+            Some(&Tag::Int(6))
+        );
+        let count = config(
+            r#"
+[enchantment-machines.AUTO_ENCHANTER]
+override-existing-enchants-lvl = true
+use-max-enchants = true
+max-enchants = 2
+"#,
+        );
+        assert!(evaluate(&host, one, &inputs, &count, false).is_none());
+        let equal = [
+            Some(sword),
+            Some(item(
+                &host,
+                ENCHANTED_BOOK,
+                STORED,
+                &[("minecraft:sharpness", 6)],
+            )),
+        ];
+        assert!(evaluate(&host, one, &equal, &Rules::default(), false).is_none());
+        assert_eq!(
+            evaluate(&host, one, &equal, &rules, false)
+                .unwrap()
+                .ok()
+                .unwrap()
+                .work_ticks,
+            150
+        );
+    }
+
+    #[test]
+    fn both_machine_families_warn_visible_players_and_skip_only_high_levels_when_unattended() {
+        let host = host();
+        let rules = config(
+            r#"
+[enchantment-machines.AUTO_ENCHANTER]
+use-enchant-level-limit = true
+enchant-level-limit = 5
+[enchantment-machines.AUTO_DISENCHANTER_2]
+use-enchant-level-limit = true
+enchant-level-limit = 5
+use-max-enchants = true
+max-enchants = 1
+"#,
+        );
+        let mixed = [("minecraft:sharpness", 7), ("minecraft:smite", 3)];
+        let enchanting = [
+            Kind::Vanilla(SWORD).stack(&host, 1),
+            Some(item(&host, ENCHANTED_BOOK, STORED, &mixed)),
+        ];
+        let mut sword = item(&host, Kind::Vanilla(SWORD), DIRECT, &mixed);
+        sword
+            .apply_components(&Compound::from([(REPAIR_COST.into(), Tag::Int(17))]))
+            .unwrap();
+        let disenchanting = [BOOK.stack(&host, 1), Some(sword)];
+        let enchanter = machine("AUTO_ENCHANTER");
+        let disenchanter = machine("AUTO_DISENCHANTER_2");
+        for (machine, inputs) in [(enchanter, &enchanting), (disenchanter, &disenchanting)] {
+            assert_eq!(
+                evaluate(&host, machine, inputs, &rules, true)
+                    .unwrap()
+                    .err(),
+                Some(5)
+            );
+        }
+        let enchants = |stack, component| levels(&host, stack, component).unwrap();
+        let applied = evaluate(&host, enchanter, &enchanting, &rules, false)
+            .unwrap()
+            .ok()
+            .unwrap();
+        assert_eq!(
+            enchants(&applied.outputs[0], DIRECT),
+            Compound::from([("minecraft:smite".into(), Tag::Int(3))])
+        );
+        let removed = evaluate(&host, disenchanter, &disenchanting, &rules, false)
+            .unwrap()
+            .ok()
+            .unwrap();
+        assert_eq!(removed.work_ticks, 60);
+        assert_eq!(
+            enchants(&removed.outputs[0], DIRECT).get(&"minecraft:sharpness".into()),
+            Some(&Tag::Int(7))
+        );
+        assert_eq!(
+            enchants(&removed.outputs[1], STORED).get(&"minecraft:smite".into()),
+            Some(&Tag::Int(3))
+        );
+        assert_eq!(
+            component(&host, &removed.outputs[1], REPAIR_COST),
+            Some(Tag::Int(17))
+        );
+        assert_eq!(component(&host, &removed.outputs[0], REPAIR_COST), None);
+        assert_eq!(
+            warning_item(&host, 5).unwrap().item().id(&host),
+            "minecraft:barrier"
+        );
+    }
+
+    #[test]
+    fn a_paper_reload_keeps_last_valid_integers_when_values_are_out_of_range() {
+        let initial = config(
+            r#"
+[enchantment-machines.AUTO_ENCHANTER_2]
+enchant-level-limit = 8
+max-enchants = 0
+"#,
+        );
+        let source = r#"
+[enchantment-machines.AUTO_ENCHANTER_2]
+use-enchant-level-limit = true
+use-max-enchants = true
+enchant-level-limit = 32768
+max-enchants = -1
+"#
+        .parse()
+        .unwrap();
+        let machine = machine("AUTO_ENCHANTER_2");
+        let loaded = Rules::read(&source, &initial);
+        let rules = loaded.machine(machine).unwrap();
+        assert_eq!(
+            (rules.level_limit(), rules.count_limit()),
+            (Some(8), Some(0))
+        );
+        let fresh = Rules::read(&source, &Rules::default());
+        let defaults = fresh.machine(machine).unwrap();
+        assert_eq!(
+            (defaults.level_limit(), defaults.count_limit()),
+            (Some(10), Some(10))
+        );
+    }
+
+    #[test]
+    fn item_allow_flags_and_literal_lore_filters_are_scoped_and_color_sensitive() {
+        let host = host();
+        let mut sword = item(
+            &host,
+            Kind::Vanilla(SWORD),
+            DIRECT,
+            &[("minecraft:sharpness", 3)],
+        );
+        sword
+            .apply_components(&Compound::from([
+                (
+                    "minecraft:custom_data".into(),
+                    Tag::compound([(
+                        "PublicBukkitValues",
+                        Tag::compound([(crate::items::ID_KEY, Tag::String("STAFF_FIRE".into()))]),
+                    )]),
+                ),
+                (
+                    "minecraft:lore".into(),
+                    Tag::List(vec![Tag::compound([
+                        ("text", Tag::String("Golden ".into())),
+                        ("color", Tag::String("gold".into())),
+                        (
+                            "extra",
+                            Tag::List(vec![Tag::compound([
+                                ("text", Tag::String("Blade".into())),
+                                ("color", Tag::String("red".into())),
+                            ])]),
+                        ),
+                    ])]),
+                ),
+            ]))
+            .unwrap();
+
+        let default = config(&default_config());
+        assert!(!default.allows_item(&sword, Family::AutoDisenchanter));
+        let rules = config(
+            r#"
+[item-settings.STAFF_FIRE]
+allow-disenchanting = true
+[enchantment-machines.AUTO_DISENCHANTER_2]
+use-ignored-lores = true
+ignored-lores = ["&6Golden &cBlade"]
+"#,
+        );
+        let inputs = [Some(sword.clone()), BOOK.stack(&host, 1)];
+        assert!(evaluate(&host, machine("AUTO_DISENCHANTER"), &inputs, &rules, false).is_some());
+        assert!(
+            evaluate(
+                &host,
+                machine("AUTO_DISENCHANTER_2"),
+                &inputs,
+                &rules,
+                false
+            )
+            .is_none()
+        );
+        let rules = config(
+            r#"
+[item-settings.STAFF_FIRE]
+allow-disenchanting = true
+[enchantment-machines.AUTO_DISENCHANTER_2]
+use-ignored-lores = true
+ignored-lores = ["&6Golden &bBlade", "Golden Blade"]
+"#,
+        );
+        assert!(
+            evaluate(
+                &host,
+                machine("AUTO_DISENCHANTER_2"),
+                &inputs,
+                &rules,
+                false
+            )
+            .is_some()
+        );
+    }
 }

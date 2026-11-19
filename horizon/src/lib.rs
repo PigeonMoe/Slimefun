@@ -36,8 +36,8 @@ mod compressor;
 mod crucible;
 mod electric_processing;
 mod enchantment_machines;
-mod enhanced_furnaces;
 mod energy_gadgets;
+mod enhanced_furnaces;
 mod factory;
 mod food_machines;
 mod fuel_generators;
@@ -131,6 +131,7 @@ impl Slimefun {
         let mut settings = self.settings.lock().unwrap();
         if fresh {
             *settings = Settings::default();
+            enchantment_machines::configure(&toml::Table::new());
             self.radiation.configure(None);
             self.block_placers.configure(None);
             output_chest::set_enabled(true);
@@ -159,6 +160,7 @@ impl Slimefun {
         self.industrial_miners.configure(Some(&table));
         self.solar_helmet.configure(table.get("solar-helmet"));
         settings.book_binder = book_binder::Rules::read_config(&table);
+        enchantment_machines::configure(&table);
         if let Some(value) = table
             .get("miner-android")
             .and_then(|section| section.get("reduced-block-updates"))
@@ -314,7 +316,9 @@ impl Hooks for Slimefun {
         event.configs.push(Config::new(
             "slimefun",
             ConfigKind::Server,
+            &format!("{}{}",
             "double-ores = true\ncrucible-allow-water-in-nether = false\nlegacy-ore-washer = false\nlegacy-dust-washer = false\nlegacy-ore-grinder = true\nelectric-gold-pan-override-output-limit = [false, false, false]\nfreezer-use-vanilla-ratios = [false, false, false]\nfire-breaking-chance = 34\noutput-chest-enabled = true\ndrop-from-golems = true\ngolem-drop-chance = 75\n\n[networks]\nenable-visualizer = true\ncargo-ticker-delay = 0\n\n[book-binder]\nbypass-vanilla-max-level = false\nhas-custom-max-level = false\ncustom-max-level = 15\n\n[portable-teleporter]\nteleportation-cost = 10\n\n[produce-collector]\nrange = 2\n\n[ancient-altar]\nstep-delay = 8\n\n[miner-android]\nreduced-block-updates = true\n\n[industrial-miner]\ncan-mine-ancient-debris = false\ncan-mine-deepslate-ores = true\n\n[advanced-industrial-miner]\ncan-mine-ancient-debris = false\ncan-mine-deepslate-ores = true\n",
+                enchantment_machines::default_config()),
         ));
     }
 
@@ -437,7 +441,9 @@ impl Hooks for Slimefun {
     }
 
     fn piston_pre(&self, level: &dyn LevelHost, event: &mut mod_api::PistonPreEvent<'_>) -> Flow {
-        if network_runtime::protect_piston(level, event) || hologram_projector::piston_protected(level, event) {
+        if network_runtime::protect_piston(level, event)
+            || hologram_projector::piston_protected(level, event)
+        {
             Flow::Cancel
         } else {
             Flow::Continue

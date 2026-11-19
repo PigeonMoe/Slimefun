@@ -537,6 +537,7 @@ pub(crate) fn next(
     machine: &Machine,
     inputs: &[Option<ItemStack>],
     settings: crate::machine::Settings,
+    enchantment_viewed: bool,
 ) -> Option<Plan> {
     match machine.family {
         Family::Smeltery => smeltery_recipes().iter().find_map(|recipe| {
@@ -563,7 +564,7 @@ pub(crate) fn next(
         Family::AutoAnvil => crate::auto_anvil::next(host, machine, inputs),
         Family::ChargingBench => None,
         Family::AutoEnchanter | Family::AutoDisenchanter => {
-            crate::enchantment_machines::next(host, machine, inputs)
+            crate::enchantment_machines::next(host, machine, inputs, enchantment_viewed)
         }
         Family::BookBinder => crate::book_binder::next(host, inputs, settings.book_binder),
         Family::CarbonPress | Family::Freezer | Family::AutoDrier => {

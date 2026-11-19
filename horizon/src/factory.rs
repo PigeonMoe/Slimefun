@@ -152,6 +152,7 @@ struct Viewer {
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct ViewState {
     progress: Option<u32>,
+    enchantment_warning: Option<i32>,
     production: bool,
     link: Option<Position>,
     assembler: Option<assemblers::Controls>,
@@ -166,11 +167,18 @@ impl ViewState {
     ) -> Self {
         let mut view = Self {
             progress: remaining(data),
+            enchantment_warning: None,
             production: false,
             link: None,
             assembler: matches!(machine.family, RecipeFamily::Assembler(_))
                 .then(|| assemblers::Controls::read(data)),
         };
+        if view.progress.is_none()
+            && let Some(spec) = machine.enchanting()
+        {
+            let inputs = INPUT.map(|index| stack_in(host, data, index));
+            view.enchantment_warning = crate::enchantment_machines::warning(host, spec, &inputs);
+        }
         if machine.reactor_menu() {
             view.link = reactors::link(host, storage.level, storage.pos, machine);
             if let RecipeFamily::Reactor(spec) = machine.family {
@@ -190,6 +198,11 @@ impl ViewState {
         machine: ElectricMachine,
     ) -> Vec<Option<ItemStack>> {
         let mut items = menu_items(host, data, machine);
+        if let Some(limit) = self.enchantment_warning
+            && let Some(item) = crate::enchantment_machines::warning_item(host, limit)
+        {
+            items[22] = Some(item);
+        }
         if machine.reactor_menu() {
             reactors::decorate_controls(
                 host,
@@ -284,6 +297,30 @@ impl FactoryViewers {
         }
     }
 
+    fn has_viewer(
+        &self,
+        host: &mut dyn ServerHost,
+        storage: Storage,
+        machine: ElectricMachine,
+    ) -> bool {
+        let viewers: Vec<_> = self
+            .0
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(_, viewer)| {
+                viewer.storage.level == storage.level
+                    && viewer.storage.pos == storage.pos
+                    && viewer.furnace.id == machine.id
+            })
+            .map(|(&uuid, viewer)| (uuid, viewer.window, viewer.entity))
+            .collect();
+        viewers.into_iter().any(|(uuid, window, entity)| {
+            host.block_entity(storage.level, storage.pos) == entity
+                && host.menu(uuid, window).is_some()
+        })
+    }
+
     pub fn refresh(&self, host: &mut dyn ServerHost, level: LevelRef) {
         if !level.in_place(host) || !level.game_time(host).is_some_and(|tick| tick % 10 == 0) {
             return;
@@ -328,6 +365,21 @@ impl FactoryViewers {
 }
 
 impl ElectricMachine {
+    fn enchanting(self) -> Option<&'static advanced_processing::Machine> {
+        match self.family {
+            RecipeFamily::Advanced(spec)
+                if matches!(
+                    spec.family,
+                    advanced_processing::Family::AutoEnchanter
+                        | advanced_processing::Family::AutoDisenchanter
+                ) =>
+            {
+                Some(spec)
+            }
+            _ => None,
+        }
+    }
+
     pub fn for_item(id: &str) -> Option<Self> {
         use RecipeFamily::{Furnace, HeatedPressure, IngotPulverizer, OreGrinder};
         if let Some(assembler) = assemblers::by_id(id) {
@@ -1485,6 +1537,7 @@ fn find_recipe(
     data: &Compound,
     machine: ElectricMachine,
     settings: Settings,
+    enchantment_viewed: bool,
     roll: impl FnMut(u32) -> Option<u32>,
 ) -> Option<RecipeRun> {
     if let RecipeFamily::Advanced(spec) = machine.family {
@@ -1497,7 +1550,7 @@ fn find_recipe(
             .iter()
             .map(|&index| stack_in(host, data, index))
             .collect();
-        let plan = advanced_processing::next(host, spec, &stored, settings)?;
+        let plan = advanced_processing::next(host, spec, &stored, settings, enchantment_viewed)?;
         if !fits_all(host, data, &plan.outputs) {
             return None;
         }
@@ -1671,7 +1724,8 @@ pub(crate) fn tick(
             recipe.has_animal(host, level, pos, settings.produce_collector_range)
         })
     } else {
-        find_recipe(host, &data, furnace, settings, |bound| {
+        let viewed = furnace.enchanting().is_some() && VIEWERS.has_viewer(host, storage, furnace);
+        find_recipe(host, &data, furnace, settings, viewed, |bound| {
             rolls.next(host, level, bound)
         })
     }?;
@@ -2210,7 +2264,7 @@ mod tests {
         let mut data = Compound::new();
         assert!(write_stack(&host, &mut data, INPUT[0], Some(water)));
         let freezer = ElectricMachine::for_item("FREEZER").unwrap();
-        let run = find_recipe(&host, &data, freezer, Settings::default(), |_| None).unwrap();
+        let run = find_recipe(&host, &data, freezer, Settings::default(), false, |_| None).unwrap();
         let [bucket, ice] = run.outputs.as_slice() else {
             panic!("Paper's freezer returns both its bucket and ice");
         };
@@ -2224,9 +2278,9 @@ mod tests {
         let saved = Tag::Compound(ice.to_nbt(&host).unwrap());
         assert_eq!(decode_pending(&host, &saved), Some(vec![ice.clone()]));
         assert!(write_stack(&host, &mut data, OUTPUT[1], Some(stone)));
-        assert!(find_recipe(&host, &data, freezer, Settings::default(), |_| None).is_none());
+        assert!(find_recipe(&host, &data, freezer, Settings::default(), false, |_| None).is_none());
         assert!(write_stack(&host, &mut data, OUTPUT[1], Some(ice.clone())));
-        assert!(find_recipe(&host, &data, freezer, Settings::default(), |_| None).is_some());
+        assert!(find_recipe(&host, &data, freezer, Settings::default(), false, |_| None).is_some());
     }
 
     #[test]
@@ -2244,7 +2298,7 @@ mod tests {
             .unwrap();
         assert!(write_stack(&host, &mut data, INPUT[0], Some(coal)));
         let press = ElectricMachine::for_item("CARBON_PRESS").unwrap();
-        let run = find_recipe(&host, &data, press, Settings::default(), |_| None).unwrap();
+        let run = find_recipe(&host, &data, press, Settings::default(), false, |_| None).unwrap();
         assert_eq!(run.quantity(), 8);
         assert_eq!(run.outputs[0].count(), 9);
         assert_eq!(run.work_override, Some(360));
@@ -2256,7 +2310,7 @@ mod tests {
         assert!(write_stack(&host, &mut data, INPUT[0], Some(chunk)));
         assert!(write_stack(&host, &mut data, INPUT[1], Some(diamond)));
         let press = ElectricMachine::for_item("CARBON_PRESS_3").unwrap();
-        let run = find_recipe(&host, &data, press, Settings::default(), |_| None).unwrap();
+        let run = find_recipe(&host, &data, press, Settings::default(), false, |_| None).unwrap();
         assert!(crate::items::RAW_CARBONADO.matches(&host, &run.outputs[0]));
         assert_eq!(run.work_override, Some(8));
     }
@@ -2462,6 +2516,7 @@ mod tests {
             data,
             ElectricMachine::for_item(id).unwrap(),
             settings,
+            false,
             roll,
         )
     }
@@ -2823,7 +2878,8 @@ mod tests {
             Some(dust.outputs[0].clone())
         ));
         let factory = ElectricMachine::for_item("ELECTRIC_INGOT_FACTORY_3").unwrap();
-        let ingot = find_recipe(&host, &data, factory, settings, |_| unreachable!()).unwrap();
+        let ingot =
+            find_recipe(&host, &data, factory, settings, false, |_| unreachable!()).unwrap();
         assert!(LEAD_INGOT.matches(&host, &ingot.outputs[0]));
         assert_eq!(
             (
@@ -2870,6 +2926,7 @@ mod tests {
             &data,
             machine,
             Settings::default(),
+            false,
             |_| unreachable!(),
         )
         .unwrap();
@@ -2886,6 +2943,7 @@ mod tests {
                 &data,
                 machine,
                 Settings::default(),
+                false,
                 |_| unreachable!()
             )
             .is_none()
@@ -2904,6 +2962,7 @@ mod tests {
                 &data,
                 machine,
                 Settings::default(),
+                false,
                 |_| unreachable!()
             )
             .is_none()
@@ -2940,6 +2999,7 @@ mod tests {
                 &data,
                 machine,
                 Settings::default(),
+                false,
                 |_| unreachable!()
             )
             .is_none()
@@ -2955,6 +3015,7 @@ mod tests {
             &data,
             machine,
             Settings::default(),
+            false,
             |_| unreachable!(),
         )
         .unwrap();
@@ -2984,6 +3045,7 @@ mod tests {
                 &data,
                 machine,
                 Settings::default(),
+                false,
                 |_| unreachable!()
             )
             .is_none()
@@ -2995,6 +3057,7 @@ mod tests {
             &data,
             machine,
             Settings::default(),
+            false,
             |_| unreachable!(),
         )
         .unwrap();
@@ -3045,7 +3108,15 @@ mod tests {
         let mut data = Compound::new();
         assert!(write_stack(&host, &mut data, INPUT[0], Some(buckets)));
         let pump = ElectricMachine::for_item("OIL_PUMP").unwrap();
-        let run = find_recipe(&host, &data, pump, Settings::default(), |_| unreachable!()).unwrap();
+        let run = find_recipe(
+            &host,
+            &data,
+            pump,
+            Settings::default(),
+            false,
+            |_| unreachable!(),
+        )
+        .unwrap();
         assert!(crate::heated_pressure::BUCKET_OF_OIL.matches(&host, &run.outputs[0]));
         assert_eq!((run.quantity(), pump.work_ticks, pump.cost), (1, 52, 14));
         use crate::networks::Component;
