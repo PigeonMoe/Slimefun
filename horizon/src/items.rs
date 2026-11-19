@@ -192,6 +192,7 @@ impl SlimefunItem {
         crate::magic_eye::decorate(self.id, &mut components);
         crate::snacks::decorate(self.id, &mut components);
         crate::smelters_pickaxe::decorate(self.id, &mut components);
+        crate::spawner_repair::decorate(self.id, &mut components);
         crate::jet_boots::decorate(self.id, &mut components);
         crate::jetpack::decorate(self.id, &mut components);
         crate::elemental_staves::decorate(self.id, &mut components);

@@ -278,10 +278,14 @@ fn allowed_material(
 enum CustomBlock {
     OutputChest,
     Altar(Kind),
+    ReinforcedSpawner,
     Network(String),
 }
 
 fn placeable_custom(id: &str) -> Option<CustomBlock> {
+    if id == crate::spawner_repair::REINFORCED_SPAWNER.id() {
+        return Some(CustomBlock::ReinforcedSpawner);
+    }
     if id == OUTPUT_CHEST.id() {
         return crate::output_chest::enabled().then_some(CustomBlock::OutputChest);
     }
@@ -514,6 +518,12 @@ impl Attempt {
                     &toml::Table::new(),
                 )
                 .is_ok(),
+                Some(CustomBlock::ReinforcedSpawner) => crate::spawner_repair::place_repaired(
+                    host,
+                    level,
+                    target,
+                    self.resource.as_stack(),
+                ),
                 Some(CustomBlock::Network(ref id)) => networks
                     .lock()
                     .unwrap()
@@ -578,6 +588,11 @@ mod tests {
         assert_eq!(placeable_custom("CARGO_NODE_OUTPUT"), None);
         assert_eq!(placeable_custom("ENERGY_REGULATOR"), None);
         assert_eq!(placeable_custom("DUCT_TAPE"), None);
+        assert_eq!(placeable_custom("BROKEN_SPAWNER"), None);
+        assert_eq!(
+            placeable_custom("REINFORCED_SPAWNER"),
+            Some(CustomBlock::ReinforcedSpawner)
+        );
         assert_eq!(
             placeable_custom("ELECTRIC_FURNACE"),
             Some(CustomBlock::Network("ELECTRIC_FURNACE".into()))

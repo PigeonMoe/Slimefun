@@ -239,6 +239,7 @@ pub(crate) const CRAFTING: &[CraftingRecipe] = &[
         &NECROMANCY,
     ),
     crate::infused::ALTAR,
+    crate::spawner_repair::ALTAR,
     altar_recipe(
         [
             MAGIC_LUMP_3,
@@ -802,15 +803,17 @@ fn start_ritual(
             "essence_of_afterlife" => "Unlock Necromancy with /sf research essence_of_afterlife.",
             "special_runes" => "Unlock Purple Runes with /sf research special_runes.",
             "rainbow_blocks" => "Unlock Rainbow Blocks with /sf research rainbow_blocks.",
+            "repaired_spawner" => "Unlock Repairing Spawners with /sf research repaired_spawner.",
             _ => "Unlock Elemental Runes with /sf research ancient_runes.",
         });
     }
-    let output = recipe
-        .output
-        .kind
-        .stack(host, recipe.output.count)
-        .and_then(|stack| stack.to_nbt(host))
-        .ok_or("The ritual output could not be saved.")?;
+    let output = if recipe.output.kind == crate::spawner_repair::REINFORCED_SPAWNER {
+        crate::spawner_repair::repair(host, &catalyst)
+    } else {
+        recipe.output.kind.stack(host, recipe.output.count)
+    }
+    .and_then(|stack| stack.to_nbt(host))
+    .ok_or("The ritual output could not be saved.")?;
     let saved: Vec<_> = items
         .iter()
         .map(|stack| stack.to_nbt(host))

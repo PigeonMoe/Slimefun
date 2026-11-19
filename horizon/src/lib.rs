@@ -77,6 +77,7 @@ mod research;
 mod smelters_pickaxe;
 mod snacks;
 mod sneak_equipment;
+mod spawner_repair;
 mod soulbound_gear;
 mod soulbound_rune;
 mod stomper;
@@ -109,6 +110,7 @@ struct Slimefun {
     jet_boots: sneak_equipment::Task<jet_boots::JetBoots>,
     jetpacks: sneak_equipment::Task<jetpack::Flight>,
     smelters_pickaxes: smelters_pickaxe::SmeltersPickaxes,
+    spawners: spawner_repair::Spawners,
     rolls: Rolls,
     chest: Mutex<Option<ItemKey>>,
     networks: Arc<Mutex<network_runtime::Networks>>,
@@ -141,6 +143,7 @@ impl Default for Slimefun {
             jet_boots: sneak_equipment::Task::default(),
             jetpacks: sneak_equipment::Task::default(),
             smelters_pickaxes: smelters_pickaxe::SmeltersPickaxes::default(),
+            spawners: spawner_repair::Spawners::default(),
             rolls: Rolls::default(),
             chest: Mutex::new(None),
             networks: Arc::default(),
@@ -203,6 +206,13 @@ impl Slimefun {
             .and_then(toml::Value::as_bool)
         {
             settings.android_reduced_block_updates = value;
+        }
+        if let Some(value) = table
+            .get("reinforced-spawner")
+            .and_then(|section| section.get("allow-spawn-eggs"))
+            .and_then(toml::Value::as_bool)
+        {
+            self.spawners.configure(value);
         }
         ancient_altar::configure(
             table
@@ -359,6 +369,7 @@ impl Hooks for Slimefun {
         factory::register(registrar);
         backpacks::register(registrar);
         ancient_altar::register(registrar);
+        self.spawners.register(registrar);
         rainbow::register(registrar);
         hologram_projector::register(registrar);
         auto_crafter::register(registrar);
@@ -370,7 +381,7 @@ impl Hooks for Slimefun {
             "slimefun",
             ConfigKind::Server,
             &format!("{}{}",
-            "double-ores = true\ncrucible-allow-water-in-nether = false\nlegacy-ore-washer = false\nlegacy-dust-washer = false\nlegacy-ore-grinder = true\nelectric-gold-pan-override-output-limit = [false, false, false]\nfreezer-use-vanilla-ratios = [false, false, false]\nfire-breaking-chance = 34\noutput-chest-enabled = true\ndrop-from-golems = true\ngolem-drop-chance = 75\n\n[URID]\ncustom-ticker-delay = 10\n\n[networks]\nmax-size = 200\nenable-visualizer = true\ncargo-ticker-delay = 0\n\n[wind-staff]\npower = 4\n\n[book-binder]\nbypass-vanilla-max-level = false\nhas-custom-max-level = false\ncustom-max-level = 15\n\n[portable-teleporter]\nteleportation-cost = 10\n\n[produce-collector]\nrange = 2\n\n[ancient-altar]\nstep-delay = 8\n\n[miner-android]\nreduced-block-updates = true\n\n[industrial-miner]\ncan-mine-ancient-debris = false\ncan-mine-deepslate-ores = true\n\n[advanced-industrial-miner]\ncan-mine-ancient-debris = false\ncan-mine-deepslate-ores = true\n",
+            "double-ores = true\ncrucible-allow-water-in-nether = false\nlegacy-ore-washer = false\nlegacy-dust-washer = false\nlegacy-ore-grinder = true\nelectric-gold-pan-override-output-limit = [false, false, false]\nfreezer-use-vanilla-ratios = [false, false, false]\nfire-breaking-chance = 34\noutput-chest-enabled = true\ndrop-from-golems = true\ngolem-drop-chance = 75\n\n[URID]\ncustom-ticker-delay = 10\n\n[networks]\nmax-size = 200\nenable-visualizer = true\ncargo-ticker-delay = 0\n\n[wind-staff]\npower = 4\n\n[book-binder]\nbypass-vanilla-max-level = false\nhas-custom-max-level = false\ncustom-max-level = 15\n\n[portable-teleporter]\nteleportation-cost = 10\n\n[produce-collector]\nrange = 2\n\n[reinforced-spawner]\nallow-spawn-eggs = true\n\n[ancient-altar]\nstep-delay = 8\n\n[miner-android]\nreduced-block-updates = true\n\n[industrial-miner]\ncan-mine-ancient-debris = false\ncan-mine-deepslate-ores = true\n\n[advanced-industrial-miner]\ncan-mine-ancient-debris = false\ncan-mine-deepslate-ores = true\n",
                 enchantment_machines::default_config()),
         ));
     }
@@ -403,7 +414,9 @@ impl Hooks for Slimefun {
         {
             return Flow::Cancel;
         }
-        if lumber_axe::allow_break(host, player) == Flow::Cancel {
+        if lumber_axe::allow_break(host, player) == Flow::Cancel
+            || self.spawners.prepare(host, player, level, event) == Flow::Cancel
+        {
             return Flow::Cancel;
         }
         self.smelters_pickaxes.prepare(host, player, level, event, &self.rolls)
@@ -414,6 +427,7 @@ impl Hooks for Slimefun {
         host: &mut dyn ServerHost,
         event: &mut mod_api::PlayerDestroyedBlockEvent,
     ) {
+        self.spawners.destroyed(host, event);
         self.smelters_pickaxes.destroyed(host, event, &self.rolls);
         lumber_axe::destroyed(host, event);
     }
@@ -431,6 +445,7 @@ impl Hooks for Slimefun {
         rainbow::placed::drop_item(level, event);
         hologram_projector::restore_drop(level, event);
         self.smelters_pickaxes.drop_items(event);
+        self.spawners.suppress_base_drops(level, event);
         Flow::Continue
     }
 
@@ -753,7 +768,12 @@ impl Hooks for Slimefun {
             return Flow::Continue;
         };
         if *event.use_item != TriState::False && let Some(held) = event.click.stack {
-            if jet_boots::STEEL_THRUSTER.matches(host, held) || jetpack::CHAIN.matches(host, held) {
+            if jet_boots::STEEL_THRUSTER.matches(host, held)
+                || jetpack::CHAIN.matches(host, held)
+                || player.entity().level(host).is_some_and(|level| {
+                    self.spawners.prevents_egg_use(host, level, event.click.pos, held)
+                })
+            {
                 *event.cancellation_result = InteractionResult::Fail;
                 return Flow::Cancel;
             }
@@ -1039,6 +1059,7 @@ impl Hooks for Slimefun {
         self.item_clicks.logout(event.player);
         self.jet_boots.forget(host, event.player);
         self.jetpacks.forget(host, event.player);
+        self.spawners.forget(event.player);
         self.bee_wings.stop(event.player);
         self.gps.logout(event.player);
         self.androids.logout(event.player);
@@ -1349,6 +1370,7 @@ impl Hooks for Slimefun {
         self.snacks.clear();
         self.jet_boots.clear();
         self.jetpacks.clear();
+        self.spawners.clear();
         self.smelters_pickaxes.clear();
         self.soulbound_rituals.clear();
         self.elevators.clear();

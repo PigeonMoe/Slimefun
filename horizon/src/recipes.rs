@@ -209,6 +209,7 @@ pub(crate) fn researches() -> impl Iterator<Item = &'static Research> {
         .chain([&crate::magic_eye::RESEARCH])
         .chain(crate::snacks::RESEARCHES.iter().copied())
         .chain([&crate::smelters_pickaxe::RESEARCH])
+        .chain([&crate::spawner_repair::CONTAINMENT, &crate::spawner_repair::REPAIRING])
         .chain(crate::jet_boots::RESEARCHES.iter().copied())
         .chain(crate::jetpack::RESEARCHES.iter().copied())
         .chain([&crate::lumber_axe::RESEARCH])
@@ -227,6 +228,7 @@ pub(crate) fn magic_crafting() -> impl Iterator<Item = &'static CraftingRecipe> 
         .chain([&crate::magic_eye::CRAFTING, &crate::snacks::DIET_RECIPE])
         .chain(crate::soulbound_gear::MAGIC_RECIPES)
         .chain(crate::ancient_altar::MAGIC_CRAFTING)
+        .chain([&crate::spawner_repair::TOOL])
         .chain([&crate::infused::MAGIC])
 }
 
