@@ -2,7 +2,10 @@
 
 use std::{
     collections::BTreeMap,
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 
 use mod_api::{
@@ -113,12 +116,38 @@ struct Reader {
     waiting_for_search: bool,
 }
 
-#[derive(Default)]
-pub(crate) struct Guide(Mutex<BTreeMap<u128, Reader>>);
+pub(crate) struct Guide {
+    readers: Mutex<BTreeMap<u128, Reader>>,
+    receive_on_first_join: AtomicBool,
+}
+
+impl Default for Guide {
+    fn default() -> Self {
+        Self {
+            readers: Mutex::new(BTreeMap::new()),
+            receive_on_first_join: AtomicBool::new(true),
+        }
+    }
+}
 
 impl Guide {
+    pub(crate) fn configure(&self, section: Option<&toml::Value>) {
+        let receive = section
+            .and_then(|section| section.get("receive-on-first-join"))
+            .and_then(toml::Value::as_bool)
+            .unwrap_or(true);
+        self.receive_on_first_join.store(receive, Ordering::Relaxed);
+    }
+
+    pub(crate) fn first_join(&self, host: &mut dyn ServerHost, uuid: u128) {
+        if self.receive_on_first_join.load(Ordering::Relaxed)
+            && let Some(player) = host.player(uuid)
+        {
+            give(host, player);
+        }
+    }
     fn last_path(&self, player: u128) -> Vec<Page> {
-        self.0
+        self.readers
             .lock()
             .unwrap()
             .get(&player)
@@ -140,7 +169,7 @@ impl Guide {
 
     pub(crate) fn chat(&self, host: &mut dyn ServerHost, player: u128, query: &str) -> bool {
         let waiting = self
-            .0
+            .readers
             .lock()
             .unwrap()
             .get_mut(&player)
@@ -201,7 +230,7 @@ impl Guide {
         {
             let settings = matches!(page, Page::Info);
             let len = path.len() - usize::from(settings);
-            let mut readers = self.0.lock().unwrap();
+            let mut readers = self.readers.lock().unwrap();
             let reader = readers.entry(player.uuid()).or_default();
             reader.history = path[..len].to_vec();
             reader.view = Some(View {
@@ -228,7 +257,7 @@ impl Guide {
             return;
         };
         let Some(view) = self
-            .0
+            .readers
             .lock()
             .unwrap()
             .get(&event.uuid)
@@ -268,7 +297,7 @@ impl Guide {
             }
             Action::SearchPrompt => {
                 host.close_menu(event.uuid);
-                self.0
+                self.readers
                     .lock()
                     .unwrap()
                     .entry(event.uuid)
@@ -291,7 +320,7 @@ impl Guide {
     }
 
     pub(crate) fn closed(&self, event: &MenuClosedEvent) {
-        let mut readers = self.0.lock().unwrap();
+        let mut readers = self.readers.lock().unwrap();
         if let Some(reader) = readers.get_mut(&event.uuid)
             && reader
                 .view
@@ -303,11 +332,11 @@ impl Guide {
     }
 
     pub(crate) fn logout(&self, player: u128) {
-        self.0.lock().unwrap().remove(&player);
+        self.readers.lock().unwrap().remove(&player);
     }
 
     pub(crate) fn clear(&self) {
-        self.0.lock().unwrap().clear();
+        self.readers.lock().unwrap().clear();
     }
 }
 
@@ -704,6 +733,29 @@ mod tests {
     }
 
     #[test]
+    fn first_join_uses_the_paper_server_option_and_gives_the_same_book() {
+        let mut host = FakeHost::new();
+        host.registries
+            .resolve_items([Identifier::parse("minecraft:enchanted_book").unwrap()])
+            .unwrap();
+        let level = host.level.level();
+        host.players.join(1, 100, level);
+        let guide = Guide::default();
+        let config = "[guide]\nreceive-on-first-join = false"
+            .parse::<toml::Table>()
+            .unwrap();
+        guide.configure(config.get("guide"));
+        guide.first_join(&mut host, 1);
+        assert!(host.players.get(1).unwrap().slots.is_empty());
+        guide.configure(None);
+        guide.first_join(&mut host, 1);
+        assert!(is_book(
+            &host,
+            host.players.get(1).unwrap().slots.get(&0).unwrap()
+        ));
+    }
+
+    #[test]
     fn basic_machine_page_and_real_recipe_use_the_paper_slots() {
         let mut host = FakeHost::new();
         let materials = [
@@ -769,7 +821,7 @@ mod tests {
     fn gui_close_and_old_windows_keep_the_readers_last_page() {
         let guide = Guide::default();
         let history = vec![Page::Main, Page::Search("jetpack".into())];
-        guide.0.lock().unwrap().insert(
+        guide.readers.lock().unwrap().insert(
             7,
             Reader {
                 history: history.clone(),
@@ -782,9 +834,27 @@ mod tests {
             },
         );
         guide.closed(&MenuClosedEvent { uuid: 7, window: 2 });
-        assert!(guide.0.lock().unwrap().get(&7).unwrap().view.is_some());
+        assert!(
+            guide
+                .readers
+                .lock()
+                .unwrap()
+                .get(&7)
+                .unwrap()
+                .view
+                .is_some()
+        );
         guide.closed(&MenuClosedEvent { uuid: 7, window: 3 });
-        assert!(guide.0.lock().unwrap().get(&7).unwrap().view.is_none());
+        assert!(
+            guide
+                .readers
+                .lock()
+                .unwrap()
+                .get(&7)
+                .unwrap()
+                .view
+                .is_none()
+        );
         assert!(
             matches!(guide.last_path(7).as_slice(), [Page::Main, Page::Search(query)] if &**query == "jetpack")
         );
