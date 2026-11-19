@@ -90,6 +90,7 @@ mod soulbound_rune;
 mod stomper;
 mod storage;
 mod tape_measure;
+mod teleposition_scroll;
 mod thermal_machines;
 mod universal_storage;
 mod zombie_pills;
@@ -123,6 +124,7 @@ struct Slimefun {
     magic_weapons: magic_weapons::Weapons,
     beheading: beheading::Beheading,
     ore_tools: ore_tools::OreTools,
+    teleposition_scroll: teleposition_scroll::Scroll,
     explosive_tools: explosive_tools::ExplosiveTools,
     rolls: Rolls,
     chest: Mutex<Option<ItemKey>>,
@@ -162,6 +164,7 @@ impl Default for Slimefun {
             magic_weapons: magic_weapons::Weapons::default(),
             beheading: beheading::Beheading::default(),
             ore_tools: ore_tools::OreTools::default(),
+            teleposition_scroll: teleposition_scroll::Scroll::default(),
             explosive_tools: explosive_tools::ExplosiveTools::default(),
             rolls: Rolls::default(),
             chest: Mutex::new(None),
@@ -204,6 +207,8 @@ impl Slimefun {
         };
         self.guide.configure(table.get("guide"), table.get("researches"));
         self.ore_tools.configure(&table);
+        self.teleposition_scroll
+            .configure(table.get("scroll-of-dimensional-teleposition"));
         self.explosive_tools.configure(&table);
         self.beheading.configure(table.get("sword-of-beheading"));
         self.radiation.configure(table.get("radiation"));
@@ -417,12 +422,13 @@ impl Hooks for Slimefun {
         event.configs.push(Config::new(
             "slimefun",
             ConfigKind::Server,
-            &format!("{}{}{}{}{}",
+            &format!("{}{}{}{}{}{}",
             "double-ores = true\ncrucible-allow-water-in-nether = false\nlegacy-ore-washer = false\nlegacy-dust-washer = false\nlegacy-ore-grinder = true\nelectric-gold-pan-override-output-limit = [false, false, false]\nfreezer-use-vanilla-ratios = [false, false, false]\nfire-breaking-chance = 34\noutput-chest-enabled = true\ndrop-from-golems = true\ngolem-drop-chance = 75\n\n[guide]\nreceive-on-first-join = true\n\n[researches]\nfree-in-creative-mode = true\nenable-fireworks = true\ndisable-learning-animation = false\n\n[URID]\ncustom-ticker-delay = 10\n\n[networks]\nmax-size = 200\nenable-visualizer = true\ncargo-ticker-delay = 0\n\n[wind-staff]\npower = 4\n\n[book-binder]\nbypass-vanilla-max-level = false\nhas-custom-max-level = false\ncustom-max-level = 15\n\n[portable-teleporter]\nteleportation-cost = 10\n\n[produce-collector]\nrange = 2\n\n[pickaxe-of-vein-mining]\nmax-blocks = 16\n\n[pickaxe-of-the-seeker]\nmax-range = 5\n\n[blade-of-vampires]\nchance = 45\n\n[reinforced-spawner]\nallow-spawn-eggs = true\n\n[ancient-altar]\nstep-delay = 8\n\n[miner-android]\nreduced-block-updates = true\n\n[industrial-miner]\ncan-mine-ancient-debris = false\ncan-mine-deepslate-ores = true\n\n[advanced-industrial-miner]\ncan-mine-ancient-debris = false\ncan-mine-deepslate-ores = true\n",
                 enchantment_machines::default_config(),
                 beheading::DEFAULT_CONFIG,
                 explosive_tools::DEFAULT_CONFIG,
-                climbing_pick::DEFAULT_CONFIG),
+                climbing_pick::DEFAULT_CONFIG,
+                teleposition_scroll::DEFAULT_CONFIG),
         ));
     }
 
@@ -927,7 +933,8 @@ impl Hooks for Slimefun {
                 *event.cancellation_result = InteractionResult::Consume;
                 return Flow::Cancel;
             }
-            if snacks::use_sugar(host, player, event.click.hand, held, Some(event.click.pos))
+            if self.teleposition_scroll.use_held(host, player, held)
+                || snacks::use_sugar(host, player, event.click.hand, held, Some(event.click.pos))
                 || elemental_staves::use_staff(host, player, held, || {
                     self.settings.lock().unwrap().wind_power
                 })
@@ -1138,6 +1145,7 @@ impl Hooks for Slimefun {
             || medical::HEAVY_CREAM.matches(host, event.click.stack)
             || medical::use_supply(host, player, event.click.hand, event.click.stack)
             || magic_eye::use_held(host, player, event.click.stack)
+            || self.teleposition_scroll.use_held(host, player, event.click.stack)
             || snacks::use_sugar(host, player, event.click.hand, event.click.stack, None)
             || elemental_staves::use_staff(host, player, event.click.stack, || {
                 self.settings.lock().unwrap().wind_power

@@ -251,6 +251,9 @@ impl SlimefunItem {
             components.insert("minecraft:lore".into(), crate::beheading::lore());
         }
         crate::ore_tools::decorate(self.id, &mut components);
+        if self.id == crate::teleposition_scroll::SCROLL_OF_DIMENSIONAL_TELEPOSITION.id() {
+            components.insert("minecraft:lore".into(), crate::teleposition_scroll::lore());
+        }
         crate::explosive_tools::decorate(self.id, &mut components);
         crate::jet_boots::decorate(self.id, &mut components);
         crate::jetpack::decorate(self.id, &mut components);
