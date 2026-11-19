@@ -366,6 +366,14 @@ const NO_RESEARCH: Research = Research {
 };
 const GOLD_BLOCK: Option<Kind> = Some(crate::items::GOLD_24K_BLOCK);
 
+const fn seasonal(inputs: [Option<Kind>; 9], output: Kind, count: u32) -> CraftingRecipe {
+    CraftingRecipe {
+        inputs,
+        output: stack(output, count),
+        research: &NO_RESEARCH,
+    }
+}
+
 pub(crate) const CRAFTING: &[CraftingRecipe] = &[
     CraftingRecipe {
         inputs: [
@@ -403,6 +411,141 @@ pub(crate) const CRAFTING: &[CraftingRecipe] = &[
         },
         research: &NO_RESEARCH,
     },
+    seasonal(
+        [
+            Some(crate::items::CHRISTMAS_MILK),
+            Some(vanilla!("egg")),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ],
+        crate::items::CHRISTMAS_EGG_NOG,
+        2,
+    ),
+    seasonal(
+        [
+            Some(APPLE_JUICE),
+            Some(vanilla!("sugar")),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ],
+        crate::items::CHRISTMAS_APPLE_CIDER,
+        2,
+    ),
+    seasonal(
+        [
+            Some(vanilla!("egg")),
+            Some(vanilla!("apple")),
+            Some(vanilla!("melon")),
+            Some(vanilla!("sugar")),
+            None,
+            None,
+            None,
+            None,
+            None,
+        ],
+        crate::items::CHRISTMAS_FRUIT_CAKE,
+        4,
+    ),
+    seasonal(
+        [
+            Some(vanilla!("sugar")),
+            Some(vanilla!("apple")),
+            Some(vanilla!("egg")),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ],
+        crate::items::CHRISTMAS_APPLE_PIE,
+        2,
+    ),
+    seasonal(
+        [
+            Some(vanilla!("egg")),
+            Some(vanilla!("sugar")),
+            Some(WHEAT_FLOUR),
+            Some(vanilla!("milk_bucket")),
+            None,
+            None,
+            None,
+            None,
+            None,
+        ],
+        crate::items::CHRISTMAS_CAKE,
+        4,
+    ),
+    seasonal(
+        [
+            None,
+            Some(crate::items::CHRISTMAS_CARAMEL),
+            None,
+            None,
+            Some(vanilla!("apple")),
+            None,
+            None,
+            Some(vanilla!("stick")),
+            None,
+        ],
+        crate::items::CHRISTMAS_CARAMEL_APPLE,
+        2,
+    ),
+    seasonal(
+        [
+            None,
+            Some(vanilla!("cocoa_beans")),
+            None,
+            None,
+            Some(vanilla!("apple")),
+            None,
+            None,
+            Some(vanilla!("stick")),
+            None,
+        ],
+        crate::items::CHRISTMAS_CHOCOLATE_APPLE,
+        2,
+    ),
+    seasonal(
+        [
+            Some(vanilla!("sugar")),
+            Some(vanilla!("carrot")),
+            Some(vanilla!("egg")),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ],
+        crate::items::CARROT_PIE,
+        2,
+    ),
+    seasonal(
+        [
+            Some(vanilla!("sugar")),
+            Some(vanilla!("apple")),
+            Some(vanilla!("egg")),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ],
+        crate::items::EASTER_APPLE_PIE,
+        2,
+    ),
     CraftingRecipe {
         inputs: [Some(GOLD_24K); 9],
         output: stack(crate::items::GOLD_24K_BLOCK, 1),
@@ -1200,6 +1343,10 @@ pub(crate) const SMELTING: &[SmeltingRecipe] = &[
         &[stack(crate::items::CHRISTMAS_CHOCOLATE_MILK, 1)],
         crate::items::CHRISTMAS_HOT_CHOCOLATE,
     ),
+    SmeltingRecipe {
+        inputs: &[stack(vanilla!("sugar"), 1), stack(vanilla!("sugar"), 1)],
+        output: stack(crate::items::CHRISTMAS_CARAMEL, 4),
+    },
     smelt(
         &[
             stack(SYNTHETIC_DIAMOND, 1),
@@ -1523,6 +1670,142 @@ pub(crate) const BLISTERING_INGOTS_RESEARCH: Research = Research {
 mod resource_recipe_tests {
     use super::*;
     use mod_api::testing::FakeHost;
+
+    #[test]
+    fn seasonal_foods_keep_their_paper_ids_and_only_the_original_apple_pie_conflict() {
+        let mut host = FakeHost::new();
+        host.registries
+            .resolve_items(
+                [
+                    "minecraft:potion",
+                    "minecraft:pumpkin_pie",
+                    "minecraft:apple",
+                ]
+                .map(|id| mod_api::Identifier::parse(id).unwrap()),
+            )
+            .unwrap();
+        let cases: &[(&str, &str, u32, &[(usize, &str)])] = &[
+            (
+                "CHRISTMAS_EGG_NOG",
+                "potion",
+                2,
+                &[(0, "CHRISTMAS_MILK"), (1, "minecraft:egg")],
+            ),
+            (
+                "CHRISTMAS_APPLE_CIDER",
+                "potion",
+                2,
+                &[(0, "APPLE_JUICE"), (1, "minecraft:sugar")],
+            ),
+            (
+                "CHRISTMAS_FRUIT_CAKE",
+                "pumpkin_pie",
+                4,
+                &[
+                    (0, "minecraft:egg"),
+                    (1, "minecraft:apple"),
+                    (2, "minecraft:melon"),
+                    (3, "minecraft:sugar"),
+                ],
+            ),
+            (
+                "CHRISTMAS_APPLE_PIE",
+                "pumpkin_pie",
+                2,
+                &[
+                    (0, "minecraft:sugar"),
+                    (1, "minecraft:apple"),
+                    (2, "minecraft:egg"),
+                ],
+            ),
+            (
+                "CHRISTMAS_CAKE",
+                "pumpkin_pie",
+                4,
+                &[
+                    (0, "minecraft:egg"),
+                    (1, "minecraft:sugar"),
+                    (2, "WHEAT_FLOUR"),
+                    (3, "minecraft:milk_bucket"),
+                ],
+            ),
+            (
+                "CHRISTMAS_CARAMEL_APPLE",
+                "apple",
+                2,
+                &[
+                    (1, "CHRISTMAS_CARAMEL"),
+                    (4, "minecraft:apple"),
+                    (7, "minecraft:stick"),
+                ],
+            ),
+            (
+                "CHRISTMAS_CHOCOLATE_APPLE",
+                "apple",
+                2,
+                &[
+                    (1, "minecraft:cocoa_beans"),
+                    (4, "minecraft:apple"),
+                    (7, "minecraft:stick"),
+                ],
+            ),
+            (
+                "CARROT_PIE",
+                "pumpkin_pie",
+                2,
+                &[
+                    (0, "minecraft:sugar"),
+                    (1, "minecraft:carrot"),
+                    (2, "minecraft:egg"),
+                ],
+            ),
+            (
+                "EASTER_APPLE_PIE",
+                "pumpkin_pie",
+                2,
+                &[
+                    (0, "minecraft:sugar"),
+                    (1, "minecraft:apple"),
+                    (2, "minecraft:egg"),
+                ],
+            ),
+        ];
+        for &(id, material, count, positions) in cases {
+            let recipe = crafting()
+                .find(|entry| entry.output.kind.id() == id)
+                .unwrap();
+            let slots: [Option<&str>; 9] = std::array::from_fn(|slot| {
+                positions
+                    .iter()
+                    .find(|&&(pos, _)| pos == slot)
+                    .map(|&(_, id)| id)
+            });
+            assert_eq!(
+                recipe.inputs.map(|input| input.map(Kind::id)),
+                slots,
+                "{id}"
+            );
+            assert!(recipe.research.id.is_empty());
+            assert_eq!(
+                recipe.output.kind.material(),
+                format!("minecraft:{material}")
+            );
+            assert_eq!(recipe.output.count, count);
+            let result = recipe.output.kind.stack(&host, count).unwrap();
+            assert_eq!(crate::items::item_id(&result).as_deref(), Some(id));
+            let competing: Vec<_> = crafting()
+                .filter(|entry| entry.inputs == recipe.inputs)
+                .map(|entry| entry.output.kind.id())
+                .collect();
+            let expected: &[&str] = match id {
+                "CHRISTMAS_APPLE_PIE" | "EASTER_APPLE_PIE" => {
+                    &["CHRISTMAS_APPLE_PIE", "EASTER_APPLE_PIE"]
+                }
+                _ => std::slice::from_ref(&id),
+            };
+            assert_eq!(competing, expected, "{id}");
+        }
+    }
 
     #[test]
     fn paper_gold_block_and_apple_form_the_exact_enhanced_crafting_chain() {

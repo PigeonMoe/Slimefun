@@ -6,10 +6,19 @@ use mod_api::{
 };
 
 use crate::items::{
-    CHRISTMAS_CHOCOLATE_MILK, CHRISTMAS_HOT_CHOCOLATE, CHRISTMAS_MILK, GOLDEN_APPLE_JUICE, Kind,
+    CHRISTMAS_APPLE_CIDER, CHRISTMAS_CHOCOLATE_MILK, CHRISTMAS_EGG_NOG, CHRISTMAS_HOT_CHOCOLATE,
+    CHRISTMAS_MILK, GOLDEN_APPLE_JUICE, Kind,
 };
 use crate::recipes::{GOLDEN_POTION, JUICER, JUICING};
 use crate::research;
+
+const CHRISTMAS_DRINKS: &[Kind] = &[
+    CHRISTMAS_MILK,
+    CHRISTMAS_CHOCOLATE_MILK,
+    CHRISTMAS_EGG_NOG,
+    CHRISTMAS_APPLE_CIDER,
+    CHRISTMAS_HOT_CHOCOLATE,
+];
 
 pub(crate) fn start(host: &mut dyn ServerHost, event: &LivingEntityUseItemStartEvent<'_>) -> Flow {
     if event.entity.is_some() {
@@ -21,12 +30,13 @@ pub(crate) fn start(host: &mut dyn ServerHost, event: &LivingEntityUseItemStartE
     let Some(player) = host.players().acting_player() else {
         return Flow::Continue;
     };
-    let required = match juice {
-        CHRISTMAS_MILK | CHRISTMAS_CHOCOLATE_MILK | CHRISTMAS_HOT_CHOCOLATE => {
-            return Flow::Continue;
-        }
-        GOLDEN_APPLE_JUICE => &GOLDEN_POTION,
-        _ => &JUICER,
+    if CHRISTMAS_DRINKS.contains(&juice) {
+        return Flow::Continue;
+    }
+    let required = if juice == GOLDEN_APPLE_JUICE {
+        &GOLDEN_POTION
+    } else {
+        &JUICER
     };
     if !research::can_use(host, player, required) {
         let message = format!("Unlock this research with /sf research {}.", required.id);
@@ -72,11 +82,7 @@ fn identify(host: &dyn ServerHost, stack: &ItemStack) -> Option<Kind> {
     JUICING
         .iter()
         .map(|recipe| recipe.output.kind)
-        .chain([
-            CHRISTMAS_MILK,
-            CHRISTMAS_CHOCOLATE_MILK,
-            CHRISTMAS_HOT_CHOCOLATE,
-        ])
+        .chain(CHRISTMAS_DRINKS.iter().copied())
         .find(|kind| kind.id() == id && kind.matches(host, stack))
 }
 
@@ -102,6 +108,8 @@ mod tests {
         for (drink, color, effect_ticks, hunger) in [
             (CHRISTMAS_MILK, 0xffffff, 4, "2.5"),
             (CHRISTMAS_CHOCOLATE_MILK, 0x800000, 11, "6.0"),
+            (CHRISTMAS_EGG_NOG, 0x808080, 6, "3.5"),
+            (CHRISTMAS_APPLE_CIDER, 0xff0000, 13, "7.0"),
             (CHRISTMAS_HOT_CHOCOLATE, 0x800000, 13, "7.0"),
         ] {
             let stack = drink.stack(&host, 1).unwrap();
@@ -150,6 +158,13 @@ mod tests {
                 2,
                 ["CHRISTMAS_MILK", "minecraft:cocoa_beans"],
             ),
+            (3, CHRISTMAS_EGG_NOG, 2, ["CHRISTMAS_MILK", "minecraft:egg"]),
+            (
+                4,
+                CHRISTMAS_APPLE_CIDER,
+                2,
+                ["APPLE_JUICE", "minecraft:sugar"],
+            ),
         ] {
             let recipe = crate::recipes::crafting()
                 .find(|recipe| recipe.output.kind == kind)
@@ -180,6 +195,50 @@ mod tests {
             let slots = &host.level.block_entity(pos).items.as_ref().unwrap().slots;
             assert_eq!(slots.iter().flatten().count() as u32, count);
             assert!(slots.iter().flatten().all(|stack| stack == &one));
+        }
+    }
+
+    #[test]
+    fn archived_eggnog_and_cider_keep_their_ids_and_need_no_research() {
+        let mut host = FakeHost::new();
+        host.registries
+            .resolve_items([Identifier::parse("minecraft:potion").unwrap()])
+            .unwrap();
+        let level = host.level.level();
+        host.players.join(1, 2, level);
+        host.players.acting = Some(1);
+        for (id, drink, hand) in [
+            ("CHRISTMAS_EGG_NOG", CHRISTMAS_EGG_NOG, mod_api::Hand::Main),
+            (
+                "CHRISTMAS_APPLE_CIDER",
+                CHRISTMAS_APPLE_CIDER,
+                mod_api::Hand::Off,
+            ),
+        ] {
+            let mut legacy = drink.stack(&host, 1).unwrap();
+            legacy
+                .set_components(Compound::from([(
+                    "minecraft:custom_data".into(),
+                    Tag::compound([(
+                        "PublicBukkitValues",
+                        Tag::compound([(crate::items::ID_KEY, Tag::String(id.into()))]),
+                    )]),
+                )]))
+                .unwrap();
+            assert_eq!(identify(&host, &legacy), Some(drink));
+            assert_eq!(
+                start(
+                    &mut host,
+                    &LivingEntityUseItemStartEvent {
+                        stack: &legacy,
+                        entity: None,
+                        hand,
+                        duration: 32,
+                        cancelled: false,
+                    }
+                ),
+                Flow::Continue
+            );
         }
     }
 

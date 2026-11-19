@@ -267,11 +267,14 @@ const fn altar_recipes() -> [CraftingRecipe; BLOCK_COUNT] {
 pub(crate) const ALTAR_RECIPES: &[CraftingRecipe] = &altar_recipes();
 
 pub(crate) fn decorate(id: &str, patch: &mut Compound) {
-    if id == CHRISTMAS_COOKIE.id() {
-        patch.insert(
-            "minecraft:custom_name".into(),
-            christmas("Christmas Cookie"),
-        );
+    let seasonal_name = match id {
+        "CHRISTMAS_COOKIE" => Some("Christmas Cookie"),
+        "CHRISTMAS_FRUIT_CAKE" => Some("Fruit Cake"),
+        "CHRISTMAS_CAKE" => Some("Christmas Cake"),
+        _ => None,
+    };
+    if let Some(name) = seasonal_name {
+        patch.insert("minecraft:custom_name".into(), christmas(name));
         return;
     }
     let Some((_, record)) = block(id) else {

@@ -7,7 +7,7 @@ use mod_api::{
 
 use crate::backpacks;
 use crate::compressor::DelayedCrafts;
-use crate::items::{OUTPUT_CHEST, SIFTED_ORE, STONE_CHUNK};
+use crate::items::{Kind, OUTPUT_CHEST, SIFTED_ORE, STONE_CHUNK};
 use crate::output_chest;
 use crate::random::Rolls;
 use crate::recipes::{
@@ -605,6 +605,22 @@ fn smelting_inputs(
     recipe: &SmeltingRecipe,
 ) -> Option<[u32; 9]> {
     let mut consumed = [0; 9];
+    if recipe.output.kind == crate::items::CHRISTMAS_CARAMEL {
+        // Paper checks each of the two sugar entries against the unchanged
+        // inventory, then removes up to two sugar in dispenser slot order.
+        let sugar = Kind::Vanilla("minecraft:sugar");
+        let mut remaining = 2;
+        for (stack, cost) in slots.iter().zip(&mut consumed) {
+            if let Some(stack) = stack.as_ref().filter(|stack| sugar.matches(host, stack)) {
+                *cost = stack.count().min(remaining);
+                remaining -= *cost;
+                if remaining == 0 {
+                    break;
+                }
+            }
+        }
+        return (remaining < 2).then_some(consumed);
+    }
     for ingredient in recipe.inputs {
         let index = slots.iter().enumerate().position(|(slot, item)| {
             item.as_ref().is_some_and(|item| {
@@ -861,6 +877,72 @@ cargo-ticker-delay = 4
     const POSITION: [i32; 3] = [0, 64, 0];
     const BLAZE_ROD: Kind = Kind::Vanilla("minecraft:blaze_rod");
     const BLAZE_POWDER: Kind = Kind::Vanilla("minecraft:blaze_powder");
+
+    #[test]
+    fn caramel_consumes_up_to_two_paper_sugar_and_never_runs_in_electric_smelteries() {
+        use crate::items::{CHRISTMAS_CARAMEL, WHEAT_FLOUR};
+
+        let mut host = FakeHost::new();
+        host.registries
+            .resolve_items(
+                ["minecraft:sugar", "minecraft:brick"].map(|id| Identifier::parse(id).unwrap()),
+            )
+            .unwrap();
+        let recipe = SMELTING
+            .iter()
+            .find(|recipe| recipe.output.kind == CHRISTMAS_CARAMEL)
+            .unwrap();
+        let sugar = Kind::Vanilla("minecraft:sugar");
+        assert_eq!(recipe.output.count, 4);
+        assert_eq!(
+            recipe
+                .inputs
+                .iter()
+                .map(|input| (input.kind, input.count))
+                .collect::<Vec<_>>(),
+            [(sugar, 1), (sugar, 1)]
+        );
+        let archived_flour = WHEAT_FLOUR.stack(&host, 2);
+
+        let mut slots = [const { None }; 9];
+        slots[2] = archived_flour;
+        assert_eq!(smelting_inputs(&host, &slots, recipe), None);
+        for (first, second, take_first, take_second) in [
+            (1, 0, 1, 0),
+            (2, 0, 2, 0),
+            (3, 0, 2, 0),
+            (1, 1, 1, 1),
+            (1, 2, 1, 1),
+            (2, 1, 2, 0),
+        ] {
+            slots[0] = (first > 0).then(|| sugar.stack(&host, first).unwrap());
+            slots[1] = (second > 0).then(|| sugar.stack(&host, second).unwrap());
+            let mut consumed = [0; 9];
+            consumed[..2].copy_from_slice(&[take_first, take_second]);
+            assert_eq!(smelting_inputs(&host, &slots, recipe), Some(consumed));
+        }
+
+        // Paper's electric machine checks unique matched slots. Both identical
+        // ingredients pick the same first slot, so its registered recipe cannot run.
+        assert!(
+            !crate::advanced_processing::smeltery_recipes()
+                .iter()
+                .any(|recipe| recipe.output.kind == CHRISTMAS_CARAMEL)
+        );
+        for machine in ["ELECTRIC_SMELTERY", "ELECTRIC_SMELTERY_2"] {
+            let spec = crate::advanced_processing::machine(machine).unwrap();
+            assert!(
+                crate::advanced_processing::next(
+                    &host,
+                    spec,
+                    &slots[..6],
+                    Settings::default(),
+                    false
+                )
+                .is_none()
+            );
+        }
+    }
 
     #[test]
     fn carbonado_uses_pressure_chamber_diamond_and_full_smeltery() {

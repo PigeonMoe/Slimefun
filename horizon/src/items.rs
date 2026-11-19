@@ -459,6 +459,22 @@ juice!(
     11
 );
 juice!(
+    CHRISTMAS_EGG_NOG,
+    "Egg Nog",
+    "green",
+    0x808080,
+    "minecraft:saturation",
+    6
+);
+juice!(
+    CHRISTMAS_APPLE_CIDER,
+    "Apple Cider",
+    "red",
+    0xff0000,
+    "minecraft:saturation",
+    13
+);
+juice!(
     CHRISTMAS_HOT_CHOCOLATE,
     "Hot Chocolate",
     "gold",
@@ -480,6 +496,57 @@ juice!(
     0xffff00,
     "minecraft:absorption",
     400
+);
+
+item!(
+    CHRISTMAS_FRUIT_CAKE,
+    "pumpkin_pie",
+    "Fruit Cake",
+    "green",
+    None,
+    None
+);
+item!(
+    CHRISTMAS_APPLE_PIE,
+    "pumpkin_pie",
+    "Apple Pie",
+    "white",
+    None,
+    None
+);
+item!(
+    CHRISTMAS_CAKE,
+    "pumpkin_pie",
+    "Christmas Cake",
+    "green",
+    None,
+    None
+);
+item!(CHRISTMAS_CARAMEL, "brick", "Caramel", "gold", None, None);
+item!(
+    CHRISTMAS_CARAMEL_APPLE,
+    "apple",
+    "Caramel Apple",
+    "gold",
+    None,
+    None
+);
+item!(
+    CHRISTMAS_CHOCOLATE_APPLE,
+    "apple",
+    "Chocolate Apple",
+    "gold",
+    None,
+    None
+);
+item!(CARROT_PIE, "pumpkin_pie", "Carrot Pie", "gold", None, None);
+item!(
+    EASTER_APPLE_PIE,
+    "pumpkin_pie",
+    "Apple Pie",
+    "white",
+    None,
+    None
 );
 
 item!(
