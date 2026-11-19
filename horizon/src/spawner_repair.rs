@@ -12,7 +12,7 @@ use mod_api::{
     AttachmentCodec, AttachmentError, AttachmentType, BlockDropsEvent, BlockKey, BreakBlockEvent,
     Compound, Flow, Hand, Holder, Host, HostSide, HostTransaction, InteractionResult, ItemKey,
     ItemPart, ItemPlace, ItemStack, LevelHost, LevelRef, OnBlockPlacedByEvent,
-    PlayerDestroyedBlockEvent, PlayerRef, RandomSource, Registrar, ServerHost, Tag, Text,
+    PlayerDestroyedBlockEvent, PlayerRef, Registrar, ServerHost, Tag, Text,
     UseOnEvent,
 };
 
@@ -529,14 +529,8 @@ impl Spawners {
             return;
         };
         let level = candidate.level;
-        let mut xyz = event.pos.map(f64::from);
-        if let Some(mut random) = level.random(host) {
-            // CraftWorld.dropItemNaturally samples once per axis around the block origin.
-            xyz = xyz.map(|p| p + (random.next_double() * 0.5 - 0.25));
-            let _ = level.set_random(host, random);
-        }
-        xyz[1] -= 0.125; // Half the vanilla item entity's height.
-        let _ = level.spawn_item(host, xyz[0], xyz[1], xyz[2], stack, 10);
+        let [x, y, z] = crate::random::natural_drop_position(host, level, event.pos);
+        let _ = level.spawn_item(host, x, y, z, stack, 10);
     }
 
     pub(crate) fn suppress_base_drops(

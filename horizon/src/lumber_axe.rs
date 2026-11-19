@@ -2,7 +2,7 @@
 
 use mod_api::{
     BlockState, BlockUpdateFlags, Flow, Hand, Host, HostBlockStates, HostTransaction, ItemPlace,
-    ItemStack, LevelRef, PlayerDestroyedBlockEvent, PlayerRef, ServerHost, SoundSource, Text,
+    ItemStack, LevelRef, PlayerDestroyedBlockEvent, PlayerRef, ServerHost, SoundSource, Tag, Text,
 };
 
 use crate::{
@@ -15,14 +15,15 @@ use crate::{
     research,
 };
 
-item!(
-    LUMBER_AXE,
-    "diamond_axe",
-    "Lumber Axe",
-    "gold",
-    Some("Cuts down the whole Tree..."),
-    None
-);
+item!(LUMBER_AXE, "diamond_axe", "Lumber Axe", "gold", None, None);
+
+pub(crate) fn lore() -> Tag {
+    Tag::List(vec![crate::items::text(
+        "Cuts down the whole Tree...",
+        "green",
+        true,
+    )])
+}
 
 pub(crate) const RESEARCH: Research = Research {
     id: "lumber_axe",
@@ -159,8 +160,8 @@ pub(crate) fn destroyed(host: &mut dyn ServerHost, event: &PlayerDestroyedBlockE
                 {
                     return Err(());
                 }
-                let [x, y, z] = pos.map(|coord| f64::from(coord) + 0.5);
                 for drop in drops {
+                    let [x, y, z] = crate::random::natural_drop_position(host, level, pos);
                     level
                         .spawn_item(host, x, y, z, drop, 10)
                         .map_err(|_| ())?
@@ -215,7 +216,7 @@ pub(crate) fn strip(
                 host,
                 "minecraft:item.axe.strip",
                 pos.map(f64::from),
-                SoundSource::Blocks,
+                SoundSource::Master,
                 1.0,
                 1.0,
             );
@@ -244,6 +245,7 @@ fn stripped_state(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mod_api::{Identifier, testing::FakeHost};
 
     #[test]
     fn recipe_uses_the_paper_magic_workbench_positions() {
@@ -263,6 +265,22 @@ mod tests {
         );
         assert_eq!(CRAFTING.research.cost, 21);
         assert_eq!(CRAFTING.output.kind.material(), "minecraft:diamond_axe");
+        let mut host = FakeHost::new();
+        host.registries
+            .resolve_items([Identifier::parse("minecraft:diamond_axe").unwrap()])
+            .unwrap();
+        let axe = CRAFTING.output.kind.stack(&host, 1).unwrap();
+        assert_eq!(
+            axe.components()
+                .unwrap()
+                .as_nbt()
+                .get(&"minecraft:lore".into()),
+            Some(&Tag::List(vec![crate::items::text(
+                "Cuts down the whole Tree...",
+                "green",
+                true
+            )])),
+        );
     }
 
     #[test]
