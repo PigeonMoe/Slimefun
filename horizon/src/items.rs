@@ -203,6 +203,7 @@ impl SlimefunItem {
         }
         crate::spawner_repair::decorate(self.id, &mut components);
         crate::magic_weapons::decorate(self.id, &mut components);
+        crate::ore_tools::decorate(self.id, &mut components);
         crate::jet_boots::decorate(self.id, &mut components);
         crate::jetpack::decorate(self.id, &mut components);
         crate::elemental_staves::decorate(self.id, &mut components);

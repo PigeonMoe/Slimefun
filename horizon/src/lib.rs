@@ -70,6 +70,7 @@ mod medical;
 mod network_recipes;
 mod network_runtime;
 mod networks;
+mod ore_tools;
 mod output_chest;
 mod portable_crafter;
 mod radiation;
@@ -115,6 +116,7 @@ struct Slimefun {
     smelters_pickaxes: smelters_pickaxe::SmeltersPickaxes,
     spawners: spawner_repair::Spawners,
     magic_weapons: magic_weapons::Weapons,
+    ore_tools: ore_tools::OreTools,
     rolls: Rolls,
     chest: Mutex<Option<ItemKey>>,
     networks: Arc<Mutex<network_runtime::Networks>>,
@@ -150,6 +152,7 @@ impl Default for Slimefun {
             smelters_pickaxes: smelters_pickaxe::SmeltersPickaxes::default(),
             spawners: spawner_repair::Spawners::default(),
             magic_weapons: magic_weapons::Weapons::default(),
+            ore_tools: ore_tools::OreTools::default(),
             rolls: Rolls::default(),
             chest: Mutex::new(None),
             networks: Arc::default(),
@@ -188,6 +191,7 @@ impl Slimefun {
             return;
         };
         self.guide.configure(table.get("guide"));
+        self.ore_tools.configure(&table);
         self.radiation.configure(table.get("radiation"));
         self.block_placers.configure(
             table
@@ -398,7 +402,7 @@ impl Hooks for Slimefun {
             "slimefun",
             ConfigKind::Server,
             &format!("{}{}",
-            "double-ores = true\ncrucible-allow-water-in-nether = false\nlegacy-ore-washer = false\nlegacy-dust-washer = false\nlegacy-ore-grinder = true\nelectric-gold-pan-override-output-limit = [false, false, false]\nfreezer-use-vanilla-ratios = [false, false, false]\nfire-breaking-chance = 34\noutput-chest-enabled = true\ndrop-from-golems = true\ngolem-drop-chance = 75\n\n[guide]\nreceive-on-first-join = true\n\n[URID]\ncustom-ticker-delay = 10\n\n[networks]\nmax-size = 200\nenable-visualizer = true\ncargo-ticker-delay = 0\n\n[wind-staff]\npower = 4\n\n[book-binder]\nbypass-vanilla-max-level = false\nhas-custom-max-level = false\ncustom-max-level = 15\n\n[portable-teleporter]\nteleportation-cost = 10\n\n[produce-collector]\nrange = 2\n\n[blade-of-vampires]\nchance = 45\n\n[reinforced-spawner]\nallow-spawn-eggs = true\n\n[ancient-altar]\nstep-delay = 8\n\n[miner-android]\nreduced-block-updates = true\n\n[industrial-miner]\ncan-mine-ancient-debris = false\ncan-mine-deepslate-ores = true\n\n[advanced-industrial-miner]\ncan-mine-ancient-debris = false\ncan-mine-deepslate-ores = true\n",
+            "double-ores = true\ncrucible-allow-water-in-nether = false\nlegacy-ore-washer = false\nlegacy-dust-washer = false\nlegacy-ore-grinder = true\nelectric-gold-pan-override-output-limit = [false, false, false]\nfreezer-use-vanilla-ratios = [false, false, false]\nfire-breaking-chance = 34\noutput-chest-enabled = true\ndrop-from-golems = true\ngolem-drop-chance = 75\n\n[guide]\nreceive-on-first-join = true\n\n[URID]\ncustom-ticker-delay = 10\n\n[networks]\nmax-size = 200\nenable-visualizer = true\ncargo-ticker-delay = 0\n\n[wind-staff]\npower = 4\n\n[book-binder]\nbypass-vanilla-max-level = false\nhas-custom-max-level = false\ncustom-max-level = 15\n\n[portable-teleporter]\nteleportation-cost = 10\n\n[produce-collector]\nrange = 2\n\n[pickaxe-of-vein-mining]\nmax-blocks = 16\n\n[pickaxe-of-the-seeker]\nmax-range = 5\n\n[blade-of-vampires]\nchance = 45\n\n[reinforced-spawner]\nallow-spawn-eggs = true\n\n[ancient-altar]\nstep-delay = 8\n\n[miner-android]\nreduced-block-updates = true\n\n[industrial-miner]\ncan-mine-ancient-debris = false\ncan-mine-deepslate-ores = true\n\n[advanced-industrial-miner]\ncan-mine-ancient-debris = false\ncan-mine-deepslate-ores = true\n",
                 enchantment_machines::default_config()),
         ));
     }
@@ -433,6 +437,7 @@ impl Hooks for Slimefun {
         }
         if lumber_axe::allow_break(host, player) == Flow::Cancel
             || self.spawners.prepare(host, player, level, event) == Flow::Cancel
+            || self.ore_tools.on_break(host, player, level, event, &self.rolls) == Flow::Cancel
         {
             return Flow::Cancel;
         }
@@ -870,7 +875,8 @@ impl Hooks for Slimefun {
                 *event.cancellation_result = InteractionResult::Fail;
                 return Flow::Cancel;
             }
-            if medical::use_supply(host, player, event.click.hand, held)
+            if self.ore_tools.seek(host, player, event.click.hand, held, &self.rolls)
+                || medical::use_supply(host, player, event.click.hand, held)
                 || magic_eye::use_held(host, player, held)
             {
                 self.item_clicks
@@ -1083,6 +1089,7 @@ impl Hooks for Slimefun {
             event.click.hand,
             event.click.stack,
         )
+            || self.ore_tools.seek(host, player, event.click.hand, event.click.stack, &self.rolls)
             || jet_boots::STEEL_THRUSTER.matches(host, event.click.stack)
             || jetpack::CHAIN.matches(host, event.click.stack)
             || medical::HEAVY_CREAM.matches(host, event.click.stack)

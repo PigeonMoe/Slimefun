@@ -70,8 +70,8 @@ pub(crate) fn decorate(id: &str, components: &mut Compound) {
     );
 }
 
-// Paper's smelters_pickaxe_blocks includes all three ore tags and ancient debris.
-fn ore(id: &str) -> bool {
+// Paper tags for Smelter's, Vein Mining and Seeker all include the three ore groups and ancient debris.
+pub(crate) fn ore(id: &str) -> bool {
     let Some(id) = id.strip_prefix("minecraft:") else {
         return false;
     };
@@ -91,7 +91,7 @@ fn ore(id: &str) -> bool {
     }
 }
 
-fn enchantment(host: &dyn Host, tool: &ItemStack, enchantment: &str) -> u32 {
+pub(crate) fn enchantment(host: &dyn Host, tool: &ItemStack, enchantment: &str) -> u32 {
     let Some(component) = ComponentId::new("minecraft:enchantments") else {
         return 0;
     };
@@ -105,7 +105,12 @@ fn enchantment(host: &dyn Host, tool: &ItemStack, enchantment: &str) -> u32 {
         .min(255)
 }
 
-fn fortune_amount(fortune: u32, silk: bool, block: &str, mut draw: impl FnMut(u32) -> u32) -> u32 {
+pub(crate) fn fortune_amount(
+    fortune: u32,
+    silk: bool,
+    block: &str,
+    mut draw: impl FnMut(u32) -> u32,
+) -> u32 {
     if fortune == 0 || silk {
         return 1;
     }
