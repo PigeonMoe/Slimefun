@@ -67,6 +67,7 @@ mod random;
 mod recipes;
 mod research;
 mod storage;
+mod tape_measure;
 mod thermal_machines;
 mod universal_storage;
 
@@ -688,7 +689,8 @@ impl Hooks for Slimefun {
         if *event.use_item != TriState::False
             && let Some(held) = event.click.stack
             && let Some(level) = player.entity().level(host)
-            && energy_gadgets::measure(host, player, level, event.click.pos, held)
+            && (energy_gadgets::measure(host, player, level, event.click.pos, held)
+                || tape_measure::use_at(host, player, level, event.click.hand, event.click.pos))
         {
             *event.cancellation_result = InteractionResult::Consume;
             return Flow::Cancel;
@@ -856,7 +858,8 @@ impl Hooks for Slimefun {
                 player.game_mode(host),
                 Some(GameMode::Survival | GameMode::Creative)
             )
-            && (portable_crafter::use_held(host, player, event.click.stack)
+            && (tape_measure::in_air(host, player, event.click.stack)
+                || portable_crafter::use_held(host, player, event.click.stack)
                 || self.backpacks.use_held(host, player, event.click.hand)
                 || network_runtime::trash::portable(host, player, event.click.hand)
                 || self

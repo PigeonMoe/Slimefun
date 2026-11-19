@@ -205,6 +205,7 @@ impl ItemPart for NetworkPlacement {
                 crate::network_recipes::ANDROID_MEMORY_CORE,
                 crate::infused::INFUSED_MAGNET,
                 crate::portable_crafter::PORTABLE_CRAFTER,
+                crate::tape_measure::TAPE_MEASURE,
                 trash::PORTABLE_DUSTBIN,
             ]
             .iter()

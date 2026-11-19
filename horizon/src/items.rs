@@ -114,6 +114,9 @@ impl SlimefunItem {
         if self.id == "PORTABLE_CRAFTER" {
             components.insert("minecraft:lore".into(), crate::portable_crafter::lore());
         }
+        if self.id == "TAPE_MEASURE" {
+            components.insert("minecraft:lore".into(), crate::tape_measure::lore());
+        }
         if let Some(lore) = crate::infused::lore(self.id) {
             components.insert("minecraft:lore".into(), lore);
         }

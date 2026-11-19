@@ -488,6 +488,7 @@ name = "slimefun-horizon"
 version = "0.1.0-dev.5"
 dependencies = [
  "horizon-mod-api",
+ "serde_json",
  "toml",
 ]
 

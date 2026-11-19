@@ -183,6 +183,8 @@ Paper 的 `stored-chunks/chunks.sfc` 会随快照导出。生成导入档案后�
 
 所有原版 Slimefun Android 均可从内存核心浏览、上传和下载服务器共享的脚本。下载会替换当前脚本。列表支持翻页、下载计数及每账号单次评分，普通脚本也会出现在其他 Android 类别的共享库里。若迁移了 Paper，通过 `python3 horizon/tools/import-android-scripts.py <Paper 的 plugins/Slimefun/scripts> <Horizon 世界>/horizon-mod-data/slimefun/android-scripts-import.toml` 导入原脚本名称、作者、下载量和评分。导入脚本会出现在对应设备的列表里。首次改动共享库时，Horizon 将导入内容及改动保存至 `android-scripts.toml`。转换脚本使用 PyYAML。
 
+卷尺在增强工作台制作。潜行右键方块可在当前卷尺上保存起点，右键同维度内的另一个方块可测量三维直线距离，最多显示三位小数。转交卷尺时起点随物品保留。若卷尺带有原 Paper 起点，请在 `<Horizon 世界>/horizon-mod-data/slimefun/paper-worlds.toml` 的 `[worlds]` 表中填写 `"旧 Paper 世界 UUID" = "minecraft:overworld"` 等对应关系；也可以重新选定起点。
+
 在增强工作台制作并放置 GPS 发射器并接入能源网络，为放置者增加 GPS 复杂度。达到 600 后，可以右击目标区块内的固定 GEO 扫描器，或手持便携扫描器右击目标区块中的方块。扫描会显示按维度和生物群系生成的四种有限储量。接通同一区块的 GEO 矿机即可开采小块铀、下界冰和盐，货运可从矿机的输出槽提取。接通油泵并放入空桶即可提取原油，油桶可送往炼油机，燃料桶可用于内燃发电机。
 
 GPS 标记工具会记录右击方块对应的相邻位置，随后使用玩家下一条聊天消息作为名称。GPS 控制面板可查看自己的在线发射器、复杂度并删除航点。迁移 Paper 航点时运行 `horizon/tools/import-waypoints.py <Paper数据目录> <Slimefun世界数据目录>/waypoints-import --world <Paper世界名>=<Horizon维度>`。使用 PM-Sync 的快照可加 `--server-id`，并用 Paper 世界 UUID 提供对应的映射。玩家须以同一 UUID 加入，导入保留已有同名航点，之后删除的航点不会从同一档案重新加入。
