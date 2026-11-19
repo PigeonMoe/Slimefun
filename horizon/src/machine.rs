@@ -84,6 +84,24 @@ impl Default for Settings {
     }
 }
 
+impl Settings {
+    pub(crate) fn update_networks(&mut self, config: Option<&toml::Value>) {
+        let defaults = Self::default();
+        let option = |setting| config.and_then(|section| section.get(setting));
+        self.network_discovery_budget = option("max-size")
+            .and_then(toml::Value::as_integer)
+            .and_then(|value| u32::try_from(value.max(1)).ok())
+            .unwrap_or(defaults.network_discovery_budget);
+        self.cargo_visualizer = option("enable-visualizer")
+            .and_then(toml::Value::as_bool)
+            .unwrap_or(defaults.cargo_visualizer);
+        self.cargo_tick_delay = option("cargo-ticker-delay")
+            .and_then(toml::Value::as_integer)
+            .and_then(|value| u32::try_from(value.max(0)).ok())
+            .unwrap_or(defaults.cargo_tick_delay);
+    }
+}
+
 impl Dispenser {
     fn place(self, slot: usize) -> ItemPlace {
         ItemPlace::BlockEntity {
@@ -787,6 +805,35 @@ pub(crate) fn deposit_into(
 mod tests {
     use super::*;
     use crate::items::Kind;
+
+    #[test]
+    fn removing_network_overrides_on_reload_restores_the_paper_defaults() {
+        let mut settings = super::Settings::default();
+        let patched = r#"[networks]
+max-size = 1
+enable-visualizer = false
+cargo-ticker-delay = 4
+"#
+        .parse::<toml::Table>()
+        .unwrap();
+        settings.update_networks(patched.get("networks"));
+        assert_eq!(settings.network_discovery_budget, 1);
+        assert!(!settings.cargo_visualizer);
+        assert_eq!(settings.cargo_tick_delay, 4);
+
+        let partial = "[networks]\nmax-size = 42\n"
+            .parse::<toml::Table>()
+            .unwrap();
+        settings.update_networks(partial.get("networks"));
+        assert_eq!(settings.network_discovery_budget, 42);
+        assert!(settings.cargo_visualizer);
+        assert_eq!(settings.cargo_tick_delay, 0);
+
+        settings.update_networks(None);
+        assert_eq!(settings.network_discovery_budget, 200);
+        assert!(settings.cargo_visualizer);
+        assert_eq!(settings.cargo_tick_delay, 0);
+    }
 
     #[test]
     fn a_magic_workbench_uses_the_first_neighboring_dispenser_after_structure_detection() {

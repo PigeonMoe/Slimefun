@@ -362,28 +362,7 @@ impl Slimefun {
                 .get("strange-nether-goo")
                 .and_then(toml::Value::as_table),
         );
-        if let Some(network) = table.get("networks").and_then(toml::Value::as_table) {
-            if let Some(budget) = network
-                .get("max-size")
-                .and_then(toml::Value::as_integer)
-                .and_then(|value| u32::try_from(value.max(1)).ok())
-            {
-                settings.network_discovery_budget = budget;
-            }
-            if let Some(value) = network
-                .get("enable-visualizer")
-                .and_then(toml::Value::as_bool)
-            {
-                settings.cargo_visualizer = value;
-            }
-            if let Some(value) = network
-                .get("cargo-ticker-delay")
-                .and_then(toml::Value::as_integer)
-                && let Ok(delay) = u32::try_from(value.max(0))
-            {
-                settings.cargo_tick_delay = delay;
-            }
-        }
+        settings.update_networks(table.get("networks"));
     }
 }
 
