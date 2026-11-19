@@ -1021,6 +1021,14 @@ impl Hooks for Slimefun {
         armor_forge::footwear(event)
     }
 
+    fn player_bee_sting(
+        &self,
+        host: &mut dyn ServerHost,
+        event: &mut mod_api::PlayerBeeStingEvent,
+    ) -> Flow {
+        radiation::protect_bee_sting(host, event.player, &self.rolls)
+    }
+
     fn player_gliding_impact(
         &self,
         _: &dyn mod_api::LoopContext,

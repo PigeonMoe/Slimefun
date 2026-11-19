@@ -283,6 +283,81 @@ fn inventory_radiation(slots: &[(u32, ItemStack)]) -> (u8, bool) {
     (dose as u8, pieces == HAZMAT.len())
 }
 
+/// The Paper Hazmat armor listener wears each real piece and changes an accepted sting to zero damage.
+pub(crate) fn protect_bee_sting(
+    host: &mut dyn ServerHost,
+    player: PlayerRef,
+    rolls: &crate::random::Rolls,
+) -> mod_api::Flow {
+    use mod_api::HostTransaction;
+
+    let Some(dimension) = player.dimension(host) else {
+        return mod_api::Flow::Continue;
+    };
+    let Some(level) = host.level(&dimension.to_string()) else {
+        return mod_api::Flow::Continue;
+    };
+    let Some(slots) = player.inventory_slots(host) else {
+        return mod_api::Flow::Continue;
+    };
+    let worn: Vec<_> = slots
+        .into_iter()
+        .filter(|(slot, item)| {
+            (36..=39).contains(slot)
+                && item.count() > 0
+                && crate::items::item_id(item).is_some_and(|id| HAZMAT.contains(&id.as_str()))
+        })
+        .collect();
+    if worn.len() != HAZMAT.len() {
+        return mod_api::Flow::Continue;
+    }
+    let wear = host.transaction(|host, _| -> Result<(), ()> {
+        for (slot, item) in worn {
+            let max = host.max_damage(item.item()).ok_or(())?;
+            let enchants =
+                crate::enchantment_machines::levels(host, &item, "minecraft:enchantments")
+                    .ok_or(())?;
+            let unbreaking = enchants
+                .get(&"minecraft:unbreaking".into())
+                .and_then(crate::enchantment_machines::level);
+            let damage = match unbreaking {
+                Some(level_of_enchant) => {
+                    let roll = rolls.next(host, level, 100).ok_or(())?;
+                    sting_wear_amount(level_of_enchant as u32, roll)
+                }
+                None => 1,
+            };
+            if damage == 0 {
+                continue;
+            }
+            let replacement = sting_durability(item, max, damage);
+            player
+                .set_inventory_slot(host, slot, replacement)
+                .map_err(|_| ())?;
+        }
+        Ok(())
+    });
+    if wear.is_ok() {
+        mod_api::Flow::Cancel
+    } else {
+        mod_api::Flow::Continue
+    }
+}
+
+fn sting_wear_amount(unbreaking: u32, roll: u32) -> u32 {
+    let chance_to_save = 60 + 40 / (unbreaking + 1);
+    u32::from(roll >= chance_to_save)
+}
+
+fn sting_durability(mut item: ItemStack, maximum: u32, wear: u32) -> Option<ItemStack> {
+    let damage = item.damage().saturating_add(wear);
+    if damage > maximum {
+        return None;
+    }
+    item.set_damage(damage);
+    Some(item)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -372,5 +447,28 @@ mod tests {
         radiation.clear();
         assert!(radiation.0.lock().unwrap().grace.is_empty());
         assert_eq!(Rules::default().duration(), 40);
+    }
+
+    #[test]
+    fn bee_wear_uses_doughs_unbreaking_odds_and_removes_at_the_next_point() {
+        assert_eq!(sting_wear_amount(1, 79), 0);
+        assert_eq!(sting_wear_amount(1, 80), 1);
+        assert_eq!(sting_wear_amount(3, 69), 0);
+        assert_eq!(sting_wear_amount(3, 70), 1);
+
+        let mut host = FakeHost::new();
+        let cap = armor_forge::SCUBA_HELMET;
+        host.registries
+            .resolve_items([Identifier::parse(cap.material()).unwrap()])
+            .unwrap();
+        let mut item = cap.stack(&host, 1).unwrap();
+        item.set_damage(54);
+        let last_point = sting_durability(item, 55, 1).unwrap();
+        assert_eq!(last_point.damage(), 55);
+        assert_eq!(
+            crate::items::item_id(&last_point).as_deref(),
+            Some("SCUBA_HELMET")
+        );
+        assert!(sting_durability(last_point, 55, 1).is_none());
     }
 }
