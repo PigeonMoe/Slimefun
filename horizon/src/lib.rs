@@ -14,6 +14,7 @@ use mod_api::{
 mod advanced_processing;
 mod ancient_altar;
 mod android_items;
+mod android_library;
 mod android_machine;
 mod android_program;
 mod android_ui;
@@ -837,7 +838,11 @@ impl Hooks for Slimefun {
         host: &mut dyn ServerHost,
         event: &mut mod_api::ServerChatEvent<'_>,
     ) -> Flow {
-        if let Some(reply) = self.gps.take_chat(host, event.player, event.raw_text) {
+        if let Some(reply) = self
+            .gps
+            .take_chat(host, event.player, event.raw_text)
+            .or_else(|| self.androids.take_chat(host, event.player, event.raw_text))
+        {
             event.replies.push(reply);
             return Flow::Cancel;
         }

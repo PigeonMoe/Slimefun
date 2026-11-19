@@ -4,11 +4,12 @@ use std::{collections::BTreeMap, sync::Mutex};
 
 use mod_api::{
     BlockEntityRef, Host, ItemStack, LevelRef, MenuClickedEvent, MenuClosedEvent, MenuReplace,
-    MenuSlotPlace, PlayerRef, ServerHost, Text,
+    MenuSlotPlace, PlayerRef, ServerHost, SoundSource, Text,
 };
 
 use crate::{
     android_items,
+    android_library::{Entries, Library},
     android_machine::{self, FUEL, PAPER_SLOTS, Position},
     android_program::{self, Instruction, MAX_LENGTH, Mode, Script},
     gps_controls::{head_icon, icon},
@@ -30,6 +31,7 @@ enum Screen {
     Memory,
     Script(Script),
     Choices { script: Script, index: usize },
+    Library { page: usize, rows: Vec<usize> },
 }
 
 #[derive(Clone)]
@@ -41,7 +43,27 @@ struct View {
 }
 
 #[derive(Default)]
-pub(crate) struct Menus(Mutex<BTreeMap<u128, View>>);
+pub(crate) struct Menus {
+    views: Mutex<BTreeMap<u128, View>>,
+    names: Mutex<BTreeMap<u128, Upload>>,
+    library: Library,
+}
+
+#[derive(Clone)]
+struct Upload {
+    anchor: Anchor,
+    page: usize,
+    script: Script,
+}
+
+const PAGE_SIZE: usize = 45;
+
+fn library_screen(page: usize) -> Screen {
+    Screen::Library {
+        page,
+        rows: Vec::new(),
+    }
+}
 
 fn can_manage(host: &dyn Host, player: PlayerRef, owner: u128) -> bool {
     player.uuid() == owner
@@ -102,15 +124,39 @@ impl Menus {
         true
     }
 
-    fn open(&self, host: &mut dyn ServerHost, player: PlayerRef, anchor: Anchor, screen: Screen) {
+    fn open(
+        &self,
+        host: &mut dyn ServerHost,
+        player: PlayerRef,
+        anchor: Anchor,
+        mut screen: Screen,
+    ) {
         let Some(machine) = android_machine::data(host, anchor.level, anchor.pos) else {
             return;
         };
-        let (title, items) = match &screen {
+        let (title, items) = match &mut screen {
             Screen::Main => ("Programmable Android", main_items(host, &machine)),
-            Screen::Memory => ("Script Editor", memory_items(host)),
+            Screen::Memory => ("Script Editor", memory_items(host, anchor.mode)),
             Screen::Script(script) => ("Script Editor", script_items(host, script)),
             Screen::Choices { .. } => ("Script Editor", choice_items(host, anchor.mode)),
+            Screen::Library { page, rows } => {
+                let entries = match self.library.load(host) {
+                    Ok(entries) => entries,
+                    Err(error) => {
+                        tell(host, player, &error);
+                        return;
+                    }
+                };
+                let ids = entries.available(anchor.mode);
+                let last = ids.len() / PAGE_SIZE;
+                *page = (*page).min(last);
+                let start = *page * PAGE_SIZE;
+                *rows = ids[start..ids.len().min(start + PAGE_SIZE)].to_vec();
+                (
+                    "Android Scripts",
+                    library_items(host, player, anchor.mode, &entries, rows, *page, last),
+                )
+            }
         };
         let rows = (items.len() / 9) as u8;
         let mut backing = vec![MenuSlotPlace::Decoration; items.len()];
@@ -135,7 +181,16 @@ impl Menus {
                 host.close_menu(player.uuid());
                 return;
             }
-            self.0.lock().unwrap().insert(
+            if matches!(screen, Screen::Library { .. }) {
+                let _ = player.play_sound(
+                    host,
+                    "minecraft:block.note_block.hat",
+                    SoundSource::Master,
+                    0.7,
+                    0.7,
+                );
+            }
+            self.views.lock().unwrap().insert(
                 player.uuid(),
                 View {
                     anchor,
@@ -152,7 +207,7 @@ impl Menus {
             return;
         }
         let Some(view) = self
-            .0
+            .views
             .lock()
             .unwrap()
             .get(&event.uuid)
@@ -233,6 +288,7 @@ impl Menus {
             Screen::Memory if !shift => match slot {
                 1 => Screen::Script(machine.script.clone()),
                 3 if mode != Mode::Archived => Screen::Script(Script::default()),
+                5 if mode != Mode::Archived => library_screen(0),
                 8 => Screen::Main,
                 _ => return,
             },
@@ -288,6 +344,90 @@ impl Menus {
                 changed = true;
                 Screen::Script(script)
             }
+            Screen::Library { page, rows } => {
+                let next = match slot {
+                    46 | 50 if !shift => {
+                        let entries = match self.library.load(host) {
+                            Ok(entries) => entries,
+                            Err(error) => {
+                                tell(host, player, &error);
+                                return;
+                            }
+                        };
+                        let pages = entries.available(mode).len() / PAGE_SIZE + 1;
+                        let next = if slot == 46 {
+                            (page + pages - 1) % pages
+                        } else {
+                            (page + 1) % pages
+                        };
+                        library_screen(next)
+                    }
+                    48 if !shift => {
+                        let entries = match self.library.load(host) {
+                            Ok(entries) => entries,
+                            Err(error) => {
+                                tell(host, player, &error);
+                                return;
+                            }
+                        };
+                        if entries.has_code(mode, &machine.script.source()) {
+                            tell(host, player, "This script was already uploaded.");
+                            return;
+                        }
+                        host.close_menu(event.uuid);
+                        self.names.lock().unwrap().insert(
+                            event.uuid,
+                            Upload {
+                                anchor: view.anchor,
+                                page,
+                                script: machine.script,
+                            },
+                        );
+                        tell(
+                            host,
+                            player,
+                            "Type the name of your Android script in chat.",
+                        );
+                        return;
+                    }
+                    53 if !shift => Screen::Memory,
+                    _ => {
+                        let Some(&id) = rows.get(slot) else {
+                            return;
+                        };
+                        if !shift && right {
+                            return;
+                        }
+                        let result = self.library.update(host, |host, entries| {
+                            if shift {
+                                entries.rate(id, event.uuid, !right)?;
+                                Ok(Screen::Library { page, rows })
+                            } else {
+                                if machine.script != view.saved {
+                                    return Err(
+                                        "The Android script changed in another menu.".into()
+                                    );
+                                }
+                                let script = entries.download(id, mode)?;
+                                machine.script = script;
+                                if !android_machine::save(host, pos, machine) {
+                                    return Err("The Android's changes could not be saved.".into());
+                                }
+                                Ok(Screen::Memory)
+                            }
+                        });
+                        match result {
+                            Ok(screen) => screen,
+                            Err(error) => {
+                                tell(host, player, &error);
+                                return;
+                            }
+                        }
+                    }
+                };
+                self.open(host, player, view.anchor, next);
+                return;
+            }
             _ => return,
         };
         if changed {
@@ -309,8 +449,46 @@ impl Menus {
         self.open(host, player, view.anchor, next);
     }
 
+    pub fn take_chat(
+        &self,
+        host: &mut dyn ServerHost,
+        player_id: u128,
+        title: &str,
+    ) -> Option<Text> {
+        let pending = self.names.lock().unwrap().remove(&player_id)?;
+        let player = host.player(player_id)?;
+        let Anchor {
+            level,
+            pos,
+            entity,
+            mode,
+        } = pending.anchor;
+        if player.entity().level(host) != Some(level)
+            || host.block_entity(level, pos) != Some(entity)
+            || !android_machine::data(host, level, pos)
+                .is_some_and(|machine| can_manage(host, player, machine.owner))
+        {
+            return Some(Text::literal(
+                "Your Android's script menu is no longer available.",
+            ));
+        }
+        let Some(name) = player.name(host) else {
+            return Some(Text::literal("The script author's name is unavailable."));
+        };
+        let upload = self.library.update(host, |_, entries| {
+            entries.upload(mode, player_id, &name, title, &pending.script)
+        });
+        Some(Text::literal(match upload {
+            Ok(()) => {
+                self.open(host, player, pending.anchor, library_screen(pending.page));
+                "Your script was uploaded.".to_owned()
+            }
+            Err(error) => error,
+        }))
+    }
+
     pub fn closed(&self, event: &MenuClosedEvent) {
-        let mut views = self.0.lock().unwrap();
+        let mut views = self.views.lock().unwrap();
         if views
             .get(&event.uuid)
             .is_some_and(|view| view.window == event.window)
@@ -320,11 +498,13 @@ impl Menus {
     }
 
     pub fn logout(&self, player: u128) {
-        self.0.lock().unwrap().remove(&player);
+        self.views.lock().unwrap().remove(&player);
+        self.names.lock().unwrap().remove(&player);
     }
 
     pub fn clear(&self) {
-        self.0.lock().unwrap().clear();
+        self.views.lock().unwrap().clear();
+        self.names.lock().unwrap().clear();
     }
 }
 
@@ -382,11 +562,71 @@ fn main_items(host: &dyn Host, machine: &android_machine::Machine) -> Vec<Option
     items
 }
 
-fn memory_items(host: &dyn Host) -> Vec<Option<ItemStack>> {
+fn memory_items(host: &dyn Host, mode: Mode) -> Vec<Option<ItemStack>> {
     let mut items = vec![None; 54];
     items[1] = head(host, "GO_FORWARD", "> Edit Script", &[]);
-    items[3] = head(host, "NEW", "> Create new Script", &[]);
+    if mode != Mode::Archived {
+        items[3] = head(host, "NEW", "> Create new Script", &[]);
+        items[5] = head(host, "GO_DOWN", "> Download a Script", &[]);
+    }
     items[8] = head(host, "TURN_LEFT", "> Back", &[]);
+    items
+}
+
+fn library_items(
+    host: &dyn ServerHost,
+    player: PlayerRef,
+    mode: Mode,
+    library: &Entries,
+    rows: &[usize],
+    page: usize,
+    last: usize,
+) -> Vec<Option<ItemStack>> {
+    let mut items = vec![None; 54];
+    items[PAGE_SIZE..].fill(icon(
+        host,
+        Kind::Vanilla("minecraft:gray_stained_glass_pane"),
+        " ",
+        &[],
+    ));
+    let pages = [format!("Page {} / {}", page + 1, last + 1)];
+    items[46] = head(host, "TURN_LEFT", "Previous page", &pages);
+    items[48] = head(
+        host,
+        "GO_UP",
+        "Upload a Script",
+        &["Click to share your current script".into()],
+    );
+    items[50] = head(host, "GO_FORWARD", "Next page", &pages);
+    items[53] = head(host, "TURN_LEFT", "> Back", &[]);
+    let kind = match mode {
+        Mode::Normal => android_items::PROGRAMMABLE_ANDROID,
+        Mode::Farmer => android_items::PROGRAMMABLE_ANDROID_FARMER,
+        Mode::Archived => return items,
+    };
+    for (slot, entry) in rows.iter().filter_map(|&id| library.get(id)).enumerate() {
+        let author = host
+            .player(entry.author)
+            .and_then(|player| player.name(host));
+        let mut lore = vec![
+            format!("by {}", author.as_deref().unwrap_or(&entry.author_name)),
+            String::new(),
+            format!("Downloads: {}", entry.downloads),
+            format!("Rating: {:?}% ", entry.rating()),
+            format!("{} ☺ | ☹ {}", entry.positive.len(), entry.negative.len()),
+            String::new(),
+            "Left Click to download this Script".into(),
+            "(This will override your current Script)".into(),
+        ];
+        if entry.can_rate(player.uuid()) {
+            lore.extend([
+                String::new(),
+                "Shift + Left Click to leave a positive Rating".into(),
+                "Shift + Right Click to leave a negative Rating".into(),
+            ]);
+        }
+        items[slot] = icon(host, kind, &entry.name, &lore);
+    }
     items
 }
 

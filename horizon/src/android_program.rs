@@ -143,6 +143,12 @@ impl Script {
         self.tokens.join("-")
     }
 
+    pub fn can_run(&self, mode: Mode) -> bool {
+        self.tokens.iter().all(|token| {
+            Instruction::parse(token).is_some_and(|instruction| instruction.can_use(mode))
+        })
+    }
+
     pub fn tokens(&self) -> &[String] {
         &self.tokens
     }

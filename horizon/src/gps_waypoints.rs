@@ -199,7 +199,7 @@ fn encode(owner: u128, rules: &Waypoints) -> String {
     text
 }
 
-fn quote(value: &str) -> String {
+pub(crate) fn quote(value: &str) -> String {
     let escaped = value.replace('\\', "\\\\").replace('"', "\\\"");
     format!("\"{escaped}\"")
 }
