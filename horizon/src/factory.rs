@@ -260,7 +260,7 @@ impl FactoryViewers {
             });
         } else if event.slot == 49 {
             if let Some(link) = reactors::link(host, level, pos, viewer.furnace) {
-                open(host, player, level, link);
+                open(host, player, level, link, None);
             }
         } else if event.slot == 4 && matches!(viewer.furnace.family, RecipeFamily::Reactor(_)) {
             network_runtime::toggle_reactor_focus(host, level, pos);
@@ -764,7 +764,12 @@ pub(crate) fn open(
     player: PlayerRef,
     level: LevelRef,
     pos: Position,
+    held: Option<&ItemStack>,
 ) -> bool {
+    // Paper leaves the held item to vanilla when a player uses it while sneaking.
+    if held.is_some() && player.entity().is_shift_key_down(host) == Some(true) {
+        return false;
+    }
     let Some(furnace) = network_runtime::factory_identity(host, level, pos)
         .and_then(|id| ElectricMachine::for_item(&id))
     else {

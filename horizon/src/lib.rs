@@ -1101,7 +1101,7 @@ impl Hooks for Slimefun {
             *event.cancellation_result = InteractionResult::Consume;
             return Flow::Cancel;
         }
-        if factory::open(host, player, level, event.click.pos) {
+        if factory::open(host, player, level, event.click.pos, event.click.stack) {
             *event.cancellation_result = InteractionResult::Consume;
             return Flow::Cancel;
         }
