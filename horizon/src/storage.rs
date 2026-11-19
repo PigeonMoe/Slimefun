@@ -439,6 +439,7 @@ fn has_restorable_menu(component: Option<Component>) -> bool {
             Component::ElectricMachine { .. }
                 | Component::FuelGenerator { .. }
                 | Component::Android
+                | Component::ReactorPort
                 | Component::CargoInput
                 | Component::CargoOutput { advanced: true }
         )
@@ -491,7 +492,6 @@ fn restore_network(
     if has_archive {
         validate_inventory_preset(row, id)?;
     }
-    let count = inventory.as_ref().map_or(0, BTreeMap::len);
     let prepared = crate::factory::prepare_paper_inventory(
         host,
         level,
@@ -499,6 +499,7 @@ fn restore_network(
         id,
         inventory.unwrap_or_default(),
     )?;
+    let count = prepared.len();
     host.transaction(|host, _| {
         let restored = networks.restore(host, level, pos, id, metadata, row)?;
         crate::factory::restore_paper_assembler_controls(host, level, pos, id, metadata)?;
@@ -685,6 +686,7 @@ mod tests {
             "BOOK_BINDER",
             "LAVA_GENERATOR_2",
             "BIO_REACTOR",
+            "REACTOR_ACCESS_PORT",
             "AUTO_BREEDER",
             "ANIMAL_GROWTH_ACCELERATOR",
             "PROGRAMMABLE_ANDROID",

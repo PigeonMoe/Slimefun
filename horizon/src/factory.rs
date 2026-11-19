@@ -1989,6 +1989,9 @@ pub(crate) fn prepare_paper_inventory(
     }
     let mut restored = Compound::new();
     for (paper_slot, stack) in items {
+        if machine.reactor_menu() && reactors::paper_control(host, machine, paper_slot, &stack) {
+            continue;
+        }
         let Some(index) = machine
             .menu_slots()
             .iter()
@@ -2339,6 +2342,140 @@ mod tests {
             .unwrap();
         assert_eq!(produced, 10);
         assert_eq!(remaining(&data_at(&mut host, storage).unwrap()), Some(1));
+    }
+
+    #[test]
+    fn paper_reactor_exports_recreate_controls_and_preserve_items_at_their_original_slots() {
+        use crate::heated_pressure::{PLUTONIUM, URANIUM};
+        use crate::hologram_projector::colored_lore;
+        use crate::thermal_machines::REACTOR_COLLANT_CELL;
+
+        let mut host = FakeHost::new();
+        let material = [
+            "minecraft:player_head",
+            "minecraft:green_wool",
+            "minecraft:red_wool",
+        ];
+        host.registries
+            .resolve_items(material.map(|id| Identifier::parse(id).unwrap()))
+            .unwrap();
+        let level = host.level.level();
+        let pos = [1, 64, 2];
+        let id = reactors::NUCLEAR_REACTOR.id();
+        host.level.block_entity(pos);
+        host.attachments.read_saved_over(Compound::from([(
+            "slimefun".into(),
+            Tag::compound([(
+                "network_state",
+                Tag::compound([(
+                    "value",
+                    Tag::compound([("id", Tag::String(id.into())), ("charge", Tag::Int(4096))]),
+                )]),
+            )]),
+        )]));
+
+        let button = |host: &FakeHost, kind: Kind, title: &str, lore: &[&str]| {
+            let mut item = kind.stack(host, 1).unwrap();
+            item.apply_components(&Compound::from([
+                ("minecraft:custom_name".into(), colored_lore(title)),
+                (
+                    "minecraft:lore".into(),
+                    Tag::List(lore.iter().copied().map(colored_lore).collect()),
+                ),
+            ]))
+            .unwrap();
+            item
+        };
+        let mode_button = button(
+            &host,
+            PLUTONIUM,
+            "&7Focus: &eProduction",
+            &[
+                "",
+                "&6Your Reactor will focus on producing goods",
+                "&6If your Energy Network doesn't need Power",
+                "&6it will continue to run and simply will",
+                "&6not generate any Power in the mean time",
+                "",
+                "&7⇨ Click to change the Focus to &ePower Generation",
+            ],
+        );
+        let access = button(
+            &host,
+            Kind::Vanilla(material[1]),
+            "&7Access Port",
+            &["", "&6Detected", "", "&7> Click to view Access Port"],
+        );
+        let uranium = URANIUM.stack(&host, 2).unwrap();
+        let coolant = REACTOR_COLLANT_CELL.stack(&host, 3).unwrap();
+        let byproduct = PLUTONIUM.stack(&host, 4).unwrap();
+        let raw = BTreeMap::from([
+            (4, mode_button),
+            (19, uranium.clone()),
+            (43, coolant.clone()),
+            (40, byproduct.clone()),
+            (49, access.clone()),
+        ]);
+        let mut malformed = raw.clone();
+        let mut marked_access = access;
+        marked_access
+            .apply_components(&Compound::from([(
+                "minecraft:custom_data".into(),
+                Tag::compound([("an_addon_value", Tag::Int(3))]),
+            )]))
+            .unwrap();
+        malformed.insert(49, marked_access);
+        let start = host.attachments.to_nbt();
+        assert!(prepare_paper_inventory(&mut host, level, pos, id, malformed).is_err());
+        assert_eq!(host.attachments.to_nbt(), start);
+
+        let prepared = prepare_paper_inventory(&mut host, level, pos, id, raw.clone()).unwrap();
+        assert_eq!(prepared.len(), 3);
+        restore_paper_inventory(&mut host, level, pos, id, prepared.clone()).unwrap();
+        let machine = ElectricMachine::for_item(id).unwrap();
+        let storage = machine.storage(level, pos);
+        let mut restored = data_at(&mut host, storage).unwrap();
+        for (index, item) in [(0, uranium), (5, coolant), (6, byproduct)] {
+            assert_eq!(stack_in(&host, &restored, index), Some(item));
+        }
+        assert_eq!(machine.menu_slots()[5..=6], [43, 40]);
+        assert_eq!(
+            crate::network_runtime::reactor_production(&mut host, level, pos),
+            Some(false)
+        );
+        assert_eq!(
+            crate::network_runtime::charge(&mut host, level, pos),
+            Some(4096)
+        );
+
+        // A new host decodes the complete saved state. An idempotent re-import
+        // recognizes the original archive without refilling a withdrawn item.
+        restored.remove(&SLOTS[0].into());
+        assert!(save(&mut host, storage, restored));
+        let saved = host.attachments.to_nbt();
+        let mut reopened = host.clone();
+        reopened.attachments.read_saved_over(saved.clone());
+        let retry = prepare_paper_inventory(&mut reopened, level, pos, id, raw).unwrap();
+        restore_paper_inventory(&mut reopened, level, pos, id, retry).unwrap();
+        assert_eq!(reopened.attachments.to_nbt(), saved);
+
+        let port = ElectricMachine::for_item(reactors::REACTOR_ACCESS_PORT.id()).unwrap();
+        let link = button(
+            &reopened,
+            Kind::Vanilla(material[2]),
+            "&7Reactor",
+            &[
+                "",
+                "&cNot detected",
+                "",
+                "&7Reactor must be",
+                "&7placed 3 blocks below",
+                "&7the access port!",
+            ],
+        );
+        assert!(reactors::paper_control(&reopened, port, 49, &link));
+        assert!(!reactors::paper_control(&reopened, port, 40, &link));
+        assert!(!reactors::paper_control(&reopened, machine, 49, &link));
     }
 
     #[test]

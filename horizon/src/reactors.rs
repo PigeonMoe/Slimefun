@@ -377,6 +377,116 @@ pub(super) fn link(
     linked.then_some(paired)
 }
 
+/// Paper adds these buttons to each instance after the preset is built, so
+/// BlockMenu.save includes them among the inventory slots. Their state is derived
+/// from the block metadata and adjacent reactor, and we recreate both buttons.
+pub(super) fn paper_control(
+    host: &dyn Host,
+    machine: ElectricMachine,
+    slot: u32,
+    stack: &ItemStack,
+) -> bool {
+    if stack.count() != 1 {
+        return false;
+    }
+    let reactor = matches!(machine.family, RecipeFamily::Reactor(_));
+    if slot == 4 && reactor {
+        return (NUCLEAR_REACTOR.matches(host, stack)
+            && paper_button(
+                stack,
+                "Focus: Electricity",
+                &[
+                    "",
+                    "Your Reactor will focus on Power Generation",
+                    "If your Energy Network doesn't need Power",
+                    "it will not produce any either",
+                    "",
+                    "⇨ Click to change the Focus to Production",
+                ],
+            ))
+            || (PLUTONIUM.matches(host, stack)
+                && paper_button(
+                    stack,
+                    "Focus: Production",
+                    &[
+                        "",
+                        "Your Reactor will focus on producing goods",
+                        "If your Energy Network doesn't need Power",
+                        "it will continue to run and simply will",
+                        "not generate any Power in the mean time",
+                        "",
+                        "⇨ Click to change the Focus to Power Generation",
+                    ],
+                ));
+    }
+    if slot != 49
+        || !stack
+            .components()
+            .is_some_and(|parts| parts.as_nbt().len() == 2)
+    {
+        return false;
+    }
+    let title = if reactor { "Access Port" } else { "Reactor" };
+    match (stack.item().id(host).as_str(), reactor) {
+        ("minecraft:green_wool", true) => paper_button(
+            stack,
+            title,
+            &["", "Detected", "", "> Click to view Access Port"],
+        ),
+        ("minecraft:green_wool", false) => paper_button(
+            stack,
+            title,
+            &["", "Detected", "", "> Click to view Reactor"],
+        ),
+        ("minecraft:red_wool", true) => paper_button(
+            stack,
+            title,
+            &[
+                "",
+                "Not detected",
+                "",
+                "Access Port must be",
+                "placed 3 blocks above",
+                "a reactor!",
+            ],
+        ),
+        ("minecraft:red_wool", false) => paper_button(
+            stack,
+            title,
+            &[
+                "",
+                "Not detected",
+                "",
+                "Reactor must be",
+                "placed 3 blocks below",
+                "the access port!",
+            ],
+        ),
+        _ => false,
+    }
+}
+
+fn paper_button(stack: &ItemStack, title: &str, expected_lore: &[&str]) -> bool {
+    let Some(parts) = stack.components().map(|components| components.as_nbt()) else {
+        return false;
+    };
+    let Some(Tag::List(lore)) = parts.get(&"minecraft:lore".into()) else {
+        return false;
+    };
+    let same_text = |tag: &Tag, expected: &str| {
+        crate::network_runtime::paper_text(tag)
+            .is_some_and(|text| crate::guide::strip_colors(&text) == expected)
+    };
+    parts
+        .get(&"minecraft:custom_name".into())
+        .is_some_and(|name| same_text(name, title))
+        && lore.len() == expected_lore.len()
+        && lore
+            .iter()
+            .zip(expected_lore)
+            .all(|(line, expected)| same_text(line, expected))
+}
+
 pub(super) fn decorate_controls(
     host: &dyn Host,
     items: &mut [Option<ItemStack>],
