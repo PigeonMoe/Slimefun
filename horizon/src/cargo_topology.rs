@@ -7,7 +7,9 @@ use mod_api::{
     LevelRef, ServerHost, Tag, UseOnEvent,
 };
 
-use super::{Component, Networks, Node, Position, factory_identity, item_id, parse_uuid, read_stack};
+use super::{
+    Component, Networks, Node, Position, factory_identity, item_id, parse_uuid, read_stack,
+};
 
 pub(super) const FILTER_SLOTS: [usize; 9] = [19, 20, 21, 28, 29, 30, 37, 38, 39];
 
@@ -205,26 +207,76 @@ pub(super) fn item_key(host: &dyn ServerHost, id: &str) -> Option<ItemKey> {
     host.item_key(&mod_api::Identifier::parse(id).ok()?)
 }
 
-fn similar(a: &ItemStack, b: &ItemStack, check_lore: bool) -> bool {
+fn component<'a>(stack: &'a ItemStack, key: &str) -> Option<&'a Tag> {
+    stack.components()?.as_nbt().get(&key.into())
+}
+
+fn paper_lore(stack: &ItemStack) -> Option<&[Tag]> {
+    match component(stack, "minecraft:lore") {
+        Some(Tag::List(lines)) if !lines.is_empty() => Some(lines),
+        _ => None,
+    }
+}
+
+fn same_lore(a: &ItemStack, b: &ItemStack) -> bool {
+    let lines = |line: &&Tag| !crate::soulbound_rune::is_soulbound_lore(line);
+    match (paper_lore(a), paper_lore(b)) {
+        (Some(a), Some(b)) => a.iter().filter(lines).eq(b.iter().filter(lines)),
+        (None, None) => true,
+        _ => false,
+    }
+}
+
+fn paper_model_data(stack: &ItemStack) -> Option<i32> {
+    match component(stack, "minecraft:custom_model_data")? {
+        Tag::Int(value) => Some(*value),
+        component => {
+            let Tag::List(floats) = component.get("floats")? else {
+                return None;
+            };
+            let Tag::Float(value) = floats.first()? else {
+                return None;
+            };
+            Some(f32::from_bits(*value) as i32)
+        }
+    }
+}
+
+fn potion_type(stack: &ItemStack) -> Option<String> {
+    let contents = component(stack, "minecraft:potion_contents")?;
+    let Tag::String(key) = (match contents {
+        Tag::String(_) => contents,
+        _ => contents.get("potion")?,
+    }) else {
+        return None;
+    };
+    let key = key.to_string().ok()?;
+    Some(key.strip_prefix("minecraft:").unwrap_or(&key).to_owned())
+}
+
+fn similar(host: &dyn ServerHost, a: &ItemStack, b: &ItemStack, check_lore: bool) -> bool {
     if a.item() != b.item() {
         return false;
     }
     if let (Some(a), Some(b)) = (item_id(a), item_id(b)) {
+        // Paper's registered-item shortcut compares the registry templates. Two
+        // bags of the same tier match even when their live ownership lore differs.
         return a == b;
     }
     let has_meta =
         |stack: &ItemStack| stack.components().is_some() || stack.damage_component().is_some();
-    let component = |stack: &ItemStack, key: &str| {
-        stack
-            .components()
-            .and_then(|patch| patch.as_nbt().get(&key.into()))
-            .cloned()
-    };
     has_meta(a) == has_meta(b)
         && component(a, "minecraft:custom_name") == component(b, "minecraft:custom_name")
-        && component(a, "minecraft:custom_model_data")
-            == component(b, "minecraft:custom_model_data")
-        && (!check_lore || component(a, "minecraft:lore") == component(b, "minecraft:lore"))
+        && paper_model_data(a) == paper_model_data(b)
+        && (!check_lore || same_lore(a, b))
+        && (potion_type(a) == potion_type(b)
+            || !matches!(
+                a.item().id(host).as_str(),
+                "minecraft:potion"
+                    | "minecraft:splash_potion"
+                    | "minecraft:lingering_potion"
+                    | "minecraft:tipped_arrow"
+            ))
 }
 
 struct Filter {
@@ -254,10 +306,10 @@ impl Filter {
         })
     }
 
-    fn accepts(&self, item: &ItemStack) -> bool {
+    fn accepts(&self, host: &dyn ServerHost, item: &ItemStack) -> bool {
         self.items
             .iter()
-            .any(|filter| similar(item, filter, self.lore))
+            .any(|filter| similar(host, item, filter, self.lore))
             != self.blacklist
     }
 }
@@ -534,13 +586,13 @@ fn route(
         let stack = source
             .resource(host, slot)?
             .to_stack(source.amount(host, slot))?;
-        input.filter.accepts(&stack).then_some((slot, stack))
+        input.filter.accepts(host, &stack).then_some((slot, stack))
     })?;
     let cursor = if cursor < outputs.len() { cursor } else { 0 };
     for offset in 0..outputs.len() {
         let index = (cursor + offset) % outputs.len();
         let output = &outputs[index];
-        if !output.filter.accepts(&stack) || input.inventory == output.inventory {
+        if !output.filter.accepts(host, &stack) || input.inventory == output.inventory {
             continue;
         }
         let moved = move_to_first(
@@ -616,7 +668,7 @@ fn move_to_first(
                 let resource = destination.resource(host, slot)?;
                 let held = destination.amount(host, slot);
                 let current = resource.to_stack(held)?;
-                similar(&current, stack, true)
+                similar(host, &current, stack, true)
                     .then(|| (held, destination.capacity(host, slot, &resource)))
             }),
             _ => Vec::new(),
@@ -629,7 +681,7 @@ fn move_to_first(
                 .resource(host, slot)
                 .and_then(|item| item.to_stack(destination.amount(host, slot)));
             if let Some(current) = &current {
-                if !similar(current, stack, true) {
+                if !similar(host, current, stack, true) {
                     continue;
                 }
                 if input.options.smart_fill
@@ -667,6 +719,126 @@ fn move_to_first(
 mod tests {
     use super::*;
     use mod_api::{Identifier, prelude::ItemsHost, testing::FakeHost};
+
+    fn restored_filter(host: &dyn ServerHost, stack: &ItemStack) -> Filter {
+        let node = Node {
+            id: "CARGO_NODE_INPUT".to_owned(),
+            component: Component::CargoInput,
+            channel: 0,
+            passes_unfiltered: false,
+        };
+        let mut settings = CargoSettings::legacy(0, false);
+        settings.lore = true;
+        settings.imported_paper = true;
+        settings
+            .filters
+            .insert(FILTER_SLOTS[0], stack.to_nbt(host).unwrap());
+        Filter::new(host, &node, &CargoSettings::load(&settings.save()).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn restored_potion_filters_use_the_base_type_for_every_paper_potion_material() {
+        let mut host = FakeHost::new();
+        let materials = [
+            "minecraft:potion",
+            "minecraft:splash_potion",
+            "minecraft:lingering_potion",
+            "minecraft:tipped_arrow",
+        ];
+        host.registries
+            .resolve_items(materials.map(|id| Identifier::parse(id).unwrap()))
+            .unwrap();
+        for material in materials {
+            let make = |potion: &str, color: i32| {
+                let mut stack = ItemStack::new(item_key(&host, material).unwrap(), 1).unwrap();
+                stack
+                    .set_components(Compound::from([(
+                        "minecraft:potion_contents".into(),
+                        Tag::compound([
+                            ("potion", Tag::String(potion.into())),
+                            ("custom_color", Tag::Int(color)),
+                        ]),
+                    )]))
+                    .unwrap();
+                stack
+            };
+            let filter = restored_filter(&host, &make("minecraft:poison", 0));
+            assert!(filter.accepts(&host, &make("poison", 0x1e21d3)));
+            assert!(!filter.accepts(&host, &make("minecraft:strong_poison", 0)));
+            assert!(!filter.accepts(&host, &make("minecraft:water", 0)));
+        }
+    }
+
+    #[test]
+    fn restored_backpack_filters_keep_papers_registered_tier_shortcut() {
+        use crate::backpacks::{MEDIUM_BACKPACK, SMALL_BACKPACK};
+
+        let mut host = FakeHost::new();
+        host.registries
+            .resolve_items([Identifier::parse(SMALL_BACKPACK.material()).unwrap()])
+            .unwrap();
+        let make = |kind: crate::items::Kind, label: &str| {
+            let mut stack = kind.stack(&host, 1).unwrap();
+            stack
+                .apply_components(&Compound::from([(
+                    "minecraft:lore".into(),
+                    Tag::List(vec![crate::items::text(label, "gray", false)]),
+                )]))
+                .unwrap();
+            stack
+        };
+        let first = make(SMALL_BACKPACK, "ID: 2728cc32-8191-44e7-86c9-2120aa3896c4#1");
+        let other_owner = "ID: 23938676-252c-4992-9a7a-1879732cdbe0#8";
+        let filter = restored_filter(&host, &first);
+        assert!(filter.accepts(&host, &make(SMALL_BACKPACK, other_owner)));
+        assert!(!filter.accepts(&host, &make(MEDIUM_BACKPACK, other_owner)));
+    }
+
+    #[test]
+    fn restored_lore_filters_ignore_only_the_soulbound_line_and_use_papers_model_number() {
+        let mut host = FakeHost::new();
+        let id = "minecraft:stick";
+        host.registries
+            .resolve_items([Identifier::parse(id).unwrap()])
+            .unwrap();
+        let make = |lines: Vec<Tag>, model: Tag| {
+            let mut stack = ItemStack::new(item_key(&host, id).unwrap(), 1).unwrap();
+            stack
+                .set_components(Compound::from([
+                    ("minecraft:lore".into(), Tag::List(lines)),
+                    ("minecraft:custom_model_data".into(), model),
+                ]))
+                .unwrap();
+            stack
+        };
+        let label = crate::items::text("Cargo", "green", false);
+        let gray = crate::items::text("Soulbound", "gray", false);
+        let model = |primary: f32, secondary: f32| {
+            Tag::compound([(
+                "floats",
+                Tag::List(vec![
+                    Tag::Float(primary.to_bits()),
+                    Tag::Float(secondary.to_bits()),
+                ]),
+            )])
+        };
+        let original = make(vec![label.clone()], model(12.0, 5.0));
+        let filter = restored_filter(&host, &original);
+        assert!(filter.accepts(
+            &host,
+            &make(vec![label.clone(), gray.clone()], model(12.9, 1.0))
+        ));
+        assert!(!filter.accepts(
+            &host,
+            &make(
+                vec![label.clone(), crate::items::text("Soulbound", "red", false)],
+                model(12.0, 5.0)
+            )
+        ));
+        assert!(!filter.accepts(&host, &make(vec![label], model(13.0, 5.0))));
+        let gray_only = restored_filter(&host, &make(vec![gray], model(12.0, 5.0)));
+        assert!(!gray_only.accepts(&host, &make(Vec::new(), model(12.0, 5.0))));
+    }
 
     #[test]
     fn smeltery_cargo_prefers_existing_partial_stacks_and_refuses_full_matching_inputs() {

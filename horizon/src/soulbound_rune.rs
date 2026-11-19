@@ -333,14 +333,18 @@ fn has_saved_marker(stack: &ItemStack) -> bool {
     let Some(Tag::List(lines)) = components.get(&"minecraft:lore".into()) else {
         return false;
     };
-    lines.iter().any(|line| match line {
+    lines.iter().any(is_soulbound_lore)
+}
+
+pub(crate) fn is_soulbound_lore(line: &Tag) -> bool {
+    match line {
         Tag::String(value) => value.to_string_lossy() == "§7Soulbound",
         Tag::Compound(fields) => {
             let mut literal = String::new();
             gray_literal(fields, false, &mut literal, 0) && literal == "Soulbound"
         }
         _ => false,
-    })
+    }
 }
 
 fn gray_literal(fields: &Compound, mut gray: bool, literal: &mut String, depth: u8) -> bool {
