@@ -217,12 +217,18 @@ impl ExplosiveTools {
         );
 
         let rules = self.rules.lock().unwrap()[tool.index()];
-        // An explicitly enabled filter must approve the additional positions before any writes.
-        if rules.call_explosion_event {
-            return Flow::Continue;
-        }
+        let positions = neighbors(event.pos);
+        let positions = if rules.call_explosion_event {
+            // Paper announces the original list before checking each position's normal
+            // permissions. A removed position cannot be restored by the tool.
+            level
+                .filter_block_explosion(host, event.pos, &positions)
+                .unwrap_or_default()
+        } else {
+            positions
+        };
         let mut held = Some(stack);
-        for pos in neighbors(event.pos) {
+        for pos in positions {
             let Some(state) = level.block_state(host, pos) else {
                 continue;
             };
