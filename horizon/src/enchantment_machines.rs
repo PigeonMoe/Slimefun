@@ -425,9 +425,6 @@ fn disenchant(
     rules: &MachineRules,
     viewed: bool,
 ) -> Attempt<(Vec<ItemStack>, u32)> {
-    if !crate::elemental_staves::can_disenchant(host, target) {
-        return None;
-    }
     let mut applied = levels(host, target, DIRECT)?;
     let selected = match select_levels(applied.clone(), rules, viewed, |_| true)? {
         Ok(selected) => selected,
@@ -591,6 +588,7 @@ mod tests {
                     "minecraft:book",
                     "minecraft:enchanted_book",
                     "minecraft:barrier",
+                    "minecraft:stick",
                 ]
                 .map(|item| Identifier::parse(item).unwrap()),
             )
@@ -812,6 +810,60 @@ max-enchants = -1
     }
 
     #[test]
+    fn paper_fire_staff_disenchant_setting_uses_the_saved_item_id() {
+        use crate::elemental_staves::STAFF_ELEMENTAL_FIRE;
+
+        let host = host();
+        let mut staff = STAFF_ELEMENTAL_FIRE.stack(&host, 1).unwrap();
+        let repair = ComponentId::new(REPAIR_COST).unwrap();
+        staff
+            .apply_components(&Compound::from([(REPAIR_COST.into(), Tag::Int(7))]))
+            .unwrap();
+        let inputs = [BOOK.stack(&host, 2), Some(staff.clone())];
+        let enabled = config("[item-settings.STAFF_ELEMENTAL_FIRE]\nallow-disenchanting = true");
+        let legacy = config("[item-settings.STAFF_FIRE]\nallow-disenchanting = true");
+        let disabled = config(
+            "[item-settings.STAFF_FIRE]\nallow-disenchanting = true\n\
+             [item-settings.STAFF_ELEMENTAL_FIRE]\nallow-disenchanting = false",
+        );
+        assert!(legacy.allows_item(&staff, Family::AutoDisenchanter));
+        assert!(!disabled.allows_item(&staff, Family::AutoDisenchanter));
+        assert!(!config(&default_config()).allows_item(&staff, Family::AutoDisenchanter));
+        for (id, cost, work_ticks) in [
+            ("AUTO_DISENCHANTER", 9, 180),
+            ("AUTO_DISENCHANTER_2", 24, 60),
+        ] {
+            let machine = machine(id);
+            assert!(evaluate(&host, machine, &inputs, &Rules::default(), false).is_none());
+            let plan = evaluate(&host, machine, &inputs, &enabled, false)
+                .unwrap()
+                .unwrap();
+            let [clean, book] = plan.outputs.as_slice() else {
+                panic!("Paper outputs the target and the enchanted book");
+            };
+            assert_eq!(
+                plan.consumed,
+                [(0, inputs[0].clone().unwrap(), 1), (1, staff.clone(), 1)]
+            );
+            assert_eq!((machine.cost, plan.work_ticks), (cost, work_ticks));
+            assert!(STAFF_ELEMENTAL_FIRE.matches(&host, clean));
+            assert!(levels(&host, clean, DIRECT).unwrap().is_empty());
+            assert!(matches!(
+                ItemResource::of(clean).value(&host, &repair),
+                None | Some(Tag::Int(0))
+            ));
+            assert_eq!(
+                ItemResource::of(book).value(&host, &repair),
+                Some(Tag::Int(7))
+            );
+            assert_eq!(
+                levels(&host, book, STORED).unwrap(),
+                Compound::from([("minecraft:fire_aspect".into(), Tag::Int(5))])
+            );
+        }
+    }
+
+    #[test]
     fn item_allow_flags_and_literal_lore_filters_are_scoped_and_color_sensitive() {
         let host = host();
         let mut sword = item(
@@ -826,7 +878,7 @@ max-enchants = -1
                     "minecraft:custom_data".into(),
                     Tag::compound([(
                         "PublicBukkitValues",
-                        Tag::compound([(crate::items::ID_KEY, Tag::String("STAFF_FIRE".into()))]),
+                        Tag::compound([(crate::items::ID_KEY, Tag::String("TEST_BLADE".into()))]),
                     )]),
                 ),
                 (
@@ -846,18 +898,18 @@ max-enchants = -1
             ]))
             .unwrap();
 
-        let default = config(&default_config());
-        assert!(!default.allows_item(&sword, Family::AutoDisenchanter));
         let rules = config(
             r#"
-[item-settings.STAFF_FIRE]
+[item-settings.TEST_BLADE]
+allow-enchanting = false
 allow-disenchanting = true
 [enchantment-machines.AUTO_DISENCHANTER_2]
 use-ignored-lores = true
 ignored-lores = ["&6Golden &cBlade"]
 "#,
         );
-        let inputs = [Some(sword.clone()), BOOK.stack(&host, 1)];
+        assert!(!rules.allows_item(&sword, Family::AutoEnchanter));
+        let inputs = [Some(sword), BOOK.stack(&host, 1)];
         assert!(evaluate(&host, machine("AUTO_DISENCHANTER"), &inputs, &rules, false).is_some());
         assert!(
             evaluate(
@@ -871,7 +923,8 @@ ignored-lores = ["&6Golden &cBlade"]
         );
         let rules = config(
             r#"
-[item-settings.STAFF_FIRE]
+[item-settings.TEST_BLADE]
+allow-enchanting = false
 allow-disenchanting = true
 [enchantment-machines.AUTO_DISENCHANTER_2]
 use-ignored-lores = true

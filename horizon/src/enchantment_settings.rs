@@ -10,6 +10,7 @@ use mod_api::{Host, ItemStack, Tag};
 
 use crate::{
     advanced_processing::{Family, Machine},
+    elemental_staves::STAFF_ELEMENTAL_FIRE,
     items::item_id,
 };
 
@@ -115,9 +116,12 @@ pub(crate) fn default_config() -> String {
             config.push_str("override-existing-enchants-lvl = false\n");
         }
     }
-    config.push_str(
-        "\n[item-settings.STAFF_FIRE]\nallow-enchanting = true\nallow-disenchanting = false\n",
-    );
+    writeln!(
+        config,
+        "\n[item-settings.{}]\nallow-enchanting = true\nallow-disenchanting = false",
+        STAFF_ELEMENTAL_FIRE.id(),
+    )
+    .unwrap();
     config
 }
 
@@ -200,12 +204,20 @@ impl Rules {
         let Some(id) = item_id(target) else {
             return true;
         };
-        let flags = self.items.get(&id);
+        let fire_staff = id == STAFF_ELEMENTAL_FIRE.id();
+        let flag = |get: fn(&ItemRules) -> Option<bool>| {
+            self.items.get(&id).and_then(get).or_else(|| {
+                // Keep settings files emitted with the old Java field name usable.
+                if fire_staff {
+                    self.items.get("STAFF_FIRE").and_then(get)
+                } else {
+                    None
+                }
+            })
+        };
         match family {
-            Family::AutoEnchanter => flags.and_then(|rules| rules.enchant).unwrap_or(true),
-            Family::AutoDisenchanter => flags
-                .and_then(|rules| rules.disenchant)
-                .unwrap_or(id != "STAFF_FIRE"),
+            Family::AutoEnchanter => flag(|rules| rules.enchant).unwrap_or(true),
+            Family::AutoDisenchanter => flag(|rules| rules.disenchant).unwrap_or(!fire_staff),
             _ => false,
         }
     }

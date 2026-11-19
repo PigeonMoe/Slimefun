@@ -253,10 +253,6 @@ fn styled<const N: usize>(parts: [Tag; N]) -> Tag {
     ])
 }
 
-pub(crate) fn can_disenchant(host: &dyn Host, stack: &ItemStack) -> bool {
-    !STAFF_ELEMENTAL_FIRE.matches(host, stack)
-}
-
 fn wind_cost(level: i32, creative: bool) -> Option<i32> {
     (level >= 2).then_some(if creative { 0 } else { 2 })
 }
@@ -474,13 +470,12 @@ mod tests {
     }
 
     #[test]
-    fn fire_staff_keeps_the_paper_fire_aspect_v_and_cannot_be_disenchanted() {
+    fn fire_staff_keeps_the_paper_fire_aspect_v() {
         let mut host = FakeHost::new();
         host.registries
             .resolve_items([Identifier::parse("minecraft:stick").unwrap()])
             .unwrap();
         let fire = STAFF_ELEMENTAL_FIRE.stack(&host, 1).unwrap();
-        let elemental = STAFF_ELEMENTAL.stack(&host, 1).unwrap();
         assert_eq!(
             fire.components()
                 .unwrap()
@@ -489,7 +484,5 @@ mod tests {
                 .and_then(|ench| ench.get("minecraft:fire_aspect")),
             Some(&Tag::Int(5))
         );
-        assert!(!can_disenchant(&host, &fire));
-        assert!(can_disenchant(&host, &elemental));
     }
 }
