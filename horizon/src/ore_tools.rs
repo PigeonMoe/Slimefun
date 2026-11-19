@@ -173,9 +173,16 @@ fn ore_at(host: &dyn Host, level: LevelRef, pos: Position) -> Option<BlockState>
     ore(&state.block().id(host)).then_some(state)
 }
 
-struct Mining<'a> {
+pub(crate) struct Mining<'a> {
     active: &'a Mutex<BTreeSet<u128>>,
     player: u128,
+}
+
+impl<'a> Mining<'a> {
+    pub(crate) fn enter(active: &'a Mutex<BTreeSet<u128>>, player: u128) -> Option<Self> {
+        let inserted = active.lock().unwrap().insert(player);
+        inserted.then(|| Self { active, player })
+    }
 }
 
 impl Drop for Mining<'_> {
@@ -200,7 +207,7 @@ impl Default for OreTools {
     }
 }
 
-fn unlocked(host: &mut dyn ServerHost, player: PlayerRef, required: &Research) -> bool {
+pub(crate) fn unlocked(host: &mut dyn ServerHost, player: PlayerRef, required: &Research) -> bool {
     if research::can_use(host, player, required) {
         return true;
     }
@@ -214,7 +221,7 @@ fn unlocked(host: &mut dyn ServerHost, player: PlayerRef, required: &Research) -
     false
 }
 
-fn hand(player: PlayerRef, hand: Hand) -> ItemPlace {
+pub(crate) fn hand(player: PlayerRef, hand: Hand) -> ItemPlace {
     ItemPlace::PlayerHand {
         player: player.uuid(),
         hand,
@@ -288,10 +295,8 @@ impl OreTools {
             |pos| ore_at(host, level, pos),
         );
 
-        let _ = self.mining.lock().unwrap().insert(player.uuid());
-        let _guard = Mining {
-            active: &self.mining,
-            player: player.uuid(),
+        let Some(_guard) = Mining::enter(&self.mining, player.uuid()) else {
+            return Flow::Continue;
         };
         for (pos, expected) in points {
             let completed = (pos != event.pos || expected == event.state)
@@ -337,7 +342,7 @@ impl OreTools {
             message.style.color = Some("red".into());
             let _ = player.tell(host, message);
         }
-        seeker_wear(host, player, level, used_hand, tool, rolls);
+        let _ = paper_tool_wear(host, player, level, used_hand, tool, rolls);
         true
     }
 }
@@ -496,25 +501,25 @@ fn direction(at: [f64; 3], destination: Position, existing_yaw: f32) -> [f32; 2]
     [yaw, -vertical.atan2(horizontal).to_degrees() as f32]
 }
 
-fn seeker_wear(
+pub(crate) fn paper_tool_wear(
     host: &mut dyn ServerHost,
     player: PlayerRef,
     level: LevelRef,
     used_hand: Hand,
     tool: &ItemStack,
     rolls: &Rolls,
-) {
+) -> Option<ItemStack> {
     let unbreaking = enchantment(host, tool, "minecraft:unbreaking");
     if unbreaking != 0 && rolls.next(host, level, unbreaking + 1) != Some(0) {
-        return;
+        return Some(tool.clone());
     }
     if ComponentId::new("minecraft:unbreakable")
         .is_some_and(|id| ItemResource::of(tool).value(host, &id).is_some())
     {
-        return;
+        return Some(tool.clone());
     }
     let Some(maximum) = host.max_damage(tool.item()).filter(|&max| max != 0) else {
-        return;
+        return Some(tool.clone());
     };
     let old = ItemResource::of(tool);
     let held = hand(player, used_hand);
@@ -527,18 +532,24 @@ fn seeker_wear(
                 1.0,
                 1.0,
             );
+            return None;
         }
-    } else {
-        let damage = tool.damage() + 1;
-        let _: Result<(), ()> = host.transaction(|host, tx| {
-            if held.resource(host).as_ref() != Some(&old) {
-                return Err(());
-            }
-            held.edit(host, tx, |stack| stack.set_damage(damage))
-                .then_some(())
-                .ok_or(())
-        });
+        return Some(tool.clone());
     }
+    let damage = tool.damage() + 1;
+    let mut tool = tool.clone();
+    let written: Result<(), ()> = host.transaction(|host, tx| {
+        if held.resource(host).as_ref() != Some(&old) {
+            return Err(());
+        }
+        held.edit(host, tx, |stack| stack.set_damage(damage))
+            .then_some(())
+            .ok_or(())
+    });
+    if written.is_ok() {
+        tool.set_damage(damage);
+    }
+    Some(tool)
 }
 
 #[cfg(test)]

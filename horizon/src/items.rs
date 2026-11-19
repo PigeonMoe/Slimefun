@@ -250,6 +250,7 @@ impl SlimefunItem {
             components.insert("minecraft:lore".into(), crate::beheading::lore());
         }
         crate::ore_tools::decorate(self.id, &mut components);
+        crate::explosive_tools::decorate(self.id, &mut components);
         crate::jet_boots::decorate(self.id, &mut components);
         crate::jetpack::decorate(self.id, &mut components);
         crate::elemental_staves::decorate(self.id, &mut components);
