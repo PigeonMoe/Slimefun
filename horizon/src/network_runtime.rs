@@ -395,6 +395,7 @@ impl Node {
             | Component::ManualCrucible
             | Component::ManualComposter
             | Component::IgnitionChamber
+            | Component::IngredientHead
             | Component::EnhancedFurnace
             | Component::InfusedHopper
             | Component::DuctTape

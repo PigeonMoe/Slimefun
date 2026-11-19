@@ -984,6 +984,8 @@ pub(crate) fn network_item(id: &str) -> Option<Kind> {
         SMALL_CAPACITOR,
         SOLAR_GENERATOR,
         IGNITION_CHAMBER,
+        crate::food_machines::CHEESE,
+        crate::food_machines::BUTTER,
         crate::factory::produce_collector::PRODUCE_COLLECTOR,
         crate::factory::tree_growth::TREE_GROWTH_ACCELERATOR,
         crate::factory::assemblers::IRON_GOLEM_ASSEMBLER,

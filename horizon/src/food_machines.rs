@@ -10,10 +10,12 @@ use crate::{
     advanced_processing::{Family, Machine, Plan, plan},
     items::{
         BILLON_INGOT, DAMASCUS_STEEL_INGOT, ELECTRIC_MOTOR, ELECTRO_MAGNET, HARDENED_METAL_INGOT,
-        HeadTexture, Kind, REINFORCED_ALLOY_INGOT, SILVER_INGOT, SMALL_CAPACITOR, TIN_INGOT, item,
+        HeadTexture, Kind, REINFORCED_ALLOY_INGOT, SALT, SILVER_INGOT, SMALL_CAPACITOR, TIN_INGOT,
+        item,
     },
+    medical::HEAVY_CREAM,
     network_recipes::MEDIUM_CAPACITOR,
-    recipes::{CraftingRecipe, Research, Stack},
+    recipes::{CraftingRecipe, INGREDIENTS_AND_CHEESE, Research, Stack},
     research,
 };
 
@@ -33,6 +35,28 @@ item!(
     "white",
     None,
     Some(EMPTY_CAN_SKIN)
+);
+item!(
+    CHEESE,
+    "player_head",
+    "Cheese",
+    "white",
+    None,
+    Some(HeadTexture {
+        profile: [1572421042, 286602775, -1346730702, -80625394],
+        value: "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHA6Ly90ZXh0dXJlcy5taW5lY3JhZnQubmV0L3RleHR1cmUvMzRmZWJiYzE1ZDFkNGNjNjJiZWRjNWQ3YTJiNmYwZjQ2Y2Q1YjA2OTZhODg0ZGU3NWUyODllMzVjYmI1M2EwIn19fQ==",
+    })
+);
+item!(
+    BUTTER,
+    "player_head",
+    "Butter",
+    "white",
+    None,
+    Some(HeadTexture {
+        profile: [-1901572948, -172215052, -1347621804, 527753420],
+        value: "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHA6Ly90ZXh0dXJlcy5taW5lY3JhZnQubmV0L3RleHR1cmUvYjY2YjE5ZjdkNjM1ZDAzNDczODkxZGYzMzAxN2M1NDkzNjMyMDlhOGY2MzI4YTg1NDJjMjEzZDA4NTI1ZSJ9fX0=",
+    })
 );
 item!(
     FOOD_FABRICATOR,
@@ -427,6 +451,26 @@ pub(crate) const CRAFTING: &[CraftingRecipe] = &[
             None,
         ],
     ),
+    craft(
+        stack(CHEESE, 1),
+        &INGREDIENTS_AND_CHEESE,
+        [
+            Some(Kind::Vanilla("minecraft:milk_bucket")),
+            Some(SALT),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ],
+    ),
+    craft(
+        stack(BUTTER, 1),
+        &INGREDIENTS_AND_CHEESE,
+        [Some(HEAVY_CREAM), Some(SALT), None, None, None, None, None, None, None],
+    ),
 ];
 
 pub(crate) fn next(
@@ -462,6 +506,26 @@ mod tests {
     use mod_api::{Identifier, testing::FakeHost};
 
     use super::*;
+
+    #[test]
+    fn cheese_and_butter_use_the_paper_slots_salt_and_the_original_item_carrier() {
+        for (kind, dairy) in [
+            (CHEESE, Kind::Vanilla("minecraft:milk_bucket")),
+            (BUTTER, HEAVY_CREAM),
+        ] {
+            let recipe = CRAFTING.iter().find(|recipe| recipe.output.kind == kind).unwrap();
+            assert_eq!(recipe.inputs[0..2], [Some(dairy), Some(SALT)]);
+            assert!(recipe.inputs[2..].iter().all(Option::is_none));
+            assert_eq!(recipe.output.count, 1);
+            assert_eq!(recipe.research.id, "ingredients_and_cheese");
+            assert_eq!(crate::items::network_item(kind.id()), Some(kind));
+            assert_eq!(
+                crate::networks::Component::for_item(kind.id()),
+                Some(crate::networks::Component::IngredientHead)
+            );
+            assert_eq!(kind.material(), "minecraft:player_head");
+        }
+    }
 
     #[test]
     fn fabricators_and_composters_preserve_all_paper_variants_and_batch_sizes() {

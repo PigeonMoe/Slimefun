@@ -15,6 +15,7 @@ pub(crate) enum Component {
     ManualCrucible,
     ManualComposter,
     IgnitionChamber,
+    IngredientHead,
     EnhancedFurnace,
     InfusedHopper,
     EnergyConnector,
@@ -113,6 +114,7 @@ impl Component {
             "CRUCIBLE" => Self::ManualCrucible,
             "COMPOSTER" => Self::ManualComposter,
             "IGNITION_CHAMBER" => Self::IgnitionChamber,
+            "CHEESE" | "BUTTER" => Self::IngredientHead,
             "OIL_PUMP" => Self::ElectricMachine {
                 capacity: crate::geology::PUMP_CAPACITY,
                 carrier: "minecraft:player_head",
@@ -252,6 +254,7 @@ impl Component {
             Self::ReactorPort => "Reactor Access Port | Three blocks above a Reactor".into(),
             Self::BlastResistant(crate::items::Kind::Slimefun(item)) => item.name.into(),
             Self::BlastResistant(crate::items::Kind::Vanilla(item)) => item.into(),
+            Self::IngredientHead => "Slimefun cooking ingredient".into(),
             Self::DuctTape => "Duct Tape".into(),
             Self::CargoInput => cargo_terminal("Cargo input", metadata),
             Self::CargoOutput { advanced: false } => cargo_terminal("Cargo output", metadata),
