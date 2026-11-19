@@ -58,6 +58,7 @@ mod infused;
 mod items;
 mod juice;
 mod machine;
+mod magic_eye;
 mod medical;
 mod network_recipes;
 mod network_runtime;
@@ -707,7 +708,9 @@ impl Hooks for Slimefun {
             return Flow::Continue;
         };
         if *event.use_item != TriState::False && let Some(held) = event.click.stack {
-            if medical::use_supply(host, player, event.click.hand, held) {
+            if medical::use_supply(host, player, event.click.hand, held)
+                || magic_eye::use_held(host, player, held)
+            {
                 self.item_clicks
                     .record_block_use(host, event.click.player, event.click.hand, held);
                 *event.cancellation_result = InteractionResult::Consume;
@@ -906,6 +909,7 @@ impl Hooks for Slimefun {
         )
             || medical::HEAVY_CREAM.matches(host, event.click.stack)
             || medical::use_supply(host, player, event.click.hand, event.click.stack)
+            || magic_eye::use_held(host, player, event.click.stack)
             || elemental_staves::use_staff(host, player, event.click.stack, || {
                 self.settings.lock().unwrap().wind_power
             })
