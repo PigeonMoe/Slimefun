@@ -193,6 +193,9 @@ impl SlimefunItem {
         crate::elevator::decorate(self.id, &mut components);
         crate::medical::decorate(self.id, &mut components);
         crate::magic_eye::decorate(self.id, &mut components);
+        if self.id == crate::infernal_bonemeal::INFERNAL_BONEMEAL.id() {
+            components.insert("minecraft:lore".into(), crate::infernal_bonemeal::lore());
+        }
         crate::snacks::decorate(self.id, &mut components);
         crate::smelters_pickaxe::decorate(self.id, &mut components);
         if self.id == crate::lumber_axe::LUMBER_AXE.id() {

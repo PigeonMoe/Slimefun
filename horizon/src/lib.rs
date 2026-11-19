@@ -56,6 +56,7 @@ mod hologram_projector;
 mod ignition_chamber;
 mod industrial_miner;
 mod item_clicks;
+mod infernal_bonemeal;
 mod infused;
 mod items;
 mod jet_boots;
@@ -851,6 +852,10 @@ impl Hooks for Slimefun {
         let Some(player) = host.player(event.click.player) else {
             return Flow::Continue;
         };
+        let fertilizer = infernal_bonemeal::use_on(host, player, event);
+        if fertilizer == Flow::Cancel || *event.use_block == TriState::False {
+            return fertilizer;
+        }
         if *event.use_item != TriState::False && let Some(held) = event.click.stack {
             if self.guide.right_click(host, player, held) {
                 *event.cancellation_result = InteractionResult::Consume;

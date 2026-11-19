@@ -240,6 +240,7 @@ pub(crate) const CRAFTING: &[CraftingRecipe] = &[
     ),
     crate::infused::ALTAR,
     crate::spawner_repair::ALTAR,
+    crate::infernal_bonemeal::ALTAR,
     altar_recipe(
         [
             MAGIC_LUMP_3,
@@ -802,6 +803,7 @@ fn start_ritual(
         return Err(match recipe.research.id {
             "essence_of_afterlife" => "Unlock Necromancy with /sf research essence_of_afterlife.",
             "special_runes" => "Unlock Purple Runes with /sf research special_runes.",
+            "infernal_bonemeal" => "Unlock Infernal Bonemeal with /sf research infernal_bonemeal.",
             "rainbow_blocks" => "Unlock Rainbow Blocks with /sf research rainbow_blocks.",
             "repaired_spawner" => "Unlock Repairing Spawners with /sf research repaired_spawner.",
             _ => "Unlock Elemental Runes with /sf research ancient_runes.",
