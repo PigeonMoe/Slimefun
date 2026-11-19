@@ -60,6 +60,7 @@ mod network_recipes;
 mod network_runtime;
 mod networks;
 mod output_chest;
+mod portable_crafter;
 mod radiation;
 mod random;
 mod recipes;
@@ -708,7 +709,8 @@ impl Hooks for Slimefun {
             return Flow::Cancel;
         }
         if *event.use_item != TriState::False
-            && (self.backpacks.use_held(host, player, event.click.hand)
+            && (event.click.stack.is_some_and(|stack| portable_crafter::use_held(host, player, stack))
+                || self.backpacks.use_held(host, player, event.click.hand)
                 || network_runtime::trash::portable(host, player, event.click.hand)
                 || self
                     .transport
@@ -850,7 +852,8 @@ impl Hooks for Slimefun {
                 player.game_mode(host),
                 Some(GameMode::Survival | GameMode::Creative)
             )
-            && (self.backpacks.use_held(host, player, event.click.hand)
+            && (portable_crafter::use_held(host, player, event.click.stack)
+                || self.backpacks.use_held(host, player, event.click.hand)
                 || network_runtime::trash::portable(host, player, event.click.hand)
                 || self
                     .transport
