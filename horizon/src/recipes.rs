@@ -142,6 +142,10 @@ pub(crate) fn researches() -> impl Iterator<Item = &'static Research> {
         .chain([&crate::auto_crafter::RESEARCH])
         .chain([&crate::composter::RESEARCH])
         .chain([&crate::block_placer::RESEARCH])
+        .chain([
+            &crate::industrial_miner::RESEARCH,
+            &crate::industrial_miner::ADVANCED_RESEARCH,
+        ])
         .chain(crate::network_recipes::RESEARCHES)
         .chain(crate::electric_processing::RESEARCHES)
         .chain(crate::fuel_generators::RESEARCHES)

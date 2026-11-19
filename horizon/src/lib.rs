@@ -46,6 +46,7 @@ mod gps_waypoints;
 mod hand_machine;
 mod heated_pressure;
 mod ignition_chamber;
+mod industrial_miner;
 mod items;
 mod juice;
 mod machine;
@@ -75,6 +76,7 @@ struct Slimefun {
     block_placers: block_placer::Placers,
     composters: composter::Composters,
     crucibles: crucible::Crucibles,
+    industrial_miners: industrial_miner::Miners,
     settings: Mutex<Settings>,
     rolls: Rolls,
     chest: Mutex<Option<ItemKey>>,
@@ -95,6 +97,7 @@ impl Default for Slimefun {
             block_placers: block_placer::Placers::default(),
             composters: composter::Composters::default(),
             crucibles: crucible::Crucibles::default(),
+            industrial_miners: industrial_miner::Miners::default(),
             settings: Mutex::new(Settings::default()),
             rolls: Rolls::default(),
             chest: Mutex::new(None),
@@ -121,6 +124,7 @@ impl Slimefun {
             self.block_placers.configure(None);
             output_chest::set_enabled(true);
             self.crucibles.configure(false);
+            self.industrial_miners.configure(None);
             ancient_altar::configure(None);
         }
         let Ok(table) = config.text.parse::<toml::Table>() else {
@@ -140,6 +144,7 @@ impl Slimefun {
                 }),
         );
         self.transport.configure(&table);
+        self.industrial_miners.configure(Some(&table));
         settings.book_binder = book_binder::Rules::read_config(&table);
         ancient_altar::configure(
             table
@@ -275,6 +280,7 @@ impl Hooks for Slimefun {
         gps_transport::register(registrar);
         android_machine::register(registrar);
         crucible::register(registrar);
+        industrial_miner::register(registrar);
         factory::register(registrar);
         backpacks::register(registrar);
         ancient_altar::register(registrar);
@@ -286,7 +292,7 @@ impl Hooks for Slimefun {
         event.configs.push(Config::new(
             "slimefun",
             ConfigKind::Server,
-            "double-ores = true\ncrucible-allow-water-in-nether = false\nlegacy-ore-washer = false\nlegacy-dust-washer = false\nlegacy-ore-grinder = true\nelectric-gold-pan-override-output-limit = [false, false, false]\nfreezer-use-vanilla-ratios = [false, false, false]\nfire-breaking-chance = 34\noutput-chest-enabled = true\ndrop-from-golems = true\ngolem-drop-chance = 75\n\n[networks]\nenable-visualizer = true\ncargo-ticker-delay = 0\n\n[book-binder]\nbypass-vanilla-max-level = false\nhas-custom-max-level = false\ncustom-max-level = 15\n\n[portable-teleporter]\nteleportation-cost = 10\n\n[produce-collector]\nrange = 2\n\n[ancient-altar]\nstep-delay = 8\n",
+            "double-ores = true\ncrucible-allow-water-in-nether = false\nlegacy-ore-washer = false\nlegacy-dust-washer = false\nlegacy-ore-grinder = true\nelectric-gold-pan-override-output-limit = [false, false, false]\nfreezer-use-vanilla-ratios = [false, false, false]\nfire-breaking-chance = 34\noutput-chest-enabled = true\ndrop-from-golems = true\ngolem-drop-chance = 75\n\n[networks]\nenable-visualizer = true\ncargo-ticker-delay = 0\n\n[book-binder]\nbypass-vanilla-max-level = false\nhas-custom-max-level = false\ncustom-max-level = 15\n\n[portable-teleporter]\nteleportation-cost = 10\n\n[produce-collector]\nrange = 2\n\n[ancient-altar]\nstep-delay = 8\n\n[industrial-miner]\ncan-mine-ancient-debris = false\ncan-mine-deepslate-ores = true\n\n[advanced-industrial-miner]\ncan-mine-ancient-debris = false\ncan-mine-deepslate-ores = true\n",
         ));
     }
 
@@ -755,6 +761,10 @@ impl Hooks for Slimefun {
             *event.cancellation_result = InteractionResult::Consume;
             return Flow::Cancel;
         }
+        if self.industrial_miners.activate(host, level, player, event.click.pos) {
+            *event.cancellation_result = InteractionResult::Consume;
+            return Flow::Cancel;
+        }
         if let Some(machine) = hand_machine::HandMachine::at(host, level, event.click.pos) {
             machine.activate(
                 host,
@@ -996,6 +1006,7 @@ impl Hooks for Slimefun {
             network_runtime::tick(&self.networks, host, event.level, settings, &self.rolls);
             factory::VIEWERS.refresh(host, event.level);
             self.crucibles.tick(host, event.level);
+            self.industrial_miners.tick(host, event.level, &self.rolls);
             self.composters.tick(host, event.level, &self.rolls);
             ancient_altar::tick(host, event.level);
             auto_crafter::refresh(host, event.level);
@@ -1021,6 +1032,7 @@ impl Hooks for Slimefun {
 
     fn level_unload(&self, host: &mut dyn ServerHost, event: &mut mod_api::LevelUnloadEvent<'_>) {
         self.block_placers.unload(host, event.dimension);
+        self.industrial_miners.unload(host, event.dimension);
     }
 
     fn scheduled_task(&self, host: &mut dyn ServerHost, event: &mut ScheduledTaskEvent<'_>) {
@@ -1028,7 +1040,11 @@ impl Hooks for Slimefun {
         self.delayed_crafts.scheduled_task(host, event);
     }
 
-    fn server_stopping(&self, _: &mut dyn ServerHost, _: &mut ServerStoppingEvent) {
+    fn validate_tickets(&self, _: &mut dyn ServerHost, event: &mut mod_api::ValidateTicketsEvent<'_>) {
+        industrial_miner::validate_tickets(event);
+    }
+
+    fn server_stopping(&self, host: &mut dyn ServerHost, _: &mut ServerStoppingEvent) {
         self.block_placers.clear();
         self.radiation.clear();
         auto_crafter::clear();
@@ -1043,6 +1059,7 @@ impl Hooks for Slimefun {
         self.delayed_crafts.clear();
         self.composters.clear();
         self.crucibles.clear();
+        self.industrial_miners.clear(host);
         self.rolls.clear();
     }
 }
@@ -1054,7 +1071,7 @@ fn describe_recipe(id: &str, double_ores: bool) -> Vec<String> {
                 .split_once(':')
                 .is_some_and(|(_, name)| name.eq_ignore_ascii_case(id))
     };
-    let mut lines = Vec::new();
+    let mut lines = industrial_miner::recipe_description(id).into_iter().collect::<Vec<_>>();
     for (name, recipes, multiplier) in [
         ("Grind Stone", GRINDING, 1),
         ("Ore Crusher", CRUSHING, 1),
