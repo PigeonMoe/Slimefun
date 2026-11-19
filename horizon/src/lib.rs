@@ -64,6 +64,7 @@ mod juice;
 mod lumber_axe;
 mod machine;
 mod magic_eye;
+mod magic_weapons;
 mod medical;
 mod network_recipes;
 mod network_runtime;
@@ -112,6 +113,7 @@ struct Slimefun {
     jetpacks: sneak_equipment::Task<jetpack::Flight>,
     smelters_pickaxes: smelters_pickaxe::SmeltersPickaxes,
     spawners: spawner_repair::Spawners,
+    magic_weapons: magic_weapons::Weapons,
     rolls: Rolls,
     chest: Mutex<Option<ItemKey>>,
     networks: Arc<Mutex<network_runtime::Networks>>,
@@ -146,6 +148,7 @@ impl Default for Slimefun {
             jetpacks: sneak_equipment::Task::default(),
             smelters_pickaxes: smelters_pickaxe::SmeltersPickaxes::default(),
             spawners: spawner_repair::Spawners::default(),
+            magic_weapons: magic_weapons::Weapons::default(),
             rolls: Rolls::default(),
             chest: Mutex::new(None),
             networks: Arc::default(),
@@ -216,6 +219,14 @@ impl Slimefun {
             .and_then(toml::Value::as_bool)
         {
             self.spawners.configure(value);
+        }
+        if let Some(chance) = table
+            .get("blade-of-vampires")
+            .and_then(|section| section.get("chance"))
+            .and_then(toml::Value::as_integer)
+            .filter(|chance| (0..=100).contains(chance))
+        {
+            self.magic_weapons.configure(chance as u8);
         }
         ancient_altar::configure(
             table
@@ -373,6 +384,7 @@ impl Hooks for Slimefun {
         backpacks::register(registrar);
         ancient_altar::register(registrar);
         self.spawners.register(registrar);
+        self.magic_weapons.register(registrar);
         rainbow::register(registrar);
         hologram_projector::register(registrar);
         auto_crafter::register(registrar);
@@ -384,7 +396,7 @@ impl Hooks for Slimefun {
             "slimefun",
             ConfigKind::Server,
             &format!("{}{}",
-            "double-ores = true\ncrucible-allow-water-in-nether = false\nlegacy-ore-washer = false\nlegacy-dust-washer = false\nlegacy-ore-grinder = true\nelectric-gold-pan-override-output-limit = [false, false, false]\nfreezer-use-vanilla-ratios = [false, false, false]\nfire-breaking-chance = 34\noutput-chest-enabled = true\ndrop-from-golems = true\ngolem-drop-chance = 75\n\n[URID]\ncustom-ticker-delay = 10\n\n[networks]\nmax-size = 200\nenable-visualizer = true\ncargo-ticker-delay = 0\n\n[wind-staff]\npower = 4\n\n[book-binder]\nbypass-vanilla-max-level = false\nhas-custom-max-level = false\ncustom-max-level = 15\n\n[portable-teleporter]\nteleportation-cost = 10\n\n[produce-collector]\nrange = 2\n\n[reinforced-spawner]\nallow-spawn-eggs = true\n\n[ancient-altar]\nstep-delay = 8\n\n[miner-android]\nreduced-block-updates = true\n\n[industrial-miner]\ncan-mine-ancient-debris = false\ncan-mine-deepslate-ores = true\n\n[advanced-industrial-miner]\ncan-mine-ancient-debris = false\ncan-mine-deepslate-ores = true\n",
+            "double-ores = true\ncrucible-allow-water-in-nether = false\nlegacy-ore-washer = false\nlegacy-dust-washer = false\nlegacy-ore-grinder = true\nelectric-gold-pan-override-output-limit = [false, false, false]\nfreezer-use-vanilla-ratios = [false, false, false]\nfire-breaking-chance = 34\noutput-chest-enabled = true\ndrop-from-golems = true\ngolem-drop-chance = 75\n\n[URID]\ncustom-ticker-delay = 10\n\n[networks]\nmax-size = 200\nenable-visualizer = true\ncargo-ticker-delay = 0\n\n[wind-staff]\npower = 4\n\n[book-binder]\nbypass-vanilla-max-level = false\nhas-custom-max-level = false\ncustom-max-level = 15\n\n[portable-teleporter]\nteleportation-cost = 10\n\n[produce-collector]\nrange = 2\n\n[blade-of-vampires]\nchance = 45\n\n[reinforced-spawner]\nallow-spawn-eggs = true\n\n[ancient-altar]\nstep-delay = 8\n\n[miner-android]\nreduced-block-updates = true\n\n[industrial-miner]\ncan-mine-ancient-debris = false\ncan-mine-deepslate-ores = true\n\n[advanced-industrial-miner]\ncan-mine-ancient-debris = false\ncan-mine-deepslate-ores = true\n",
                 enchantment_machines::default_config()),
         ));
     }
@@ -433,6 +445,44 @@ impl Hooks for Slimefun {
         self.spawners.destroyed(host, event);
         self.smelters_pickaxes.destroyed(host, event, &self.rolls);
         lumber_axe::destroyed(host, event);
+    }
+
+    fn living_incoming_damage(
+        &self,
+        _: &mut dyn mod_api::LevelRandomHost,
+        event: &mut mod_api::LivingIncomingDamageEvent<'_>,
+    ) -> Flow {
+        self.magic_weapons.incoming(event);
+        Flow::Continue
+    }
+
+    fn living_damage_post(
+        &self,
+        _: &mut dyn mod_api::LevelRandomHost,
+        event: &mut mod_api::LivingDamagePostEvent<'_>,
+    ) {
+        self.magic_weapons.post(event);
+    }
+
+    fn entity_shoot_bow(&self, host: &mut dyn ServerHost, event: &mut mod_api::EntityShootBowEvent<'_>) {
+        self.magic_weapons.shot(host, event);
+    }
+
+    fn hears_projectile_impacts(&self, _: &dyn mod_api::Host, event: &mut mod_api::HearsProjectileImpactsEvent) {
+        event.hears = true;
+    }
+
+    fn projectile_impact(
+        &self,
+        host: &mut dyn ServerHost,
+        event: &mut mod_api::ProjectileImpactEvent<'_>,
+    ) -> Flow {
+        self.magic_weapons.impact(host, event);
+        Flow::Continue
+    }
+
+    fn entity_leave_level(&self, _: &mut dyn ServerHost, event: &mut mod_api::EntityLeaveLevelEvent<'_>) {
+        self.magic_weapons.departed(event.entity);
     }
 
     fn block_drops(&self, level: &dyn LevelHost, event: &mut BlockDropsEvent<'_>) -> Flow {
@@ -1335,6 +1385,7 @@ impl Hooks for Slimefun {
     fn level_tick_post(&self, host: HostSide<'_>, event: &mut LevelTickPostEvent) {
         if let HostSide::Server(host) = host {
             let settings = *self.settings.lock().unwrap();
+            self.magic_weapons.tick(host, event.level, &self.rolls);
             self.butcher_androids.tick(host, event.level, &self.rolls);
             network_runtime::tick(
                 &self.networks,
@@ -1393,6 +1444,7 @@ impl Hooks for Slimefun {
         self.block_placers.unload(host, event.dimension);
         self.industrial_miners.unload(host, event.dimension);
         self.butcher_androids.unload(host, event.dimension);
+        self.magic_weapons.unload(host, event.dimension);
     }
 
     fn scheduled_task(&self, host: &mut dyn ServerHost, event: &mut ScheduledTaskEvent<'_>) {
@@ -1420,6 +1472,7 @@ impl Hooks for Slimefun {
         self.jet_boots.clear();
         self.jetpacks.clear();
         self.spawners.clear();
+        self.magic_weapons.clear();
         self.smelters_pickaxes.clear();
         self.soulbound_rituals.clear();
         self.elevators.clear();
