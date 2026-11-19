@@ -66,6 +66,12 @@ Java 版源码和原有构建指令位于仓库根目录。
 
 季节分类、原版配方索引和语言设置仍待移植。
 
+## 护符
+
+魔法工作台可制作普通护符、魔法玻璃以及 Magician、Wizard 和 Wise 护符。魔法玻璃用于配方，不能直接放置。三种护符均可用四枚 Ender Lump III 进行末影灌注。普通护符放在主物品栏，灌注版放在末影箱，两者均需完成相应的基础护符研究。三种护符触发后保留在原槽位。生存指南的二阶护符分类需先完成已移植的一阶护符研究。
+
+Magician 可从当前注册表中选择相容附魔。默认仅对可接受该附魔的装备生效。服务器可在 `[magician-talisman]` 启用 `allow-enchantment-books`，或在 `[magician-talisman.allow-enchantments.minecraft.efficiency.level]` 将 `"2"` 设为 `false`，停用该附魔等级。Wizard 可在有资格的工具上给出三级至五级时运，精准采集出现在当次附魔列表时不会触发。Wise 只尝试翻倍经验球修补后剩余的经验。使用 `[talismans]` 的 `use-actionbar = false` 可改为聊天提示。
+
 ## 本地开发增量
 
 本节描述开发分支的变更。使用当前 PigeonMoe Horizon Fork 构建以取得最新的设备和背包接口。

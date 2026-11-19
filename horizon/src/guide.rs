@@ -479,38 +479,37 @@ fn render(host: &dyn Host, saved: Option<&Compound>, screen: &Page) -> Menu {
     }
     match screen {
         Page::Main => {
-            let basics = GROUPS
-                .iter()
-                .find(|group| group.key == "basicMachines")
-                .is_none_or(|group| group_entries(group).all(|entry| unlocked(saved, entry)));
             for (slot, group) in GROUPS
                 .iter()
                 .filter(|group| group_entries(group).next().is_some())
                 .enumerate()
             {
-                let available = !group.requires_basics || basics;
-                let (material, name, lore) = if available {
-                    (
-                        group.icon,
-                        format!("&{}{}", color_code(group.color), group.name),
-                        &[][..],
-                    )
-                } else {
-                    (
+                let locked_parent = group
+                    .parent
+                    .and_then(|key| GROUPS.iter().find(|parent| parent.key == key))
+                    .filter(|parent| !group_entries(parent).all(|entry| unlocked(saved, entry)));
+                let name = format!("&{}{}", color_code(group.color), group.name);
+                let shown = if let Some(parent) = locked_parent {
+                    icon(
+                        host,
                         "minecraft:barrier",
-                        format!("&4Locked &7- &f{}", group.name),
+                        &format!("&4Locked &7- &f{}", group.name),
                         &[
                             "",
                             "&fComplete these categories first:",
                             "",
-                            "&7Basic Machines",
-                        ][..],
+                            &format!("&7{}", parent.name),
+                        ],
                     )
+                } else {
+                    icon(host, group.icon, &name, &[])
                 };
                 menu.set(
                     9 + slot,
-                    icon(host, material, &name, lore),
-                    available.then_some(Action::Push(Page::Group(group, 1))),
+                    shown,
+                    locked_parent
+                        .is_none()
+                        .then_some(Action::Push(Page::Group(group, 1))),
                 );
             }
         }

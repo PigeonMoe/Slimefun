@@ -91,6 +91,7 @@ mod soulbound_gear;
 mod soulbound_rune;
 mod stomper;
 mod storage;
+mod talismans;
 mod tape_measure;
 mod teleposition_scroll;
 mod thermal_machines;
@@ -127,6 +128,7 @@ struct Slimefun {
     beheading: beheading::Beheading,
     ore_tools: ore_tools::OreTools,
     nether_goo: nether_goo::NetherGoo,
+    talismans: talismans::Talismans,
     teleposition_scroll: teleposition_scroll::Scroll,
     explosive_tools: explosive_tools::ExplosiveTools,
     rolls: Rolls,
@@ -168,6 +170,7 @@ impl Default for Slimefun {
             beheading: beheading::Beheading::default(),
             ore_tools: ore_tools::OreTools::default(),
             nether_goo: nether_goo::NetherGoo::default(),
+            talismans: talismans::Talismans::default(),
             teleposition_scroll: teleposition_scroll::Scroll::default(),
             explosive_tools: explosive_tools::ExplosiveTools::default(),
             rolls: Rolls::default(),
@@ -196,6 +199,7 @@ impl Slimefun {
         if fresh {
             *settings = Settings::default();
             enchantment_machines::configure(&toml::Table::new());
+            self.talismans.configure(&toml::Table::new());
             self.radiation.configure(None);
             self.climbing.configure(None);
             self.nether_goo.configure(None);
@@ -212,6 +216,7 @@ impl Slimefun {
         };
         self.guide.configure(table.get("guide"), table.get("researches"));
         self.ore_tools.configure(&table);
+        self.talismans.configure(&table);
         self.teleposition_scroll
             .configure(table.get("scroll-of-dimensional-teleposition"));
         self.explosive_tools.configure(&table);
@@ -426,20 +431,22 @@ impl Hooks for Slimefun {
         hologram_projector::register(registrar);
         auto_crafter::register(registrar);
         self.universal.register(registrar);
+        talismans::register(registrar);
     }
 
     fn register_configs(&self, _: HostSide<'_>, event: &mut RegisterConfigsEvent<'_>) {
         event.configs.push(Config::new(
             "slimefun",
             ConfigKind::Server,
-            &format!("{}{}{}{}{}{}{}",
+            &format!("{}{}{}{}{}{}{}{}",
             "double-ores = true\ncrucible-allow-water-in-nether = false\nlegacy-ore-washer = false\nlegacy-dust-washer = false\nlegacy-ore-grinder = true\nelectric-gold-pan-override-output-limit = [false, false, false]\nfreezer-use-vanilla-ratios = [false, false, false]\nfire-breaking-chance = 34\noutput-chest-enabled = true\ndrop-from-golems = true\ngolem-drop-chance = 75\n\n[guide]\nreceive-on-first-join = true\n\n[researches]\nfree-in-creative-mode = true\nenable-fireworks = true\ndisable-learning-animation = false\n\n[URID]\ncustom-ticker-delay = 10\n\n[networks]\nmax-size = 200\nenable-visualizer = true\ncargo-ticker-delay = 0\n\n[wind-staff]\npower = 4\n\n[book-binder]\nbypass-vanilla-max-level = false\nhas-custom-max-level = false\ncustom-max-level = 15\n\n[portable-teleporter]\nteleportation-cost = 10\n\n[produce-collector]\nrange = 2\n\n[pickaxe-of-vein-mining]\nmax-blocks = 16\n\n[pickaxe-of-the-seeker]\nmax-range = 5\n\n[blade-of-vampires]\nchance = 45\n\n[reinforced-spawner]\nallow-spawn-eggs = true\n\n[ancient-altar]\nstep-delay = 8\n\n[miner-android]\nreduced-block-updates = true\n\n[industrial-miner]\ncan-mine-ancient-debris = false\ncan-mine-deepslate-ores = true\n\n[advanced-industrial-miner]\ncan-mine-ancient-debris = false\ncan-mine-deepslate-ores = true\n",
                 enchantment_machines::default_config(),
                 beheading::DEFAULT_CONFIG,
                 explosive_tools::DEFAULT_CONFIG,
                 climbing_pick::DEFAULT_CONFIG,
                 teleposition_scroll::DEFAULT_CONFIG,
-                nether_goo::DEFAULT_CONFIG),
+                nether_goo::DEFAULT_CONFIG,
+                talismans::DEFAULT_CONFIG),
         ));
     }
 
@@ -1371,6 +1378,31 @@ impl Hooks for Slimefun {
         self.transport.close(event);
         self.elevators.closed(event);
         network_runtime::menu_closed(&self.networks, event);
+    }
+
+    fn player_enchant_item_pre(
+        &self,
+        host: &mut dyn ServerHost,
+        event: &mut mod_api::PlayerEnchantItemPreEvent<'_>,
+    ) {
+        self.talismans.enchant(
+            host,
+            event.player,
+            event.input,
+            event.enchantments,
+            event.book_enchantments,
+            &self.rolls,
+        );
+    }
+
+    fn player_orb_xp_pre(
+        &self,
+        host: &mut dyn ServerHost,
+        event: &mut mod_api::PlayerOrbXpPreEvent,
+    ) {
+        event.points = self
+            .talismans
+            .orb_xp(host, event.player, event.points, &self.rolls);
     }
 
     fn living_entity_use_item_start(

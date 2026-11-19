@@ -119,20 +119,20 @@ pub(super) struct Group {
     pub name: &'static str,
     pub color: &'static str,
     pub icon: &'static str,
-    pub requires_basics: bool,
+    pub parent: Option<&'static str>,
 }
 
 macro_rules! group {
     ($key:literal, $name:literal, $icon:literal) => {
-        group!($key, $name, $icon, "gray", false)
+        group!($key, $name, $icon, "gray", None)
     };
-    ($key:literal, $name:literal, $icon:literal, $color:literal, $locked:literal) => {
+    ($key:literal, $name:literal, $icon:literal, $color:literal, $parent:expr) => {
         Group {
             key: $key,
             name: $name,
             icon: concat!("minecraft:", $icon),
             color: $color,
-            requires_basics: $locked,
+            parent: $parent,
         }
     };
 }
@@ -156,22 +156,42 @@ pub(super) const GROUPS: &[Group] = &[
         "Technical Gadgets",
         "leather_chestplate"
     ),
-    group!("gps", "GPS-based Machines", "player_head", "aqua", true),
+    group!("talismans", "Talismans - &aTier I", "emerald"),
+    group!(
+        "ender_talismans",
+        "Talismans - &aTier II",
+        "emerald",
+        "gray",
+        Some("talismans")
+    ),
+    group!(
+        "gps",
+        "GPS-based Machines",
+        "player_head",
+        "aqua",
+        Some("basicMachines")
+    ),
     group!(
         "electricity",
         "Energy and Electricity",
         "player_head",
         "aqua",
-        true
+        Some("basicMachines")
     ),
     group!(
         "androids",
         "Programmable Androids",
         "player_head",
         "red",
-        true
+        Some("basicMachines")
     ),
-    group!("cargo", "Cargo Management", "player_head", "red", true),
+    group!(
+        "cargo",
+        "Cargo Management",
+        "player_head",
+        "red",
+        Some("basicMachines")
+    ),
 ];
 
 static CATALOG: LazyLock<BTreeMap<String, Entry>> = LazyLock::new(build);
