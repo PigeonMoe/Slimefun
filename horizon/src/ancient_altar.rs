@@ -1218,6 +1218,7 @@ fn ritual_recipe(
         .iter()
         .chain(crate::armor_forge::ALTAR_RECIPES)
         .chain(crate::rainbow::ALTAR_RECIPES)
+        .chain(crate::soulbound_gear::ALTAR_RECIPES)
         .find(|recipe| {
             recipe.inputs[4].is_some_and(|kind| kind.matches(host, catalyst))
                 && (0..8).any(|rotation| {

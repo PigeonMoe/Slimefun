@@ -171,6 +171,7 @@ pub(crate) fn researches() -> impl Iterator<Item = &'static Research> {
         .chain(crate::factory::crop_growth::RESEARCHES)
         .chain(crate::factory::assemblers::RESEARCHES)
         .chain(crate::backpacks::RESEARCHES)
+        .chain(crate::soulbound_gear::RESEARCHES.iter().copied())
         .chain([
             &crate::ancient_altar::ALTAR_RESEARCH,
             &crate::ancient_altar::RUNES_RESEARCH,
@@ -192,6 +193,7 @@ pub(crate) fn magic_crafting() -> impl Iterator<Item = &'static CraftingRecipe> 
     [&crate::factory::experience_collector::FLASK_RECIPE]
         .into_iter()
         .chain(crate::backpacks::MAGIC_CRAFTING)
+        .chain(crate::soulbound_gear::MAGIC_RECIPES)
         .chain(crate::ancient_altar::MAGIC_CRAFTING)
         .chain([&crate::infused::MAGIC])
 }

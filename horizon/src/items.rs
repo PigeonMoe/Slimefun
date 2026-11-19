@@ -48,7 +48,7 @@ impl Kind {
         }
     }
 
-    pub(crate) fn material(self) -> &'static str {
+    pub(crate) const fn material(self) -> &'static str {
         match self {
             Self::Vanilla(id) => id,
             Self::Slimefun(item) => item.material,
@@ -185,6 +185,7 @@ impl SlimefunItem {
         }
         crate::enchantment_machines::decorate(self.id, &mut components);
         crate::ancient_altar::decorate(self.id, &mut components);
+        crate::soulbound_gear::decorate(self.id, &mut components);
         crate::rainbow::decorate(self.id, &mut components);
         crate::armor_forge::decorate(self.id, &mut components);
         crate::auto_crafter::decorate(self.id, &mut components);

@@ -66,6 +66,7 @@ mod rainbow;
 mod random;
 mod recipes;
 mod research;
+mod soulbound_gear;
 mod storage;
 mod tape_measure;
 mod thermal_machines;
@@ -879,7 +880,9 @@ impl Hooks for Slimefun {
         host: &dyn mod_api::Host,
         event: &mut mod_api::PlayerKeepDeathItemEvent<'_>,
     ) -> Flow {
-        if backpacks::keep_on_death(host, event.stack) {
+        if backpacks::keep_on_death(host, event.stack)
+            || soulbound_gear::keeps_on_death(host, event.stack)
+        {
             Flow::Cancel
         } else {
             Flow::Continue
@@ -1399,6 +1402,7 @@ fn describe_recipe(id: &str, double_ores: bool) -> Vec<String> {
                 .iter()
                 .chain(armor_forge::ALTAR_RECIPES)
                 .chain(rainbow::ALTAR_RECIPES)
+                .chain(soulbound_gear::ALTAR_RECIPES)
                 .map(|recipe| ("Ancient Altar", recipe)),
         );
     for (workbench, recipe) in workbenches.filter(|(bench, recipe)| {
