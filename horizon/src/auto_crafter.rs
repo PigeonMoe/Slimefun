@@ -476,7 +476,7 @@ impl IngredientKind<'_> {
         match self {
             Self::Slimefun(kind) => kind.matches(host, stack),
             Self::Vanilla(ingredient) => {
-                vanilla::ingredient_allowed(stack) && ingredient.test(host, stack)
+                crate::items::usable_in_workbench(stack) && ingredient.test(host, stack)
             }
         }
     }

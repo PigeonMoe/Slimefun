@@ -1367,6 +1367,34 @@ impl Hooks for Slimefun {
         network_runtime::menu_closed(&self.networks, event);
     }
 
+    fn player_recipe_result(
+        &self,
+        _: &dyn mod_api::Host,
+        event: &mut mod_api::PlayerRecipeResultEvent<'_>,
+    ) -> Flow {
+        let blocked = match event.menu {
+            "minecraft:crafting" => {
+                !items::usable_in_workbench(event.result)
+                    || event
+                        .inputs
+                        .iter()
+                        .flatten()
+                        .any(|stack| !items::usable_in_workbench(stack))
+            }
+            "minecraft:smithing" => event
+                .inputs
+                .get(2)
+                .and_then(Option::as_ref)
+                .is_some_and(|stack| !items::usable_in_workbench(stack)),
+            _ => false,
+        };
+        if blocked {
+            Flow::Cancel
+        } else {
+            Flow::Continue
+        }
+    }
+
     fn player_enchant_item_pre(
         &self,
         host: &mut dyn ServerHost,

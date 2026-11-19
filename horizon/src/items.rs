@@ -376,6 +376,19 @@ pub(crate) fn item_id(stack: &ItemStack) -> Option<String> {
     }
 }
 
+pub(crate) fn usable_in_workbench(stack: &ItemStack) -> bool {
+    item_id(stack).is_none_or(|id| {
+        matches!(
+            id.as_str(),
+            "SYNTHETIC_SAPPHIRE"
+                | "SYNTHETIC_DIAMOND"
+                | "SYNTHETIC_EMERALD"
+                | "GOLD_4K"
+                | "SYNTHETIC_SHULKER_SHELL"
+        )
+    })
+}
+
 fn string(value: &str) -> Tag {
     Tag::String(value.into())
 }

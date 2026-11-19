@@ -188,19 +188,6 @@ fn choices<'a>(
         .collect()
 }
 
-pub(super) fn ingredient_allowed(stack: &ItemStack) -> bool {
-    crate::items::item_id(stack).is_none_or(|id| {
-        matches!(
-            id.as_str(),
-            "SYNTHETIC_SAPPHIRE"
-                | "SYNTHETIC_DIAMOND"
-                | "SYNTHETIC_EMERALD"
-                | "GOLD_4K"
-                | "SYNTHETIC_SHULKER_SHELL"
-        )
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
