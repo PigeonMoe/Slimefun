@@ -5,25 +5,53 @@ pub(crate) const MAX_LENGTH: usize = 54;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Mode {
-    Normal,
+    Normal(Tier),
     Farmer,
+    Fisherman(Tier),
     Archived,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Tier {
+    Solid,
+    Liquid,
+    Nuclear,
+}
+
+impl Tier {
+    pub fn number(self) -> u32 {
+        match self {
+            Self::Solid => 1,
+            Self::Liquid => 2,
+            Self::Nuclear => 3,
+        }
+    }
+}
+
+impl Mode {
+    pub fn tier(self) -> Option<Tier> {
+        Some(match self {
+            Self::Normal(tier) | Self::Fisherman(tier) => tier,
+            Self::Farmer => Tier::Solid,
+            Self::Archived => return None,
+        })
+    }
 }
 
 pub(crate) fn mode(id: &str) -> Option<Mode> {
     Some(match id {
-        "PROGRAMMABLE_ANDROID" => Mode::Normal,
+        "PROGRAMMABLE_ANDROID" => Mode::Normal(Tier::Solid),
+        "PROGRAMMABLE_ANDROID_2" => Mode::Normal(Tier::Liquid),
+        "PROGRAMMABLE_ANDROID_3" => Mode::Normal(Tier::Nuclear),
         "PROGRAMMABLE_ANDROID_FARMER" => Mode::Farmer,
+        "PROGRAMMABLE_ANDROID_FISHERMAN" => Mode::Fisherman(Tier::Solid),
+        "PROGRAMMABLE_ANDROID_2_FISHERMAN" => Mode::Fisherman(Tier::Liquid),
+        "PROGRAMMABLE_ANDROID_3_FISHERMAN" => Mode::Fisherman(Tier::Nuclear),
         "PROGRAMMABLE_ANDROID_MINER"
         | "PROGRAMMABLE_ANDROID_WOODCUTTER"
         | "PROGRAMMABLE_ANDROID_BUTCHER"
-        | "PROGRAMMABLE_ANDROID_FISHERMAN"
-        | "PROGRAMMABLE_ANDROID_2"
-        | "PROGRAMMABLE_ANDROID_2_FISHERMAN"
         | "PROGRAMMABLE_ANDROID_2_FARMER"
         | "PROGRAMMABLE_ANDROID_2_BUTCHER"
-        | "PROGRAMMABLE_ANDROID_3"
-        | "PROGRAMMABLE_ANDROID_3_FISHERMAN"
         | "PROGRAMMABLE_ANDROID_3_BUTCHER" => Mode::Archived,
         _ => return None,
     })
@@ -39,6 +67,7 @@ pub(crate) enum Instruction {
     GoDown,
     TurnLeft,
     TurnRight,
+    CatchFish,
     FarmForward,
     FarmDown,
     InterfaceItems,
@@ -54,6 +83,7 @@ const INSTRUCTIONS: &[(&str, &str, Instruction)] = &[
     ("GO_DOWN", "Move downwards", Instruction::GoDown),
     ("TURN_LEFT", "Turn left", Instruction::TurnLeft),
     ("TURN_RIGHT", "Turn right", Instruction::TurnRight),
+    ("CATCH_FISH", "Catch Fish", Instruction::CatchFish),
     (
         "FARM_FORWARD",
         "Harvest and Replant",
@@ -95,6 +125,7 @@ impl Instruction {
     fn can_use(self, mode: Mode) -> bool {
         match self {
             Self::FarmForward | Self::FarmDown => mode == Mode::Farmer,
+            Self::CatchFish => matches!(mode, Mode::Fisherman(_)),
             _ => mode != Mode::Archived,
         }
     }
@@ -240,18 +271,18 @@ mod tests {
     fn default_program_waits_in_order_and_repeats_from_start() {
         let mut program = Script::default();
         assert_eq!(
-            program.advance(Mode::Normal, 0),
+            program.advance(Mode::Normal(Tier::Solid), 0),
             Some((Instruction::TurnLeft, 1))
         );
         assert_eq!(
-            program.advance(Mode::Normal, 1),
+            program.advance(Mode::Normal(Tier::Solid), 1),
             Some((Instruction::Repeat, 0))
         );
         assert_eq!(program.edit(1, Some(Instruction::FarmDown)), Some(()));
         assert_eq!(program.edit(2, Some(Instruction::Wait)), Some(()));
         assert_eq!(program.duplicate(2), Some(()));
         assert_eq!(program.source(), "START-FARM_DOWN-WAIT-WAIT-REPEAT");
-        assert_eq!(program.advance(Mode::Normal, 0), None);
+        assert_eq!(program.advance(Mode::Normal(Tier::Solid), 0), None);
         assert_eq!(
             program.advance(Mode::Farmer, 0),
             Some((Instruction::FarmDown, 1))

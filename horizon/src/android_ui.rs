@@ -11,7 +11,7 @@ use crate::{
     android_items,
     android_library::{Entries, Library},
     android_machine::{self, FUEL, PAPER_SLOTS, Position},
-    android_program::{self, Instruction, MAX_LENGTH, Mode, Script},
+    android_program::{self, Instruction, MAX_LENGTH, Mode, Script, Tier},
     gps_controls::{head_icon, icon},
     items::{HeadTexture, Kind},
     network_runtime, research,
@@ -102,11 +102,13 @@ impl Menus {
             );
             return true;
         }
-        if mode != Mode::Archived && !research::can_use(host, player, &android_items::RESEARCH) {
+        if let Some((_, required)) = android_items::kind_and_research(mode)
+            && !research::can_use(host, player, required)
+        {
             tell(
                 host,
                 player,
-                "Unlock Programmable Androids to use this machine.",
+                &format!("Unlock {} to use this machine.", required.name),
             );
             return true;
         }
@@ -135,7 +137,10 @@ impl Menus {
             return;
         };
         let (title, items) = match &mut screen {
-            Screen::Main => ("Programmable Android", main_items(host, &machine)),
+            Screen::Main => (
+                "Programmable Android",
+                main_items(host, anchor.mode, &machine),
+            ),
             Screen::Memory => ("Script Editor", memory_items(host, anchor.mode)),
             Screen::Script(script) => ("Script Editor", script_items(host, script)),
             Screen::Choices { .. } => ("Script Editor", choice_items(host, anchor.mode)),
@@ -526,7 +531,11 @@ fn tell(host: &mut dyn ServerHost, player: PlayerRef, message: &str) {
     let _ = player.tell(host, Text::literal(message));
 }
 
-fn main_items(host: &dyn Host, machine: &android_machine::Machine) -> Vec<Option<ItemStack>> {
+fn main_items(
+    host: &dyn Host,
+    mode: Mode,
+    machine: &android_machine::Machine,
+) -> Vec<Option<ItemStack>> {
     const BORDER: &[usize] = &[
         0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 18, 24, 25, 26, 27, 33, 35, 36, 42, 44, 45, 46, 47, 48, 49,
         50, 51, 52, 53,
@@ -550,11 +559,27 @@ fn main_items(host: &dyn Host, machine: &android_machine::Machine) -> Vec<Option
         &["Click to open the Script Editor".into()],
     );
     items[17] = head(host, "PAUSE", "Pause", &[]);
-    items[34] = icon(
+    let (fuel, examples) = match mode.tier() {
+        Some(Tier::Solid) => ("solid fuel", "e.g. coal or wood"),
+        Some(Tier::Liquid) => ("liquid fuel", "e.g. lava, oil or fuel"),
+        Some(Tier::Nuclear) => (
+            "radioactive fuel",
+            "e.g. uranium, neptunium or boosted uranium",
+        ),
+        None => (
+            "archived fuel",
+            "This Android retains its old fuel and inventory",
+        ),
+    };
+    items[34] = head(
         host,
-        Kind::Vanilla("minecraft:coal"),
-        "Solid Fuel",
-        &[format!("Remaining steps: {}", machine.fuel)],
+        "FUEL",
+        "⇩ Fuel Input ⇩",
+        &[
+            format!("This Android runs on {fuel}."),
+            examples.to_owned(),
+            format!("Remaining steps: {}", machine.fuel),
+        ],
     );
     for (index, &slot) in PAPER_SLOTS.iter().enumerate() {
         items[slot] = android_machine::slot(host, machine, index);
@@ -599,10 +624,8 @@ fn library_items(
     );
     items[50] = head(host, "GO_FORWARD", "Next page", &pages);
     items[53] = head(host, "TURN_LEFT", "> Back", &[]);
-    let kind = match mode {
-        Mode::Normal => android_items::PROGRAMMABLE_ANDROID,
-        Mode::Farmer => android_items::PROGRAMMABLE_ANDROID_FARMER,
-        Mode::Archived => return items,
+    let Some((kind, _)) = android_items::kind_and_research(mode) else {
+        return items;
     };
     for (slot, entry) in rows.iter().filter_map(|&id| library.get(id)).enumerate() {
         let author = host
@@ -679,6 +702,20 @@ fn head(host: &dyn Host, key: &str, name: &str, lore: &[String]) -> Option<ItemS
 }
 
 const SKINS: &[(&str, HeadTexture)] = &[
+    (
+        "FUEL",
+        HeadTexture {
+            profile: [-1442515976, -1100268200, -1139489874, 993810157],
+            value: "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHBzOi8vdGV4dHVyZXMubWluZWNyYWZ0Lm5ldC90ZXh0dXJlLzkzNDNjZTU4ZGE1NGM3OTkyNGEyYzkzMzFjZmM0MTdmZThjY2JiZWE5YmU0NWE3YWM4NTg2MGE2YzczMCJ9fX0=",
+        },
+    ),
+    (
+        "CATCH_FISH",
+        HeadTexture {
+            profile: [614746120, 73350380, -1901274334, -1584263689],
+            value: "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHBzOi8vdGV4dHVyZXMubWluZWNyYWZ0Lm5ldC90ZXh0dXJlL2ZkNGZkZTUxMWY0NDU0MTAxZTRhMmE3MmJjODZmMTI5ODVkZmNkYTc2YjY0YmIyNGRjNjNhOWZhOWUzYTMifX19",
+        },
+    ),
     (
         "START",
         HeadTexture {

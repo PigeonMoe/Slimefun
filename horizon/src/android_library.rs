@@ -145,7 +145,8 @@ impl Entries {
 
 fn category(mode: Mode) -> Option<&'static str> {
     match mode {
-        Mode::Normal => Some("NONE"),
+        Mode::Normal(_) => Some("NONE"),
+        Mode::Fisherman(_) => Some("FISHERMAN"),
         Mode::Farmer => Some("FARMER"),
         Mode::Archived => None,
     }
@@ -329,6 +330,7 @@ fn encode(library: &Entries) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::android_program::Tier;
 
     #[test]
     fn library_shares_normal_scripts_and_keeps_paper_vote_rules() {
@@ -336,7 +338,7 @@ mod tests {
         let normal = Script::default();
         let farmer = Script::parse("START-FARM_FORWARD-REPEAT").unwrap();
         library
-            .upload(Mode::Normal, 1, "Juniper", "&aΩ", &normal)
+            .upload(Mode::Normal(Tier::Solid), 1, "Juniper", "&aΩ", &normal)
             .unwrap();
         library
             .upload(Mode::Farmer, 2, "Fern", "Harvest", &farmer)
@@ -347,14 +349,14 @@ mod tests {
                 .is_err()
         );
         assert_eq!(library.available(Mode::Farmer), vec![1, 0]);
-        assert_eq!(library.available(Mode::Normal), vec![0]);
+        assert_eq!(library.available(Mode::Normal(Tier::Solid)), vec![0]);
         assert_eq!(library.get(0).unwrap().name, "Ω");
         assert!(library.rate(0, 1, false).is_err());
         library.rate(0, 2, false).unwrap();
         assert!(library.rate(0, 2, true).is_err());
         assert_eq!(library.available(Mode::Farmer), vec![0, 1]);
         assert_eq!(library.get(0).unwrap().rating(), 0.5);
-        assert!(library.download(1, Mode::Normal).is_err());
+        assert!(library.download(1, Mode::Normal(Tier::Solid)).is_err());
         assert_eq!(library.download(1, Mode::Farmer).unwrap(), farmer);
         let restored = parse(encode(&library).as_bytes()).unwrap();
         assert_eq!(restored.get(0), library.get(0));
@@ -362,7 +364,7 @@ mod tests {
     }
 
     #[test]
-    fn an_old_fisherman_script_remains_archived_without_appearing_on_other_devices() {
+    fn an_old_fisherman_script_appears_only_on_its_compatible_device() {
         let imported = br#"
 format = 1
 [[scripts]]
@@ -370,17 +372,19 @@ name = "Zed's Catch"
 author = "0000000000000000000000000000000f"
 author_name = "Zed"
 category = "FISHERMAN"
-code = "START-FISH-REPEAT"
+code = "START-CATCH_FISH-REPEAT"
 downloads = 21
 positive = ["00000000000000000000000000000001"]
 negative = []
 "#;
         let entries = parse(imported).unwrap();
-        assert!(entries.available(Mode::Normal).is_empty());
+        assert!(entries.available(Mode::Normal(Tier::Solid)).is_empty());
         assert!(entries.available(Mode::Farmer).is_empty());
+        assert_eq!(entries.available(Mode::Fisherman(Tier::Solid)), vec![0]);
+        assert_eq!(entries.available(Mode::Fisherman(Tier::Nuclear)), vec![0]);
         let entry = entries.get(0).unwrap();
         assert_eq!(entry.downloads, 21);
-        assert_eq!(entry.code, "START-FISH-REPEAT");
+        assert_eq!(entry.code, "START-CATCH_FISH-REPEAT");
         assert_eq!(entry.author, 15);
         assert_eq!(
             parse(encode(&entries).as_bytes()).unwrap().get(0),

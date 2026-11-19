@@ -13,6 +13,7 @@ use mod_api::{
 
 mod advanced_processing;
 mod ancient_altar;
+mod android_fishing;
 mod android_items;
 mod android_library;
 mod android_machine;

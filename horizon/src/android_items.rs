@@ -3,10 +3,12 @@
 use mod_api::Tag;
 
 use crate::{
-    fuel_generators::COAL_GENERATOR,
+    android_program::{self, Mode, Tier},
+    factory::reactors::NUCLEAR_REACTOR,
+    fuel_generators::{COAL_GENERATOR, COMBUSTION_REACTOR},
     heated_pressure::PLASTIC_SHEET,
     items::{BASIC_CIRCUIT_BOARD, ELECTRIC_MOTOR, HeadTexture, Kind, STEEL_INGOT, item, text},
-    network_recipes::ANDROID_MEMORY_CORE,
+    network_recipes::{ANDROID_MEMORY_CORE, BLISTERING_INGOT_3, POWER_CRYSTAL},
     recipes::{CraftingRecipe, Research, Stack},
 };
 
@@ -184,6 +186,57 @@ pub(crate) const RESEARCH: Research = Research {
     cost: 50,
 };
 
+const ADVANCED: Research = Research {
+    id: "advanced_android",
+    name: "Advanced Androids",
+    cost: 60,
+};
+const ADVANCED_FISHERMAN: Research = Research {
+    id: "advanced_fisherman_android",
+    name: "Advanced Androids - Fisherman",
+    cost: 30,
+};
+const EMPOWERED: Research = Research {
+    id: "empowered_android",
+    name: "Empowered Androids",
+    cost: 60,
+};
+const EMPOWERED_FISHERMAN: Research = Research {
+    id: "empowered_fisherman_android",
+    name: "Empowered Androids - Fisherman",
+    cost: 30,
+};
+
+pub(crate) const RESEARCHES: &[&Research] = &[
+    &RESEARCH,
+    &INTERFACES,
+    &ADVANCED,
+    &ADVANCED_FISHERMAN,
+    &EMPOWERED,
+    &EMPOWERED_FISHERMAN,
+];
+
+const ROD: Kind = Kind::Vanilla("minecraft:fishing_rod");
+const CHEST: Kind = Kind::Vanilla("minecraft:chest");
+
+const fn fisherman(frame: Kind, kind: Kind, research: &'static Research) -> CraftingRecipe {
+    CraftingRecipe {
+        inputs: [
+            None,
+            None,
+            None,
+            Some(ROD),
+            Some(frame),
+            Some(ROD),
+            None,
+            Some(ELECTRIC_MOTOR),
+            None,
+        ],
+        output: Stack { kind, count: 1 },
+        research,
+    }
+}
+
 pub(crate) const CRAFTING: &[CraftingRecipe] = &[
     CraftingRecipe {
         inputs: [
@@ -257,6 +310,57 @@ pub(crate) const CRAFTING: &[CraftingRecipe] = &[
         },
         research: &RESEARCH,
     },
+    fisherman(
+        PROGRAMMABLE_ANDROID,
+        PROGRAMMABLE_ANDROID_FISHERMAN,
+        &RESEARCH,
+    ),
+    CraftingRecipe {
+        inputs: [
+            Some(PLASTIC_SHEET),
+            Some(ANDROID_MEMORY_CORE),
+            Some(PLASTIC_SHEET),
+            Some(COMBUSTION_REACTOR),
+            Some(PROGRAMMABLE_ANDROID),
+            Some(CHEST),
+            Some(PLASTIC_SHEET),
+            Some(POWER_CRYSTAL),
+            Some(PLASTIC_SHEET),
+        ],
+        output: Stack {
+            kind: PROGRAMMABLE_ANDROID_2,
+            count: 1,
+        },
+        research: &ADVANCED,
+    },
+    fisherman(
+        PROGRAMMABLE_ANDROID_2,
+        PROGRAMMABLE_ANDROID_2_FISHERMAN,
+        &ADVANCED_FISHERMAN,
+    ),
+    CraftingRecipe {
+        inputs: [
+            Some(PLASTIC_SHEET),
+            Some(ANDROID_MEMORY_CORE),
+            Some(PLASTIC_SHEET),
+            Some(NUCLEAR_REACTOR),
+            Some(PROGRAMMABLE_ANDROID_2),
+            Some(CHEST),
+            Some(BLISTERING_INGOT_3),
+            Some(POWER_CRYSTAL),
+            Some(BLISTERING_INGOT_3),
+        ],
+        output: Stack {
+            kind: PROGRAMMABLE_ANDROID_3,
+            count: 1,
+        },
+        research: &EMPOWERED,
+    },
+    fisherman(
+        PROGRAMMABLE_ANDROID_3,
+        PROGRAMMABLE_ANDROID_3_FISHERMAN,
+        &EMPOWERED_FISHERMAN,
+    ),
 ];
 
 pub(crate) fn item(id: &str) -> Option<Kind> {
@@ -281,15 +385,49 @@ pub(crate) fn item(id: &str) -> Option<Kind> {
     .find(|kind| kind.id() == id)
 }
 
+pub(crate) fn kind_and_research(mode: Mode) -> Option<(Kind, &'static Research)> {
+    Some(match mode {
+        Mode::Normal(Tier::Solid) => (PROGRAMMABLE_ANDROID, &RESEARCH),
+        Mode::Farmer => (PROGRAMMABLE_ANDROID_FARMER, &RESEARCH),
+        Mode::Fisherman(Tier::Solid) => (PROGRAMMABLE_ANDROID_FISHERMAN, &RESEARCH),
+        Mode::Normal(Tier::Liquid) => (PROGRAMMABLE_ANDROID_2, &ADVANCED),
+        Mode::Fisherman(Tier::Liquid) => (PROGRAMMABLE_ANDROID_2_FISHERMAN, &ADVANCED_FISHERMAN),
+        Mode::Normal(Tier::Nuclear) => (PROGRAMMABLE_ANDROID_3, &EMPOWERED),
+        Mode::Fisherman(Tier::Nuclear) => (PROGRAMMABLE_ANDROID_3_FISHERMAN, &EMPOWERED_FISHERMAN),
+        Mode::Archived => return None,
+    })
+}
+
 pub(crate) fn lore(id: &str) -> Option<Tag> {
-    let function = match id {
-        "PROGRAMMABLE_ANDROID" => "None",
-        "PROGRAMMABLE_ANDROID_FARMER" => "Farming",
-        _ => return None,
+    let mode = android_program::mode(id)?;
+    let tier = mode.tier()?;
+    let function = match mode {
+        Mode::Normal(_) => "None",
+        Mode::Farmer => "Farming",
+        Mode::Fisherman(_) => "Fishing",
+        Mode::Archived => return None,
     };
-    Some(Tag::List(vec![
+    let mut lore = vec![
         Tag::String("".into()),
         text(&format!("⇨ Function: {function}"), "gray", false),
-        text("⇨ Fuel Efficiency: 1.0x", "gray", false),
-    ]))
+    ];
+    if matches!(mode, Mode::Fisherman(_)) {
+        lore.push(text(
+            &format!("⇨ Success Rate: {}%", 10 * tier.number()),
+            "gray",
+            false,
+        ));
+    }
+    let efficiency = match tier {
+        Tier::Solid => "1.0",
+        Tier::Liquid => "1.5",
+        Tier::Nuclear if matches!(mode, Mode::Fisherman(_)) => "8.0",
+        Tier::Nuclear => "3.0",
+    };
+    lore.push(text(
+        &format!("⇨ Fuel Efficiency: {efficiency}x"),
+        "gray",
+        false,
+    ));
+    Some(Tag::List(lore))
 }

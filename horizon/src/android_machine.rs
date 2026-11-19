@@ -10,7 +10,11 @@ use mod_api::{
 };
 
 use crate::{
-    android_program::{self, Facing, Instruction, Mode, Script},
+    android_fishing,
+    android_program::{self, Facing, Instruction, Script, Tier},
+    factory::reactors::NEPTUNIUM,
+    fuel_generators::BUCKET_OF_FUEL,
+    heated_pressure::{BOOSTED_URANIUM, BUCKET_OF_OIL, URANIUM},
     items::{Kind, item_id},
     random::Rolls,
 };
@@ -401,7 +405,28 @@ pub(crate) fn register(registrar: &mut dyn Registrar) {
     });
 }
 
-fn solid_fuel(host: &dyn Host, stack: &ItemStack) -> Option<f32> {
+const LIQUID_FUELS: &[(Kind, u32)] = &[
+    (Kind::Vanilla("minecraft:lava_bucket"), 100),
+    (BUCKET_OF_OIL, 200),
+    (BUCKET_OF_FUEL, 500),
+];
+
+const NUCLEAR_FUELS: &[(Kind, u32)] =
+    &[(URANIUM, 2500), (NEPTUNIUM, 1200), (BOOSTED_URANIUM, 3000)];
+
+fn fuel_ticks(host: &dyn Host, tier: Tier, stack: &ItemStack) -> Option<u32> {
+    let table = match tier {
+        Tier::Solid => return solid_fuel(host, stack),
+        Tier::Liquid => LIQUID_FUELS,
+        Tier::Nuclear => NUCLEAR_FUELS,
+    };
+    table
+        .iter()
+        .find(|(fuel, _)| fuel.matches(host, stack))
+        .map(|(_, ticks)| *ticks)
+}
+
+fn solid_fuel(host: &dyn Host, stack: &ItemStack) -> Option<u32> {
     if item_id(stack).is_some()
         || stack.components().is_some()
         || stack.damage_component().is_some()
@@ -433,7 +458,37 @@ fn solid_fuel(host: &dyn Host, stack: &ItemStack) -> Option<f32> {
         }
         _ => return None,
     };
-    Some(ticks as f32)
+    Some(ticks)
+}
+
+/// Like BlockMenu.pushItem, use an existing compatible slot or the first vacant output.
+pub(crate) fn push_one(host: &dyn Host, machine: &mut Machine, stack: ItemStack) -> bool {
+    let resource = ItemResource::of(&stack);
+    let capacity = crate::factory::max_stack(host, &resource);
+    for index in 0..FUEL {
+        let updated = match slot(host, machine, index) {
+            Some(held) if resource.matches(&held) && held.count() < capacity => {
+                resource.to_stack(held.count() + 1)
+            }
+            None => Some(stack.clone()),
+            _ => continue,
+        };
+        return updated
+            .is_some_and(|stack| replace_slot(host, machine, index, Some(stack)).is_some());
+    }
+    false
+}
+
+fn refill(host: &dyn Host, tier: Tier, machine: &mut Machine) -> Option<()> {
+    let stack = slot(host, machine, FUEL)?;
+    machine.fuel = fuel_ticks(host, tier, &stack)? as f32;
+    replace_slot(host, machine, FUEL, stack.shrink(1))?;
+    if tier == Tier::Liquid {
+        let empty = Kind::Vanilla("minecraft:bucket").stack(host, 1)?;
+        // Paper still refuels when all output slots are full.
+        push_one(host, machine, empty);
+    }
+    Some(())
 }
 
 pub(crate) fn tick(
@@ -444,15 +499,13 @@ pub(crate) fn tick(
     rolls: &Rolls,
 ) -> Option<Movement> {
     let mode = android_program::mode(item)?;
+    let tier = mode.tier()?;
     let mut state = data(host, level, pos)?;
-    if mode == Mode::Archived || state.paused {
+    if state.paused {
         return None;
     }
     if state.fuel < 0.001 {
-        let stack = slot(host, &state, FUEL)?;
-        let fuel = solid_fuel(host, &stack)?;
-        state.fuel = fuel;
-        replace_slot(host, &mut state, FUEL, stack.shrink(1))?;
+        refill(host, tier, &mut state)?;
         save(host, pos, state);
         return None;
     }
@@ -471,6 +524,9 @@ pub(crate) fn tick(
     match instruction {
         Instruction::TurnLeft => turn(host, level, pos, facing.turned(-1)),
         Instruction::TurnRight => turn(host, level, pos, facing.turned(1)),
+        Instruction::CatchFish => {
+            android_fishing::fish(host, level, pos, tier, rolls);
+        }
         Instruction::FarmForward | Instruction::FarmDown => {
             let direction = if instruction == Instruction::FarmDown {
                 [0, -1, 0]
@@ -729,7 +785,59 @@ mod tests {
     }
 
     #[test]
-    fn old_paper_program_fields_round_trip_and_keep_unknown_modes() {
+    fn liquid_and_nuclear_fuels_accept_only_their_paper_item_id_and_duration() {
+        let mut host = mod_api::testing::FakeHost::new();
+        host.registries
+            .resolve_items(
+                [
+                    "minecraft:lava_bucket",
+                    "minecraft:bucket",
+                    "minecraft:coal",
+                    "minecraft:player_head",
+                ]
+                .map(|id| Identifier::parse(id).unwrap()),
+            )
+            .unwrap();
+        for (tier, table) in [(Tier::Liquid, LIQUID_FUELS), (Tier::Nuclear, NUCLEAR_FUELS)] {
+            for &(kind, duration) in table {
+                let stack = kind.stack(&host, 1).unwrap();
+                assert_eq!(
+                    fuel_ticks(&host, tier, &stack),
+                    Some(duration),
+                    "{}",
+                    kind.id()
+                );
+                assert_eq!(
+                    fuel_ticks(
+                        &host,
+                        if tier == Tier::Liquid {
+                            Tier::Nuclear
+                        } else {
+                            Tier::Liquid
+                        },
+                        &stack
+                    ),
+                    None
+                );
+            }
+        }
+        let coal = Kind::Vanilla("minecraft:coal").stack(&host, 1).unwrap();
+        assert_eq!(fuel_ticks(&host, Tier::Solid, &coal), Some(8));
+        assert_eq!(fuel_ticks(&host, Tier::Liquid, &coal), None);
+
+        let mut device = Machine::new(1, Facing::South);
+        let lava = Kind::Vanilla("minecraft:lava_bucket").stack(&host, 1);
+        replace_slot(&host, &mut device, FUEL, lava).unwrap();
+        refill(&host, Tier::Liquid, &mut device).unwrap();
+        assert_eq!(device.fuel, 100.0);
+        assert!(slot(&host, &device, FUEL).is_none());
+        assert!(
+            Kind::Vanilla("minecraft:bucket").matches(&host, &slot(&host, &device, 0).unwrap())
+        );
+    }
+
+    #[test]
+    fn old_paper_program_fields_round_trip_and_keep_fishing_instructions() {
         let host = mod_api::testing::FakeHost::new();
         let metadata = toml::Table::from_iter([
             (

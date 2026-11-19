@@ -156,11 +156,8 @@ pub(crate) fn researches() -> impl Iterator<Item = &'static Research> {
         .chain([&crate::factory::produce_collector::RESEARCH])
         .chain([&crate::factory::tree_growth::RESEARCH])
         .chain(crate::factory::animal_machines::RESEARCHES)
-        .chain([
-            &crate::android_items::RESEARCH,
-            &crate::android_items::INTERFACES,
-            &crate::heated_pressure::PLASTIC_RESEARCH,
-        ])
+        .chain(crate::android_items::RESEARCHES.iter().copied())
+        .chain([&crate::heated_pressure::PLASTIC_RESEARCH])
         .chain(crate::factory::crop_growth::RESEARCHES)
         .chain(crate::factory::assemblers::RESEARCHES)
         .chain(crate::backpacks::RESEARCHES)
