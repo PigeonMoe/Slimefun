@@ -1295,7 +1295,15 @@ pub(crate) fn tick(
                 let status = if group.iter().all(|pos| active[pos].0.regulator()) {
                     Some(Status::EnergyEmpty)
                 } else {
-                    tick_energy(host, level, &dimension, &active, &group, rolls)
+                    tick_energy(
+                        host,
+                        level,
+                        &dimension,
+                        &active,
+                        &group,
+                        rolls,
+                        settings.solar_night_in_other_dimensions,
+                    )
                 };
                 (status, Status::EnergyConflict)
             }
@@ -1540,6 +1548,7 @@ fn tick_energy(
     active: &BTreeMap<Position, (&Node, u32)>,
     group: &[Position],
     rolls: &Rolls,
+    solar_night_in_other_dimensions: bool,
 ) -> Option<Status> {
     let time = level.day_time(host).map(|time| time.rem_euclid(24_000));
     let day = time.is_some_and(|time| !(12_300..=23_850).contains(&time))
@@ -1581,15 +1590,13 @@ fn tick_energy(
                     Component::SolarGenerator {
                         day: sun,
                         night: moon,
-                    } if dimension == "minecraft:overworld"
-                        && level.brightness(host, LightLayer::Sky, pos) == Some(15) =>
-                    {
-                        if day {
-                            sun
-                        } else {
-                            moon
-                        }
-                    }
+                    } => solar_power(
+                        dimension,
+                        day,
+                        [sun, moon],
+                        solar_night_in_other_dimensions,
+                        || level.brightness(host, LightLayer::Sky, pos) == Some(15),
+                    ),
                     _ => 0,
                 };
                 available += u64::from(energy);
@@ -1621,6 +1628,20 @@ fn tick_energy(
         reactors::apply_effects(host, level, pos, poll);
     }
     Some(status)
+}
+
+fn solar_power(
+    dimension: &str,
+    daytime: bool,
+    [sun, moon]: [u32; 2],
+    night_in_other_dimensions: bool,
+    open_sky: impl FnOnce() -> bool,
+) -> u32 {
+    if dimension != "minecraft:overworld" {
+        return if night_in_other_dimensions { moon } else { 0 };
+    }
+    let output = if daytime { sun } else { moon };
+    if output != 0 && open_sky() { output } else { 0 }
 }
 
 fn capacitor_tier(charge: u32, capacity: u32) -> usize {
@@ -2039,6 +2060,44 @@ mod tests {
         assert_eq!(
             capacity_updates(u64::MAX, &active, &[a, b]),
             vec![(a, 128), (b, 512)]
+        );
+    }
+
+    #[test]
+    fn solar_night_option_is_independent_of_sky_light_in_the_other_dimensions() {
+        let advanced = [128, 64];
+        assert_eq!(
+            solar_power("minecraft:overworld", false, [32, 0], true, || panic!()),
+            0
+        );
+        for dimension in ["minecraft:the_nether", "minecraft:the_end"] {
+            assert_eq!(
+                solar_power(dimension, true, advanced, false, || panic!()),
+                0
+            );
+            assert_eq!(
+                solar_power(dimension, true, advanced, true, || panic!()),
+                64
+            );
+            assert_eq!(
+                solar_power(dimension, false, advanced, true, || panic!()),
+                64
+            );
+            for day in [2, 8, 32] {
+                assert_eq!(solar_power(dimension, true, [day, 0], true, || panic!()), 0);
+            }
+        }
+        assert_eq!(
+            solar_power("minecraft:overworld", true, advanced, true, || true),
+            128
+        );
+        assert_eq!(
+            solar_power("minecraft:overworld", false, advanced, false, || true),
+            64
+        );
+        assert_eq!(
+            solar_power("minecraft:overworld", false, advanced, true, || false),
+            0
         );
     }
 

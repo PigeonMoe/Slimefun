@@ -82,6 +82,8 @@ Magician 可从当前注册表中选择相容附魔。默认仅对可接受该�
 
 本节描述开发分支的变更。使用当前 PigeonMoe Horizon Fork 构建以取得最新的设备和背包接口。
 
+在 `[solar-generator-4]` 中启用 `other-dimensions-use-night-energy` 后，第四档太阳能发电机可在下界和末地每次网络更新提供 64 J。默认关闭。在主世界仍按时间、天气和天空光照发电。
+
 电炉和电动矿物粉碎机各有三档，电动锭粉碎机有一档，加热压力舱有两档。这些机器通过能源调节器取电，保存输入、输出、剩余进度及缓冲电量。部分原料来源和其他电力机器仍待移植。
 
 研究 `multimeter` 后，可用万用表右击有储能容量的设备查看当前电量和容量。太阳能头盔使用 `solar_panel_and_helmet` 研究，默认在指定日照时间且眼部天空光为 15 时，每 10 刻给手持及穿戴的可充电物品各充 0.1 J。可在 `[solar-helmet]` 调整 `enable-armor-effects`、`armor-update-interval` 和 `charge-amount`。
