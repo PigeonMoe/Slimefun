@@ -54,15 +54,29 @@ fn book(host: &dyn Host) -> Option<ItemStack> {
     Some(item)
 }
 
+fn book_mode(host: &dyn Host, item: &ItemStack) -> Option<&'static str> {
+    if item.item().id(host) != "minecraft:enchanted_book" {
+        return None;
+    }
+    match item
+        .components()?
+        .as_nbt()
+        .get(&"minecraft:custom_data".into())?
+        .get("PublicBukkitValues")?
+        .get(GUIDE_KEY)?
+    {
+        Tag::String(mode) if mode.to_string_lossy() == SURVIVAL => Some(SURVIVAL),
+        Tag::String(mode) if mode.to_string_lossy() == "CHEAT_MODE" => Some("CHEAT_MODE"),
+        _ => None,
+    }
+}
+
 fn is_book(host: &dyn Host, item: &ItemStack) -> bool {
-    item.item().id(host) == "minecraft:enchanted_book"
-        && matches!(
-            item.components()
-                .and_then(|components| components.as_nbt().get(&"minecraft:custom_data".into()))
-                .and_then(|custom| custom.get("PublicBukkitValues"))
-                .and_then(|values| values.get(GUIDE_KEY)),
-            Some(Tag::String(mode)) if mode.to_string_lossy() == SURVIVAL
-        )
+    book_mode(host, item) == Some(SURVIVAL)
+}
+
+pub(crate) fn is_guide_book(host: &dyn Host, item: &ItemStack) -> bool {
+    book_mode(host, item).is_some()
 }
 
 pub(crate) fn research_topics() -> impl Iterator<Item = &'static Research> {
@@ -845,6 +859,7 @@ mod tests {
         give(&mut host, player);
         let book = host.players.get(1).unwrap().slots.get(&0).unwrap();
         assert!(is_book(&host, book));
+        assert!(is_guide_book(&host, book));
         assert_eq!(
             book.components()
                 .unwrap()
@@ -859,6 +874,7 @@ mod tests {
             .set_components(book.components().unwrap().as_nbt().clone())
             .unwrap();
         assert!(!is_book(&host, &counterfeit));
+        assert!(!is_guide_book(&host, &counterfeit));
         let mut wrong = book.clone();
         wrong
             .apply_components(&Compound::from([(
@@ -870,6 +886,7 @@ mod tests {
             )]))
             .unwrap();
         assert!(!is_book(&host, &wrong));
+        assert!(is_guide_book(&host, &wrong));
     }
 
     #[test]

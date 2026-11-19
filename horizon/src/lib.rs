@@ -1369,7 +1369,7 @@ impl Hooks for Slimefun {
 
     fn player_recipe_result(
         &self,
-        _: &dyn mod_api::Host,
+        host: &dyn mod_api::Host,
         event: &mut mod_api::PlayerRecipeResultEvent<'_>,
     ) -> Flow {
         let blocked = match event.menu {
@@ -1386,6 +1386,11 @@ impl Hooks for Slimefun {
                 .get(2)
                 .and_then(Option::as_ref)
                 .is_some_and(|stack| !items::usable_in_workbench(stack)),
+            "minecraft:grindstone" | "minecraft:cartography_table" => event
+                .inputs
+                .iter()
+                .flatten()
+                .any(|stack| vanilla_station_blocks(host, stack)),
             _ => false,
         };
         if blocked {
@@ -1393,6 +1398,26 @@ impl Hooks for Slimefun {
         } else {
             Flow::Continue
         }
+    }
+
+    fn anvil_craft_pre(
+        &self,
+        host: &mut dyn ServerHost,
+        event: &mut mod_api::AnvilCraftPreEvent<'_>,
+    ) -> Flow {
+        if ![event.craft.left.as_ref(), event.craft.right.as_ref()]
+            .into_iter()
+            .flatten()
+            .any(|stack| vanilla_station_blocks(host, stack))
+        {
+            return Flow::Continue;
+        }
+        if let Some(player) = host.player(event.player) {
+            let mut warning = Text::literal("You cannot use Slimefun items in an anvil!");
+            warning.style.color = Some("dark_red".into());
+            let _ = player.tell(host, warning);
+        }
+        Flow::Cancel
     }
 
     fn player_enchant_item_pre(
@@ -1675,6 +1700,10 @@ impl Hooks for Slimefun {
         self.industrial_miners.clear(host);
         self.rolls.clear();
     }
+}
+
+fn vanilla_station_blocks(host: &dyn mod_api::Host, item: &mod_api::ItemStack) -> bool {
+    items::item_id(item).is_some() || guide::is_guide_book(host, item)
 }
 
 fn describe_recipe(id: &str, double_ores: bool) -> Vec<String> {
