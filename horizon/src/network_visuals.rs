@@ -82,7 +82,7 @@ fn color(value: impl Into<String>, name: &str, bold: bool) -> Text {
     text
 }
 
-fn compact(value: u64) -> String {
+pub(crate) fn compact(value: u64) -> String {
     for (divisor, suffix) in [(1_000_000_000, 'B'), (1_000_000, 'M'), (1_000, 'K')] {
         if value >= divisor {
             let decimal = format!("{:.2}", value as f64 / divisor as f64);

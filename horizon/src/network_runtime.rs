@@ -910,6 +910,18 @@ pub(crate) fn open_scanner(
     true
 }
 
+pub(crate) use network_visuals::compact as compact_energy;
+
+pub(crate) fn energy_buffer(host: &mut dyn ServerHost, level: LevelRef, pos: Position) -> Option<(u32, u32)> {
+    let state = block_data(host, level, pos)?;
+    let capacity = match Component::for_item(&state.id)? {
+        Component::Capacitor(capacity) | Component::ElectricMachine { capacity, .. }
+        | Component::GpsTransmitter { capacity } | Component::FuelGenerator { capacity, .. } => capacity,
+        _ => return None,
+    };
+    (capacity > 0).then_some((state.charge.min(capacity), capacity))
+}
+
 pub(crate) fn charge(host: &mut dyn ServerHost, level: LevelRef, pos: Position) -> Option<u32> {
     block_data(host, level, pos).map(|data| data.charge)
 }

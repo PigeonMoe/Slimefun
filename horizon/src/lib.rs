@@ -37,6 +37,7 @@ mod crucible;
 mod electric_processing;
 mod enchantment_machines;
 mod enhanced_furnaces;
+mod energy_gadgets;
 mod factory;
 mod food_machines;
 mod fuel_generators;
@@ -81,6 +82,7 @@ struct Slimefun {
     composters: composter::Composters,
     crucibles: crucible::Crucibles,
     industrial_miners: industrial_miner::Miners,
+    solar_helmet: energy_gadgets::SolarHelmet,
     settings: Mutex<Settings>,
     rolls: Rolls,
     chest: Mutex<Option<ItemKey>>,
@@ -104,6 +106,7 @@ impl Default for Slimefun {
             composters: composter::Composters::default(),
             crucibles: crucible::Crucibles::default(),
             industrial_miners: industrial_miner::Miners::default(),
+            solar_helmet: energy_gadgets::SolarHelmet::default(),
             settings: Mutex::new(Settings::default()),
             rolls: Rolls::default(),
             chest: Mutex::new(None),
@@ -133,6 +136,7 @@ impl Slimefun {
             output_chest::set_enabled(true);
             self.crucibles.configure(false);
             self.industrial_miners.configure(None);
+            self.solar_helmet.configure(None);
             ancient_altar::configure(None);
         }
         let Ok(table) = config.text.parse::<toml::Table>() else {
@@ -153,6 +157,7 @@ impl Slimefun {
         );
         self.transport.configure(&table);
         self.industrial_miners.configure(Some(&table));
+        self.solar_helmet.configure(table.get("solar-helmet"));
         settings.book_binder = book_binder::Rules::read_config(&table);
         if let Some(value) = table
             .get("miner-android")
@@ -666,6 +671,14 @@ impl Hooks for Slimefun {
         ) {
             return Flow::Continue;
         }
+        if *event.use_item != TriState::False
+            && let Some(held) = event.click.stack
+            && let Some(level) = player.entity().level(host)
+            && energy_gadgets::measure(host, player, level, event.click.pos, held)
+        {
+            *event.cancellation_result = InteractionResult::Consume;
+            return Flow::Cancel;
+        }
         if event.click.hand == Hand::Main
             && let Some(level) = player.entity().level(host)
             && (auto_crafter::use_at(
@@ -1054,6 +1067,7 @@ impl Hooks for Slimefun {
             hologram_projector::tick(host, event.level);
             auto_crafter::refresh(host, event.level);
             armor_forge::tick_equipment(host, event.level);
+            self.solar_helmet.tick(host, event.level);
             self.bee_wings.tick(host, event.level);
             self.transport.tick(&self.networks, host, event.level);
         }

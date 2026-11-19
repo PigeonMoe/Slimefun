@@ -207,17 +207,32 @@ pub(crate) fn charge_lore(current: f32, maximum: f32) -> Tag {
 }
 
 pub(crate) fn discharge(host: &dyn Host, stack: &ItemStack, amount: u32) -> Option<ItemStack> {
-    match update_charge(host, stack, Some(amount))? {
+    match update_charge(host, stack, Change::Remove(amount))? {
         Action::Charge(stack) => Some(stack),
         _ => None,
     }
 }
 
 pub(crate) fn action(host: &dyn Host, stack: &ItemStack) -> Option<Action> {
-    update_charge(host, stack, None)
+    update_charge(host, stack, Change::Add(COST as f32 / 2.0))
 }
 
-fn update_charge(host: &dyn Host, stack: &ItemStack, discharge: Option<u32>) -> Option<Action> {
+pub(crate) fn recharge(host: &dyn Host, stack: &ItemStack, amount: f32) -> Option<ItemStack> {
+    if !amount.is_finite() || amount <= 0.0 {
+        return None;
+    }
+    match update_charge(host, stack, Change::Add(amount))? {
+        Action::Charge(stack) => Some(stack),
+        _ => None,
+    }
+}
+
+enum Change {
+    Add(f32),
+    Remove(u32),
+}
+
+fn update_charge(host: &dyn Host, stack: &ItemStack, change: Change) -> Option<Action> {
     if stack.count() != 1 {
         return None;
     }
@@ -255,11 +270,11 @@ fn update_charge(host: &dyn Host, stack: &ItemStack, discharge: Option<u32>) -> 
         None => first.map_or(0.0, |(_, charge)| charge),
         _ => return None,
     };
-    let charge = match discharge {
-        Some(amount) if current >= amount as f32 => current - amount as f32,
-        Some(_) => return None,
-        None if current >= maximum => return Some(Action::ReturnFull),
-        None => (current + COST as f32 / 2.0).min(maximum),
+    let charge = match change {
+        Change::Remove(amount) if current >= amount as f32 => current - amount as f32,
+        Change::Remove(_) => return None,
+        Change::Add(_) if current >= maximum => return Some(Action::ReturnFull),
+        Change::Add(amount) => (current + amount).min(maximum),
     };
     // Paper rounds the f32 charge and writes the same value to PDC and lore.
     let charge = ((f64::from(charge) * 100.0).round() / 100.0) as f32;
@@ -361,6 +376,24 @@ mod tests {
         };
         assert_charge(&charged, 50.0, 50.0);
         assert!(matches!(action(&host, &charged), Some(Action::ReturnFull)));
+    }
+
+    #[test]
+    fn solar_recharge_preserves_fractional_paper_energy_and_stops_at_capacity() {
+        let host = host();
+        let device = paper_stack(
+            &host,
+            "PORTABLE_TELEPORTER",
+            "minecraft:compass",
+            Some(49.85),
+            charge_lore(0.0, 50.0),
+        );
+        let first = recharge(&host, &device, 0.1).unwrap();
+        assert_charge(&first, 49.95, 50.0);
+        let full = recharge(&host, &first, 0.1).unwrap();
+        assert_charge(&full, 50.0, 50.0);
+        assert!(recharge(&host, &full, 0.1).is_none());
+        assert!(recharge(&host, &device, f32::NAN).is_none());
     }
 
     #[test]

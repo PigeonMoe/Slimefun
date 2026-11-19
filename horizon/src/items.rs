@@ -111,6 +111,9 @@ impl SlimefunItem {
                 text("", "white", false), text("Projects an Editable Hologram", "white", false),
             ]));
         }
+        if let Some(lore) = crate::energy_gadgets::lore(self.id) {
+            components.insert("minecraft:lore".into(), lore);
+        }
         if let Some(lore) = crate::android_items::lore(self.id) {
             components.insert("minecraft:lore".into(), lore);
         }
