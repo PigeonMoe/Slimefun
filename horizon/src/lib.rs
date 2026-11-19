@@ -35,6 +35,7 @@ mod composter;
 mod compressor;
 mod crucible;
 mod electric_processing;
+mod elemental_staves;
 mod enchantment_machines;
 mod enhanced_furnaces;
 mod energy_gadgets;
@@ -52,6 +53,7 @@ mod heated_pressure;
 mod hologram_projector;
 mod ignition_chamber;
 mod industrial_miner;
+mod item_clicks;
 mod infused;
 mod items;
 mod juice;
@@ -94,6 +96,7 @@ struct Slimefun {
     solar_helmet: energy_gadgets::SolarHelmet,
     magnets: infused::Magnets,
     settings: Mutex<Settings>,
+    item_clicks: item_clicks::ItemClicks,
     rolls: Rolls,
     chest: Mutex<Option<ItemKey>>,
     networks: Arc<Mutex<network_runtime::Networks>>,
@@ -120,6 +123,7 @@ impl Default for Slimefun {
             solar_helmet: energy_gadgets::SolarHelmet::default(),
             magnets: infused::Magnets::default(),
             settings: Mutex::new(Settings::default()),
+            item_clicks: item_clicks::ItemClicks::default(),
             rolls: Rolls::default(),
             chest: Mutex::new(None),
             networks: Arc::default(),
@@ -172,6 +176,7 @@ impl Slimefun {
         self.industrial_miners.configure(Some(&table));
         self.solar_helmet.configure(table.get("solar-helmet"));
         settings.book_binder = book_binder::Rules::read_config(&table);
+        settings.wind_power = elemental_staves::wind_power(table.get("wind-staff"));
         enchantment_machines::configure(&table);
         settings.infused = infused::Settings::read_config(&table);
         if let Some(value) = table
@@ -347,7 +352,7 @@ impl Hooks for Slimefun {
             "slimefun",
             ConfigKind::Server,
             &format!("{}{}",
-            "double-ores = true\ncrucible-allow-water-in-nether = false\nlegacy-ore-washer = false\nlegacy-dust-washer = false\nlegacy-ore-grinder = true\nelectric-gold-pan-override-output-limit = [false, false, false]\nfreezer-use-vanilla-ratios = [false, false, false]\nfire-breaking-chance = 34\noutput-chest-enabled = true\ndrop-from-golems = true\ngolem-drop-chance = 75\n\n[URID]\ncustom-ticker-delay = 10\n\n[networks]\nmax-size = 200\nenable-visualizer = true\ncargo-ticker-delay = 0\n\n[book-binder]\nbypass-vanilla-max-level = false\nhas-custom-max-level = false\ncustom-max-level = 15\n\n[portable-teleporter]\nteleportation-cost = 10\n\n[produce-collector]\nrange = 2\n\n[ancient-altar]\nstep-delay = 8\n\n[miner-android]\nreduced-block-updates = true\n\n[industrial-miner]\ncan-mine-ancient-debris = false\ncan-mine-deepslate-ores = true\n\n[advanced-industrial-miner]\ncan-mine-ancient-debris = false\ncan-mine-deepslate-ores = true\n",
+            "double-ores = true\ncrucible-allow-water-in-nether = false\nlegacy-ore-washer = false\nlegacy-dust-washer = false\nlegacy-ore-grinder = true\nelectric-gold-pan-override-output-limit = [false, false, false]\nfreezer-use-vanilla-ratios = [false, false, false]\nfire-breaking-chance = 34\noutput-chest-enabled = true\ndrop-from-golems = true\ngolem-drop-chance = 75\n\n[URID]\ncustom-ticker-delay = 10\n\n[networks]\nmax-size = 200\nenable-visualizer = true\ncargo-ticker-delay = 0\n\n[wind-staff]\npower = 4\n\n[book-binder]\nbypass-vanilla-max-level = false\nhas-custom-max-level = false\ncustom-max-level = 15\n\n[portable-teleporter]\nteleportation-cost = 10\n\n[produce-collector]\nrange = 2\n\n[ancient-altar]\nstep-delay = 8\n\n[miner-android]\nreduced-block-updates = true\n\n[industrial-miner]\ncan-mine-ancient-debris = false\ncan-mine-deepslate-ores = true\n\n[advanced-industrial-miner]\ncan-mine-ancient-debris = false\ncan-mine-deepslate-ores = true\n",
                 enchantment_machines::default_config()),
         ));
     }
@@ -701,12 +706,19 @@ impl Hooks for Slimefun {
         let Some(player) = host.player(event.click.player) else {
             return Flow::Continue;
         };
-        if *event.use_item != TriState::False
-            && let Some(held) = event.click.stack
-            && medical::use_supply(host, player, event.click.hand, held)
-        {
-            *event.cancellation_result = InteractionResult::Consume;
-            return Flow::Cancel;
+        if *event.use_item != TriState::False && let Some(held) = event.click.stack {
+            if medical::use_supply(host, player, event.click.hand, held) {
+                self.item_clicks
+                    .record_block_use(host, event.click.player, event.click.hand, held);
+                *event.cancellation_result = InteractionResult::Consume;
+                return Flow::Cancel;
+            }
+            if elemental_staves::use_staff(host, player, held, || {
+                self.settings.lock().unwrap().wind_power
+            }) {
+                self.item_clicks
+                    .record_block_use(host, event.click.player, event.click.hand, held);
+            }
         }
         if !matches!(
             player.game_mode(host),
@@ -886,8 +898,17 @@ impl Hooks for Slimefun {
         let Some(player) = host.player(event.click.player) else {
             return Flow::Continue;
         };
-        if medical::HEAVY_CREAM.matches(host, event.click.stack)
+        if self.item_clicks.consume_fallthrough(
+            host,
+            event.click.player,
+            event.click.hand,
+            event.click.stack,
+        )
+            || medical::HEAVY_CREAM.matches(host, event.click.stack)
             || medical::use_supply(host, player, event.click.hand, event.click.stack)
+            || elemental_staves::use_staff(host, player, event.click.stack, || {
+                self.settings.lock().unwrap().wind_power
+            })
         {
             *event.cancellation_result = InteractionResult::Consume;
             return Flow::Cancel;
@@ -942,6 +963,7 @@ impl Hooks for Slimefun {
         _: &mut dyn ServerHost,
         event: &mut mod_api::PlayerLoggedOutEvent<'_>,
     ) {
+        self.item_clicks.logout(event.player);
         self.bee_wings.stop(event.player);
         self.gps.logout(event.player);
         self.androids.logout(event.player);
@@ -1218,6 +1240,7 @@ impl Hooks for Slimefun {
     }
 
     fn server_stopping(&self, host: &mut dyn ServerHost, _: &mut ServerStoppingEvent) {
+        self.item_clicks.clear();
         self.soulbound_rituals.clear();
         self.block_placers.clear();
         self.radiation.clear();

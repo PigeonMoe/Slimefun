@@ -131,6 +131,7 @@ pub(crate) fn crafting() -> impl Iterator<Item = &'static CraftingRecipe> {
         .chain(crate::backpacks::CRAFTING)
         .chain(crate::food_machines::CRAFTING)
         .chain(crate::medical::CRAFTING)
+        .chain(crate::elemental_staves::CRAFTING)
         .chain([&crate::auto_brewer::CRAFTING])
         .chain([&crate::factory::fluid_pump::CRAFTING])
         .chain([&crate::factory::charging_bench::CRAFTING])
@@ -197,6 +198,7 @@ pub(crate) fn researches() -> impl Iterator<Item = &'static Research> {
             &crate::factory::experience_collector::FLASK_RESEARCH,
         ])
         .chain(crate::enchantment_machines::RESEARCHES)
+        .chain(crate::elemental_staves::RESEARCHES.iter().copied())
         .chain([&crate::rainbow::RESEARCH])
         .chain(crate::auto_anvil::RESEARCHES)
         .chain(crate::enhanced_furnaces::RESEARCHES)
@@ -207,6 +209,7 @@ pub(crate) fn magic_crafting() -> impl Iterator<Item = &'static CraftingRecipe> 
     [&crate::factory::experience_collector::FLASK_RECIPE]
         .into_iter()
         .chain(crate::backpacks::MAGIC_CRAFTING)
+        .chain(crate::elemental_staves::MAGIC_CRAFTING)
         .chain(crate::soulbound_gear::MAGIC_RECIPES)
         .chain(crate::ancient_altar::MAGIC_CRAFTING)
         .chain([&crate::infused::MAGIC])

@@ -188,6 +188,7 @@ impl SlimefunItem {
         crate::soulbound_gear::decorate(self.id, &mut components);
         crate::rainbow::decorate(self.id, &mut components);
         crate::medical::decorate(self.id, &mut components);
+        crate::elemental_staves::decorate(self.id, &mut components);
         crate::armor_forge::decorate(self.id, &mut components);
         crate::auto_crafter::decorate(self.id, &mut components);
         if let Some(texture) = &self.texture {

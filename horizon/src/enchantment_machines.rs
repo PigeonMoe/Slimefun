@@ -387,6 +387,9 @@ fn disenchant(
     rules: &MachineRules,
     viewed: bool,
 ) -> Attempt<(Vec<ItemStack>, u32)> {
+    if !crate::elemental_staves::can_disenchant(host, target) {
+        return None;
+    }
     let mut applied = levels(host, target, DIRECT)?;
     let selected = match select_levels(applied.clone(), rules, viewed, |_| true)? {
         Ok(selected) => selected,

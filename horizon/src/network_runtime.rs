@@ -207,6 +207,7 @@ impl ItemPart for NetworkPlacement {
                 reactors::NEPTUNIUM,
                 crate::network_recipes::ANDROID_MEMORY_CORE,
                 crate::infused::INFUSED_MAGNET,
+                crate::elemental_staves::LAVA_CRYSTAL,
                 crate::portable_crafter::PORTABLE_CRAFTER,
                 crate::tape_measure::TAPE_MEASURE,
                 trash::PORTABLE_DUSTBIN,
