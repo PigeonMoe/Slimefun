@@ -203,6 +203,9 @@ impl SlimefunItem {
         }
         crate::spawner_repair::decorate(self.id, &mut components);
         crate::magic_weapons::decorate(self.id, &mut components);
+        if self.id == crate::beheading::SWORD_OF_BEHEADING.id() {
+            components.insert("minecraft:lore".into(), crate::beheading::lore());
+        }
         crate::ore_tools::decorate(self.id, &mut components);
         crate::jet_boots::decorate(self.id, &mut components);
         crate::jetpack::decorate(self.id, &mut components);

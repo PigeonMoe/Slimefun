@@ -28,6 +28,7 @@ mod auto_brewer;
 mod auto_crafter;
 mod backpacks;
 mod bee_wings;
+mod beheading;
 mod block_placer;
 mod book_binder;
 mod circuits;
@@ -116,6 +117,7 @@ struct Slimefun {
     smelters_pickaxes: smelters_pickaxe::SmeltersPickaxes,
     spawners: spawner_repair::Spawners,
     magic_weapons: magic_weapons::Weapons,
+    beheading: beheading::Beheading,
     ore_tools: ore_tools::OreTools,
     rolls: Rolls,
     chest: Mutex<Option<ItemKey>>,
@@ -152,6 +154,7 @@ impl Default for Slimefun {
             smelters_pickaxes: smelters_pickaxe::SmeltersPickaxes::default(),
             spawners: spawner_repair::Spawners::default(),
             magic_weapons: magic_weapons::Weapons::default(),
+            beheading: beheading::Beheading::default(),
             ore_tools: ore_tools::OreTools::default(),
             rolls: Rolls::default(),
             chest: Mutex::new(None),
@@ -185,6 +188,7 @@ impl Slimefun {
             self.crucibles.configure(false);
             self.industrial_miners.configure(None);
             self.solar_helmet.configure(None);
+            self.beheading.configure(None);
             ancient_altar::configure(None);
         }
         let Ok(table) = config.text.parse::<toml::Table>() else {
@@ -192,6 +196,7 @@ impl Slimefun {
         };
         self.guide.configure(table.get("guide"), table.get("researches"));
         self.ore_tools.configure(&table);
+        self.beheading.configure(table.get("sword-of-beheading"));
         self.radiation.configure(table.get("radiation"));
         self.block_placers.configure(
             table
@@ -401,9 +406,10 @@ impl Hooks for Slimefun {
         event.configs.push(Config::new(
             "slimefun",
             ConfigKind::Server,
-            &format!("{}{}",
+            &format!("{}{}{}",
             "double-ores = true\ncrucible-allow-water-in-nether = false\nlegacy-ore-washer = false\nlegacy-dust-washer = false\nlegacy-ore-grinder = true\nelectric-gold-pan-override-output-limit = [false, false, false]\nfreezer-use-vanilla-ratios = [false, false, false]\nfire-breaking-chance = 34\noutput-chest-enabled = true\ndrop-from-golems = true\ngolem-drop-chance = 75\n\n[guide]\nreceive-on-first-join = true\n\n[researches]\nfree-in-creative-mode = true\ndisable-learning-animation = false\n\n[URID]\ncustom-ticker-delay = 10\n\n[networks]\nmax-size = 200\nenable-visualizer = true\ncargo-ticker-delay = 0\n\n[wind-staff]\npower = 4\n\n[book-binder]\nbypass-vanilla-max-level = false\nhas-custom-max-level = false\ncustom-max-level = 15\n\n[portable-teleporter]\nteleportation-cost = 10\n\n[produce-collector]\nrange = 2\n\n[pickaxe-of-vein-mining]\nmax-blocks = 16\n\n[pickaxe-of-the-seeker]\nmax-range = 5\n\n[blade-of-vampires]\nchance = 45\n\n[reinforced-spawner]\nallow-spawn-eggs = true\n\n[ancient-altar]\nstep-delay = 8\n\n[miner-android]\nreduced-block-updates = true\n\n[industrial-miner]\ncan-mine-ancient-debris = false\ncan-mine-deepslate-ores = true\n\n[advanced-industrial-miner]\ncan-mine-ancient-debris = false\ncan-mine-deepslate-ores = true\n",
-                enchantment_machines::default_config()),
+                enchantment_machines::default_config(),
+                beheading::DEFAULT_CONFIG),
         ));
     }
 
@@ -613,6 +619,7 @@ impl Hooks for Slimefun {
     ) -> Flow {
         let settings = *self.settings.lock().unwrap();
         circuits::add_golem_drop(host, event, settings, &self.rolls);
+        self.beheading.drop_head(host, event, &self.rolls);
         Flow::Continue
     }
 
