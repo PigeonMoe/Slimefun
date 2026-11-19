@@ -60,6 +60,7 @@ mod items;
 mod jet_boots;
 mod jetpack;
 mod juice;
+mod lumber_axe;
 mod machine;
 mod magic_eye;
 mod medical;
@@ -402,6 +403,9 @@ impl Hooks for Slimefun {
         {
             return Flow::Cancel;
         }
+        if lumber_axe::allow_break(host, player) == Flow::Cancel {
+            return Flow::Cancel;
+        }
         self.smelters_pickaxes.prepare(host, player, level, event, &self.rolls)
     }
 
@@ -411,6 +415,7 @@ impl Hooks for Slimefun {
         event: &mut mod_api::PlayerDestroyedBlockEvent,
     ) {
         self.smelters_pickaxes.destroyed(host, event, &self.rolls);
+        lumber_axe::destroyed(host, event);
     }
 
     fn block_drops(&self, level: &dyn LevelHost, event: &mut BlockDropsEvent<'_>) -> Flow {
@@ -774,6 +779,13 @@ impl Hooks for Slimefun {
             Some(GameMode::Survival | GameMode::Creative)
         ) {
             return Flow::Continue;
+        }
+        if *event.use_item != TriState::False
+            && let Some(held) = event.click.stack
+            && lumber_axe::strip(host, player, held, event.click.pos) == Flow::Cancel
+        {
+            *event.cancellation_result = InteractionResult::Fail;
+            return Flow::Cancel;
         }
         if *event.use_item != TriState::False
             && let Some(held) = event.click.stack

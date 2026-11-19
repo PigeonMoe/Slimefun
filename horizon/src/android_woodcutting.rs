@@ -24,19 +24,25 @@ const NEIGHBORS: [Position; 10] = [
 ];
 
 /// Paper examines each connected log in a depth-first walk and cuts the last one.
-fn last_log(start: Position, mut is_log: impl FnMut(Position) -> bool) -> Option<Position> {
-    let mut found = BTreeSet::new();
+fn last_log(start: Position, is_log: impl FnMut(Position) -> bool) -> Option<Position> {
+    connected_logs(start, MAX_REACH, is_log).pop()
+}
+
+pub(crate) fn connected_logs(
+    start: Position,
+    limit: usize,
+    mut is_log: impl FnMut(Position) -> bool,
+) -> Vec<Position> {
+    let mut visited = BTreeSet::new();
     let mut pending = vec![start];
-    let mut last = None;
-    while let Some(pos) = pending.pop() {
-        if found.contains(&pos) || !is_log(pos) {
+    let mut logs = Vec::new();
+    while logs.len() < limit
+        && let Some(pos) = pending.pop()
+    {
+        if !visited.insert(pos) || !is_log(pos) {
             continue;
         }
-        found.insert(pos);
-        last = Some(pos);
-        if found.len() == MAX_REACH {
-            break;
-        }
+        logs.push(pos);
         pending.extend(
             NEIGHBORS
                 .iter()
@@ -44,7 +50,7 @@ fn last_log(start: Position, mut is_log: impl FnMut(Position) -> bool) -> Option
                 .filter_map(|&face| android_machine::offset(pos, face)),
         );
     }
-    last
+    logs
 }
 
 pub(crate) fn chop(
