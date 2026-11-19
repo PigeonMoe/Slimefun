@@ -503,6 +503,11 @@ fn ingredient(host: &dyn Host, pedestal: &Compound) -> Option<ItemStack> {
     ItemStack::from_nbt(host, nbt).filter(|stack| stack.count() == 1)
 }
 
+pub(crate) fn marked(host: &dyn Host, entity: mod_api::BlockEntityRef) -> bool {
+    host.block_entity_saved_attachment(entity, DEVICE.namespace, DEVICE.name)
+        .is_some()
+}
+
 pub(crate) fn is_pedestal(host: &dyn Host, level: LevelRef, pos: Pos) -> bool {
     if !level
         .block_state(host, pos)

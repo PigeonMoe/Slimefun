@@ -3,7 +3,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use mod_api::{
-    AttachmentCodec, AttachmentError, AttachmentType, BlockDropsEvent, Compound, Holder,
+    AttachmentCodec, AttachmentError, AttachmentType, BlockDropsEvent, Compound, Holder, Host,
     HostTransaction, ITEMS, ItemKey, ItemPart, ItemStack, LevelHost, LevelRef,
     OnBlockPlacedByEvent, ServerHost, Tag,
 };
@@ -243,10 +243,16 @@ pub(crate) fn restore_drop(level: &dyn LevelHost, event: &mut BlockDropsEvent<'_
     }
 }
 
+pub(crate) fn live_marker(host: &dyn Host, entity: mod_api::BlockEntityRef) -> bool {
+    placed(host.block_entity_saved_attachment(entity, MARKER.namespace, MARKER.name))
+}
+
+fn placed(data: Option<Compound>) -> bool {
+    data.is_some_and(|marker| marker.get(&"placed".into()) == Some(&Tag::Byte(1)))
+}
+
 pub(crate) fn marked(level: &dyn LevelHost, entity: mod_api::BlockEntityRef) -> bool {
-    level
-        .block_entity_saved_attachment(entity, MARKER.namespace, MARKER.name)
-        .is_some_and(|marker| marker.get(&"placed".into()) == Some(&Tag::Byte(1)))
+    placed(level.block_entity_saved_attachment(entity, MARKER.namespace, MARKER.name))
 }
 
 fn adjacent([x, y, z]: [i32; 3]) -> impl Iterator<Item = [i32; 3]> {

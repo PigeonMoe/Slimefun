@@ -978,6 +978,17 @@ pub(crate) fn ignition_chamber_at(
         && block_data(host, level, pos).is_some_and(|data| data.id == chamber.id())
 }
 
+pub(crate) fn has_block_marker(host: &mut dyn ServerHost, level: LevelRef, pos: Position) -> bool {
+    block_data(host, level, pos).is_some()
+        || host.block_entity(level, pos).is_some_and(|entity| {
+            host.block_entity_saved_attachment(entity, NETWORK_STATE.namespace, NETWORK_STATE.name)
+                .is_some()
+                || crate::block_placer::marked(host, entity)
+                || crate::output_chest::live_marker(host, entity)
+                || crate::ancient_altar::marked(host, entity)
+        })
+}
+
 fn block_data(host: &mut dyn ServerHost, level: LevelRef, pos: Position) -> Option<BlockData> {
     if !level.in_place(host) {
         return None;

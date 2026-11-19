@@ -100,6 +100,10 @@ fn decode_owner(data: &Compound) -> Option<Option<u128>> {
     }
 }
 
+pub(crate) fn marked(host: &dyn Host, entity: BlockEntityRef) -> bool {
+    marker(host, entity).is_some()
+}
+
 fn marker(host: &dyn Host, entity: BlockEntityRef) -> Option<Option<u128>> {
     decode_owner(&host.block_entity_saved_attachment(entity, OWNER.namespace, OWNER.name)?)
 }
