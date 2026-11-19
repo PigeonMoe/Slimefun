@@ -449,6 +449,7 @@ enum InventoryKind {
     InputOnly,
     Assembler(&'static crate::factory::assemblers::Assembler),
     Factory { smeltery: bool },
+    HeatedPressure,
     Smelter(&'static str),
     Brewer,
 }
@@ -479,7 +480,7 @@ impl InventoryKind {
             Self::GeoMiner => 0..size,
             Self::InputOnly => 0..0,
             Self::Assembler(_) => 0..0,
-            Self::Factory { .. } => 2..4.min(size),
+            Self::Factory { .. } | Self::HeatedPressure => 2..4.min(size),
             Self::Smelter(_) => 2..3.min(size),
             Self::Brewer => 0..3.min(size),
         }
@@ -488,7 +489,7 @@ impl InventoryKind {
     fn insert(self, host: &dyn ServerHost, size: usize, stack: &ItemStack) -> Range<usize> {
         match self {
             Self::Ordinary | Self::Chest | Self::TrashCan => 0..size,
-            Self::Factory { smeltery: true } => 0..0,
+            Self::Factory { smeltery: true } | Self::HeatedPressure => 0..0,
             Self::Factory { smeltery: false } => 0..2.min(size),
             Self::ReactorPort => {
                 if crate::factory::reactors::coolant(host, stack) {
@@ -613,6 +614,12 @@ fn attached_inventory(
         }
         if crate::factory::reactors::reactor(&id).is_some() {
             return None;
+        }
+        if matches!(
+            id.as_str(),
+            "HEATED_PRESSURE_CHAMBER" | "HEATED_PRESSURE_CHAMBER_2"
+        ) {
+            return Some((pos, InventoryKind::HeatedPressure));
         }
         let smeltery = crate::factory::ElectricMachine::for_item(&id)
             .is_some_and(crate::factory::ElectricMachine::is_smeltery);
@@ -763,6 +770,28 @@ fn smeltery_slots(
         .collect()
 }
 
+// Paper uses its amount-sensitive similarity check here, so only
+// existing stacks at least as large as this delivery participate in the sort.
+fn pressure_slots(
+    size: usize,
+    incoming: u32,
+    mut matching: impl FnMut(usize) -> Option<u32>,
+) -> Vec<usize> {
+    let slots = 0..2.min(size);
+    let mut preferred: Vec<_> = slots
+        .clone()
+        .filter_map(|slot| {
+            let count = matching(slot)?;
+            (count >= incoming).then_some((slot, count))
+        })
+        .collect();
+    if preferred.is_empty() {
+        return slots.collect();
+    }
+    preferred.sort_by_key(|&(_, count)| count);
+    preferred.into_iter().map(|(slot, _)| slot).collect()
+}
+
 fn move_to_first(
     host: &mut dyn ServerHost,
     level: LevelRef,
@@ -787,7 +816,7 @@ fn move_to_first(
             .slot_position(host, level, input.inventory, source_size, source_slot)
             .ok_or(())?;
         let mut endpoint_allowed = BTreeMap::new();
-        let smeltery = match output.kind {
+        let preferred = match output.kind {
             InventoryKind::Factory { smeltery: true } => smeltery_slots(size, |slot| {
                 let resource = destination.resource(host, slot)?;
                 let held = destination.amount(host, slot);
@@ -795,9 +824,15 @@ fn move_to_first(
                 similar(host, &current, stack, true)
                     .then(|| (held, destination.capacity(host, slot, &resource)))
             }),
+            InventoryKind::HeatedPressure => pressure_slots(size, stack.count(), |slot| {
+                let resource = destination.resource(host, slot)?;
+                let count = destination.amount(host, slot);
+                let current = resource.to_stack(count)?;
+                similar(host, &current, stack, true).then_some(count)
+            }),
             _ => Vec::new(),
         };
-        for slot in smeltery
+        for slot in preferred
             .into_iter()
             .chain(output.kind.insert(host, size, stack))
         {
@@ -1020,6 +1055,89 @@ mod tests {
             [0, 4]
         );
         assert!(smeltery_slots(8, |slot| (slot == 4).then_some((64, 64))).is_empty());
+    }
+
+    #[test]
+    fn a_heated_pressure_chamber_preserves_the_empty_second_ingredient_slot() {
+        let mut host = FakeHost::new();
+        let level = host.level.level();
+        let material = Identifier::parse("minecraft:sugar").unwrap();
+        host.registries.resolve_items([material.clone()]).unwrap();
+        let item = host.item_key(&material).unwrap();
+        let source = [3, 70, 4];
+        let target = [5, 70, 4];
+        host.level.block_entity(source).with_items(1);
+        host.level.block_entity(target).with_items(4);
+        let terminal = |pos, kind| Terminal {
+            pos,
+            inventory: pos,
+            kind,
+            options: CargoSettings::legacy(0, true),
+            filter: Filter {
+                items: Vec::new(),
+                blacklist: true,
+                lore: false,
+            },
+        };
+        let input = terminal(source, InventoryKind::Ordinary);
+        let output = terminal(target, InventoryKind::HeatedPressure);
+        let put = |host: &mut FakeHost, pos, slot, count| {
+            host.level.block_entity(pos).items.as_mut().unwrap().slots[slot] =
+                ItemStack::new(item, count);
+        };
+        let count = |host: &FakeHost, pos, slot: usize| {
+            host.level
+                .block_entity_at(pos)
+                .unwrap()
+                .items
+                .as_ref()
+                .unwrap()
+                .slots[slot]
+                .as_ref()
+                .map_or(0, ItemStack::count)
+        };
+        let incoming = ItemStack::new(item, 2).unwrap();
+        let deliver = |host: &mut FakeHost| {
+            move_to_first(
+                host,
+                level,
+                &input,
+                0,
+                &output,
+                &incoming,
+                |_, from, to, _| {
+                    assert_eq!((from, to), (source, target));
+                    true
+                },
+            )
+        };
+
+        // Both Paper tiers expose input 19 and 20 as internal slots 0 and 1.
+        // A full matching stack in 20 reserves 19 for the other ingredient.
+        put(&mut host, source, 0, 2);
+        put(&mut host, target, 1, 64);
+        assert_eq!(deliver(&mut host), 0);
+        assert_eq!(
+            (
+                count(&host, source, 0),
+                count(&host, target, 0),
+                count(&host, target, 1)
+            ),
+            (2, 0, 64)
+        );
+        // Space made in a matching stack is used before the earlier empty slot.
+        put(&mut host, target, 1, 20);
+        assert_eq!(deliver(&mut host), 2);
+        assert_eq!((count(&host, target, 0), count(&host, target, 1)), (0, 22));
+        // A stack smaller than the incoming stack does not take part in the preference.
+        put(&mut host, source, 0, 2);
+        put(&mut host, target, 1, 1);
+        assert_eq!(deliver(&mut host), 2);
+        assert_eq!((count(&host, target, 0), count(&host, target, 1)), (2, 1));
+        assert_eq!(
+            pressure_slots(4, 2, |slot| [Some(12), Some(3)][slot]),
+            [1, 0]
+        );
     }
 
     #[test]
