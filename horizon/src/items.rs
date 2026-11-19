@@ -194,6 +194,18 @@ impl SlimefunItem {
         crate::elemental_staves::decorate(self.id, &mut components);
         crate::armor_forge::decorate(self.id, &mut components);
         crate::auto_crafter::decorate(self.id, &mut components);
+        let enchantments: &[(&str, i32)] = match self.id {
+            "GRANDMAS_WALKING_STICK" => &[("minecraft:knockback", 2)],
+            "GRANDPAS_WALKING_STICK" => &[("minecraft:knockback", 5)],
+            "COBALT_PICKAXE" => &[("minecraft:efficiency", 6), ("minecraft:unbreaking", 10)],
+            _ => &[],
+        };
+        if !enchantments.is_empty() {
+            components.insert(
+                "minecraft:enchantments".into(),
+                Tag::compound(enchantments.iter().map(|&(id, level)| (id, Tag::Int(level)))),
+            );
+        }
         if let Some(texture) = &self.texture {
             components.insert(
                 "minecraft:profile".into(),
@@ -450,6 +462,36 @@ mod tests {
             .unwrap();
         assert!(!MAGIC_LUMP_1.matches(&host, &wrong_material));
     }
+
+    #[test]
+    fn walking_sticks_and_cobalt_pick_keep_paper_enchantments_and_research() {
+        let mut host = FakeHost::new();
+        host.registries
+            .resolve_items(
+                ["minecraft:stick", "minecraft:iron_pickaxe"]
+                    .map(|id| Identifier::parse(id).unwrap()),
+            )
+            .unwrap();
+        let equipment: [(Kind, &str, &[(&str, i32)]); 3] = [
+            (GRANDMAS_WALKING_STICK, "walking_sticks", &[("minecraft:knockback", 2)]),
+            (GRANDPAS_WALKING_STICK, "walking_sticks", &[("minecraft:knockback", 5)]),
+            (COBALT_PICKAXE, "cobalt_pickaxe", &[("minecraft:efficiency", 6), ("minecraft:unbreaking", 10)]),
+        ];
+        for (kind, study, enchantments) in equipment {
+            let stack = kind.stack(&host, 1).unwrap();
+            assert_eq!(item_id(&stack).as_deref(), Some(kind.id()));
+            let recipe = crate::recipes::crafting()
+                .find(|recipe| recipe.output.kind == kind)
+                .unwrap();
+            assert_eq!((recipe.output.count, recipe.research.id), (1, study));
+            let patch = stack.components().unwrap().as_nbt();
+            let expected = Tag::compound(enchantments.iter().map(|&(key, level)| (key, Tag::Int(level))));
+            assert_eq!(
+                patch.get(&"minecraft:enchantments".into()),
+                Some(&expected)
+            );
+        }
+    }
 }
 
 // Resource items used by the starter production machines.
@@ -649,6 +691,23 @@ item!(
 );
 item!(BRASS_INGOT, "gold_ingot", "Brass Ingot", "aqua", None, None);
 item!(BRONZE_INGOT, "brick", "Bronze Ingot", "aqua", None, None);
+item!(
+    GRANDMAS_WALKING_STICK,
+    "stick",
+    "Grandmas Walking Stick",
+    "gray",
+    None,
+    None
+);
+item!(
+    GRANDPAS_WALKING_STICK,
+    "stick",
+    "Grandpas Walking Stick",
+    "gray",
+    None,
+    None
+);
+item!(COBALT_PICKAXE, "iron_pickaxe", "Cobalt Pickaxe", "blue", None, None);
 item!(
     COBALT_INGOT,
     "iron_ingot",

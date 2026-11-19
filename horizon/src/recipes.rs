@@ -24,6 +24,7 @@ use crate::items::{
 use crate::items::{
     ELECTRIC_FURNACE, ELECTRIC_FURNACE_2, ELECTRIC_FURNACE_3, GILDED_IRON, HEATING_COIL,
 };
+use crate::items::{COBALT_PICKAXE, GRANDMAS_WALKING_STICK, GRANDPAS_WALKING_STICK};
 
 #[derive(Clone, Copy)]
 pub(crate) struct Stack {
@@ -241,6 +242,8 @@ pub(crate) const TASTY_KELP: Research = Research {
 };
 
 pub(crate) const RESEARCHES: &[Research] = &[
+    WALKING_STICKS,
+    SPEEDY_PICKAXE,
     LUMPS,
     TASTY_KELP,
     AUTOMATED_PANNING_MACHINE,
@@ -313,7 +316,45 @@ const fn lump_upgrade(input: Kind, output: Kind) -> CraftingRecipe {
 
 const KELP: Option<Kind> = Some(vanilla!("dried_kelp"));
 
+const WALKING_STICKS: Research = Research {
+    id: "walking_sticks",
+    name: "Walking Sticks",
+    cost: 1,
+};
+const SPEEDY_PICKAXE: Research = Research {
+    id: "cobalt_pickaxe",
+    name: "Speedy Pickaxe",
+    cost: 14,
+};
+
 pub(crate) const CRAFTING: &[CraftingRecipe] = &[
+    CraftingRecipe {
+        inputs: [
+            None, Some(vanilla!("oak_log")), None,
+            None, Some(vanilla!("oak_log")), None,
+            None, Some(vanilla!("oak_log")), None,
+        ],
+        output: stack(GRANDMAS_WALKING_STICK, 1),
+        research: &WALKING_STICKS,
+    },
+    CraftingRecipe {
+        inputs: [
+            Some(vanilla!("leather")), Some(vanilla!("oak_log")), Some(vanilla!("leather")),
+            None, Some(vanilla!("oak_log")), None,
+            None, Some(vanilla!("oak_log")), None,
+        ],
+        output: stack(GRANDPAS_WALKING_STICK, 1),
+        research: &WALKING_STICKS,
+    },
+    CraftingRecipe {
+        inputs: [
+            Some(COBALT_INGOT), Some(COBALT_INGOT), Some(COBALT_INGOT),
+            None, Some(NICKEL_INGOT), None,
+            None, Some(NICKEL_INGOT), None,
+        ],
+        output: stack(COBALT_PICKAXE, 1),
+        research: &SPEEDY_PICKAXE,
+    },
     CraftingRecipe {
         inputs: [
             None,
