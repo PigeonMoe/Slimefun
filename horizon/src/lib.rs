@@ -20,6 +20,7 @@ mod android_machine;
 mod android_mining;
 mod android_program;
 mod android_ui;
+mod android_woodcutting;
 mod armor_forge;
 mod auto_anvil;
 mod auto_brewer;

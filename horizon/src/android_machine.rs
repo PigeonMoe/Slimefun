@@ -12,6 +12,7 @@ use mod_api::{
 use crate::{
     android_fishing, android_mining,
     android_program::{self, Facing, Instruction, Script, Tier},
+    android_woodcutting,
     factory::reactors::NEPTUNIUM,
     fuel_generators::BUCKET_OF_FUEL,
     heated_pressure::{BOOSTED_URANIUM, BUCKET_OF_OIL, URANIUM},
@@ -522,7 +523,9 @@ pub(crate) fn tick(
 
     let step = state.script.advance(mode, state.index);
     state.fuel -= 1.0;
-    if let Some((_, index)) = step {
+    if let Some((instruction, index)) = step
+        && instruction != Instruction::ChopTree
+    {
         state.index = index;
     }
     let owner = state.owner;
@@ -530,7 +533,7 @@ pub(crate) fn tick(
     if !save(host, pos, state) {
         return None;
     }
-    let (instruction, _) = step?;
+    let (instruction, next) = step?;
     match instruction {
         Instruction::TurnLeft => turn(host, level, pos, facing.turned(-1)),
         Instruction::TurnRight => turn(host, level, pos, facing.turned(1)),
@@ -563,8 +566,23 @@ pub(crate) fn tick(
         Instruction::CatchFish => {
             android_fishing::fish(host, level, pos, tier, rolls);
         }
-        Instruction::FarmForward | Instruction::FarmDown => {
-            let direction = if instruction == Instruction::FarmDown {
+        Instruction::ChopTree => {
+            let target = offset(pos, facing.offset())?;
+            if android_woodcutting::chop(host, level, pos, target, owner)
+                && let Some(mut state) = data(host, level, pos)
+            {
+                state.index = next;
+                save(host, pos, state);
+            }
+        }
+        Instruction::FarmForward
+        | Instruction::FarmDown
+        | Instruction::FarmExoticForward
+        | Instruction::FarmExoticDown => {
+            let direction = if matches!(
+                instruction,
+                Instruction::FarmDown | Instruction::FarmExoticDown
+            ) {
                 [0, -1, 0]
             } else {
                 facing.offset()

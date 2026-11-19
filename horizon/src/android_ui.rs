@@ -694,7 +694,11 @@ fn choice_items(host: &dyn Host, mode: Mode) -> Vec<Option<ItemStack>> {
 }
 
 fn head(host: &dyn Host, key: &str, name: &str, lore: &[String]) -> Option<ItemStack> {
-    let key = key.strip_prefix("MOVE_AND_").unwrap_or(key);
+    let key = match key {
+        "FARM_EXOTIC_FORWARD" => "FARM_FORWARD",
+        "FARM_EXOTIC_DOWN" => "FARM_DOWN",
+        _ => key.strip_prefix("MOVE_AND_").unwrap_or(key),
+    };
     if let Some((_, texture)) = SKINS.iter().find(|(id, _)| *id == key) {
         head_icon(host, texture, name, lore)
     } else {
@@ -703,6 +707,13 @@ fn head(host: &dyn Host, key: &str, name: &str, lore: &[String]) -> Option<ItemS
 }
 
 const SKINS: &[(&str, HeadTexture)] = &[
+    (
+        "CHOP_TREE",
+        HeadTexture {
+            profile: [-476162738, 1038692848, -1749521871, 1196710938],
+            value: "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHBzOi8vdGV4dHVyZXMubWluZWNyYWZ0Lm5ldC90ZXh0dXJlLzY0YmE0OTM4NGRiYTdiN2FjZGI0ZjcwZTkzNjFlNmQ1N2NiYmNiZjcyMGNmNGYxNmMyYmI4M2U0NTU3In19fQ==",
+        },
+    ),
     (
         "DIG_UP",
         HeadTexture {

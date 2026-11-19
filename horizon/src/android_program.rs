@@ -7,7 +7,9 @@ pub(crate) const MAX_LENGTH: usize = 54;
 pub(crate) enum Mode {
     Normal(Tier),
     Farmer,
+    AdvancedFarmer,
     Miner,
+    Woodcutter,
     Fisherman(Tier),
     Archived,
 }
@@ -33,7 +35,8 @@ impl Mode {
     pub fn tier(self) -> Option<Tier> {
         Some(match self {
             Self::Normal(tier) | Self::Fisherman(tier) => tier,
-            Self::Farmer | Self::Miner => Tier::Solid,
+            Self::Farmer | Self::Miner | Self::Woodcutter => Tier::Solid,
+            Self::AdvancedFarmer => Tier::Liquid,
             Self::Archived => return None,
         })
     }
@@ -45,13 +48,13 @@ pub(crate) fn mode(id: &str) -> Option<Mode> {
         "PROGRAMMABLE_ANDROID_2" => Mode::Normal(Tier::Liquid),
         "PROGRAMMABLE_ANDROID_3" => Mode::Normal(Tier::Nuclear),
         "PROGRAMMABLE_ANDROID_FARMER" => Mode::Farmer,
+        "PROGRAMMABLE_ANDROID_2_FARMER" => Mode::AdvancedFarmer,
+        "PROGRAMMABLE_ANDROID_WOODCUTTER" => Mode::Woodcutter,
         "PROGRAMMABLE_ANDROID_FISHERMAN" => Mode::Fisherman(Tier::Solid),
         "PROGRAMMABLE_ANDROID_2_FISHERMAN" => Mode::Fisherman(Tier::Liquid),
         "PROGRAMMABLE_ANDROID_3_FISHERMAN" => Mode::Fisherman(Tier::Nuclear),
         "PROGRAMMABLE_ANDROID_MINER" => Mode::Miner,
-        "PROGRAMMABLE_ANDROID_WOODCUTTER"
-        | "PROGRAMMABLE_ANDROID_BUTCHER"
-        | "PROGRAMMABLE_ANDROID_2_FARMER"
+        "PROGRAMMABLE_ANDROID_BUTCHER"
         | "PROGRAMMABLE_ANDROID_2_BUTCHER"
         | "PROGRAMMABLE_ANDROID_3_BUTCHER" => Mode::Archived,
         _ => return None,
@@ -74,9 +77,12 @@ pub(crate) enum Instruction {
     MoveAndDigUp,
     MoveAndDigForward,
     MoveAndDigDown,
+    ChopTree,
     CatchFish,
     FarmForward,
     FarmDown,
+    FarmExoticForward,
+    FarmExoticDown,
     InterfaceItems,
     InterfaceFuel,
 }
@@ -108,6 +114,7 @@ const INSTRUCTIONS: &[(&str, &str, Instruction)] = &[
         "Dig and move downwards",
         Instruction::MoveAndDigDown,
     ),
+    ("CHOP_TREE", "Chop and Replant", Instruction::ChopTree),
     ("CATCH_FISH", "Catch Fish", Instruction::CatchFish),
     (
         "FARM_FORWARD",
@@ -118,6 +125,16 @@ const INSTRUCTIONS: &[(&str, &str, Instruction)] = &[
         "FARM_DOWN",
         "Harvest and Replant (Block underneath)",
         Instruction::FarmDown,
+    ),
+    (
+        "FARM_EXOTIC_FORWARD",
+        "Advanced Harvest and Replant",
+        Instruction::FarmExoticForward,
+    ),
+    (
+        "FARM_EXOTIC_DOWN",
+        "Advanced Harvest and Replant (Block underneath)",
+        Instruction::FarmExoticDown,
     ),
     (
         "INTERFACE_ITEMS",
@@ -157,6 +174,8 @@ impl Instruction {
             | Self::MoveAndDigForward
             | Self::MoveAndDigDown => mode == Mode::Miner,
             Self::CatchFish => matches!(mode, Mode::Fisherman(_)),
+            Self::ChopTree => mode == Mode::Woodcutter,
+            Self::FarmExoticForward | Self::FarmExoticDown => mode == Mode::AdvancedFarmer,
             _ => mode != Mode::Archived,
         }
     }
@@ -337,6 +356,20 @@ mod tests {
             script.source(),
             "START-DIG_UP-MOVE_AND_DIG_FORWARD-DIG_DOWN-REPEAT"
         );
+    }
+
+    #[test]
+    fn advanced_farmers_and_woodcutters_use_only_their_paper_instructions() {
+        let exotic = Script::parse("START-FARM_EXOTIC_FORWARD-FARM_EXOTIC_DOWN-REPEAT").unwrap();
+        assert!(exotic.can_run(Mode::AdvancedFarmer));
+        assert!(!exotic.can_run(Mode::Farmer));
+        assert_eq!(
+            exotic.advance(Mode::AdvancedFarmer, 1),
+            Some((Instruction::FarmExoticDown, 2))
+        );
+        let chop = Script::parse("START-CHOP_TREE-REPEAT").unwrap();
+        assert!(chop.can_run(Mode::Woodcutter));
+        assert!(!chop.can_run(Mode::Miner));
     }
 
     #[test]

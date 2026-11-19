@@ -148,6 +148,8 @@ fn category(mode: Mode) -> Option<&'static str> {
         Mode::Normal(_) => Some("NONE"),
         Mode::Fisherman(_) => Some("FISHERMAN"),
         Mode::Farmer => Some("FARMER"),
+        Mode::AdvancedFarmer => Some("ADVANCED_FARMER"),
+        Mode::Woodcutter => Some("WOODCUTTER"),
         Mode::Miner => Some("MINER"),
         Mode::Archived => None,
     }

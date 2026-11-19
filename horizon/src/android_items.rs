@@ -191,6 +191,11 @@ const ADVANCED: Research = Research {
     name: "Advanced Androids",
     cost: 60,
 };
+const ADVANCED_FARMER: Research = Research {
+    id: "advanced_farmer_android",
+    name: "Advanced Androids - Farmer",
+    cost: 30,
+};
 const ADVANCED_FISHERMAN: Research = Research {
     id: "advanced_fisherman_android",
     name: "Advanced Androids - Fisherman",
@@ -212,12 +217,15 @@ pub(crate) const RESEARCHES: &[&Research] = &[
     &INTERFACES,
     &ADVANCED,
     &ADVANCED_FISHERMAN,
+    &ADVANCED_FARMER,
     &EMPOWERED,
     &EMPOWERED_FISHERMAN,
 ];
 
 const ROD: Kind = Kind::Vanilla("minecraft:fishing_rod");
 const PICKAXE: Kind = Kind::Vanilla("minecraft:diamond_pickaxe");
+const AXE: Kind = Kind::Vanilla("minecraft:diamond_axe");
+const HOE: Kind = Kind::Vanilla("minecraft:diamond_hoe");
 const CHEST: Kind = Kind::Vanilla("minecraft:chest");
 
 const fn fisherman(frame: Kind, kind: Kind, research: &'static Research) -> CraftingRecipe {
@@ -329,6 +337,24 @@ pub(crate) const CRAFTING: &[CraftingRecipe] = &[
         },
         research: &RESEARCH,
     },
+    CraftingRecipe {
+        inputs: [
+            None,
+            None,
+            None,
+            Some(AXE),
+            Some(PROGRAMMABLE_ANDROID),
+            Some(AXE),
+            None,
+            Some(ELECTRIC_MOTOR),
+            None,
+        ],
+        output: Stack {
+            kind: PROGRAMMABLE_ANDROID_WOODCUTTER,
+            count: 1,
+        },
+        research: &RESEARCH,
+    },
     fisherman(
         PROGRAMMABLE_ANDROID,
         PROGRAMMABLE_ANDROID_FISHERMAN,
@@ -357,6 +383,24 @@ pub(crate) const CRAFTING: &[CraftingRecipe] = &[
         PROGRAMMABLE_ANDROID_2_FISHERMAN,
         &ADVANCED_FISHERMAN,
     ),
+    CraftingRecipe {
+        inputs: [
+            None,
+            None,
+            None,
+            Some(HOE),
+            Some(PROGRAMMABLE_ANDROID_2),
+            Some(HOE),
+            None,
+            Some(ELECTRIC_MOTOR),
+            None,
+        ],
+        output: Stack {
+            kind: PROGRAMMABLE_ANDROID_2_FARMER,
+            count: 1,
+        },
+        research: &ADVANCED_FARMER,
+    },
     CraftingRecipe {
         inputs: [
             Some(PLASTIC_SHEET),
@@ -408,6 +452,8 @@ pub(crate) fn kind_and_research(mode: Mode) -> Option<(Kind, &'static Research)>
     Some(match mode {
         Mode::Normal(Tier::Solid) => (PROGRAMMABLE_ANDROID, &RESEARCH),
         Mode::Farmer => (PROGRAMMABLE_ANDROID_FARMER, &RESEARCH),
+        Mode::AdvancedFarmer => (PROGRAMMABLE_ANDROID_2_FARMER, &ADVANCED_FARMER),
+        Mode::Woodcutter => (PROGRAMMABLE_ANDROID_WOODCUTTER, &RESEARCH),
         Mode::Miner => (PROGRAMMABLE_ANDROID_MINER, &RESEARCH),
         Mode::Fisherman(Tier::Solid) => (PROGRAMMABLE_ANDROID_FISHERMAN, &RESEARCH),
         Mode::Normal(Tier::Liquid) => (PROGRAMMABLE_ANDROID_2, &ADVANCED),
@@ -423,7 +469,8 @@ pub(crate) fn lore(id: &str) -> Option<Tag> {
     let tier = mode.tier()?;
     let function = match mode {
         Mode::Normal(_) => "None",
-        Mode::Farmer => "Farming",
+        Mode::Farmer | Mode::AdvancedFarmer => "Farming",
+        Mode::Woodcutter => "Woodcutting",
         Mode::Miner => "Mining",
         Mode::Fisherman(_) => "Fishing",
         Mode::Archived => return None,
