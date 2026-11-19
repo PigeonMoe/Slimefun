@@ -1105,7 +1105,14 @@ pub(crate) fn tick(
             trash::clear(host, pos);
         }
         if node.component == Component::Android
-            && let Some(movement) = crate::android_machine::tick(host, level, pos, &node.id, rolls)
+            && let Some(movement) = crate::android_machine::tick(
+                host,
+                level,
+                pos,
+                &node.id,
+                rolls,
+                settings.android_reduced_block_updates,
+            )
         {
             move_android(networks, host, level, &dimension, node, movement);
         }

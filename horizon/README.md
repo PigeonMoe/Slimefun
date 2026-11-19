@@ -171,7 +171,9 @@ Paper 的 `stored-chunks/chunks.sfc` 会随快照导出。生成导入档案后�
 
 三档普通及渔夫 Android 可用原配方制作和安装。渔夫用 `CATCH_FISH` 检查脚下的水，每次尝试的钓获率依档为 10%、20% 和 30%，鱼类来自当前数据包的 `minecraft:fishes` 标签，杂物和宝藏按 Paper 权重抽取。二档消耗岩浆桶、原油桶或燃料桶，空桶进入六个输出槽中可容纳的位置。三档使用铀、镎及强化铀。旧档中同类设备的脚本、燃料余量、进度和库存沿用现有恢复流程。
 
-普通、农夫和渔夫 Android 可从内存核心浏览、上传和下载服务器共享的脚本。下载会替换当前脚本。列表支持翻页、下载计数及每账号单次评分，普通脚本在农夫及渔夫菜单也可见。若迁移了 Paper，通过 `python3 horizon/tools/import-android-scripts.py <Paper 的 plugins/Slimefun/scripts> <Horizon 世界>/horizon-mod-data/slimefun/android-scripts-import.toml` 导入原脚本名称、作者、下载量和评分。导入脚本会出现在对应设备的列表里。首次改动共享库时，Horizon 将导入内容及改动保存至 `android-scripts.toml`。转换脚本使用 PyYAML。
+矿工 Android 有向前、向上和向下挖掘及挖后移动两类指令，按无附魔钻石镐计算原版战利品。方块变更前会检查设备离线属主的领地权限，识别已登记的 Slimefun 方块并跳过。默认按 Paper 优化保留符合周边方块条件的圆石、石头和玄武岩发生器，管理员可用配置 `[miner-android]` 中的 `reduced-block-updates` 关闭。Bukkit 的方块形成扩展事件由 Paper 插件监听，当前 Horizon 矿工未转接该扩展。
+
+普通、农夫、渔夫和矿工 Android 可从内存核心浏览、上传和下载服务器共享的脚本。下载会替换当前脚本。列表支持翻页、下载计数及每账号单次评分，普通脚本在农夫、渔夫及矿工菜单也可见。若迁移了 Paper，通过 `python3 horizon/tools/import-android-scripts.py <Paper 的 plugins/Slimefun/scripts> <Horizon 世界>/horizon-mod-data/slimefun/android-scripts-import.toml` 导入原脚本名称、作者、下载量和评分。导入脚本会出现在对应设备的列表里。首次改动共享库时，Horizon 将导入内容及改动保存至 `android-scripts.toml`。转换脚本使用 PyYAML。
 
 在增强工作台制作并放置 GPS 发射器并接入能源网络，为放置者增加 GPS 复杂度。达到 600 后，可以右击目标区块内的固定 GEO 扫描器，或手持便携扫描器右击目标区块中的方块。扫描会显示按维度和生物群系生成的四种有限储量。接通同一区块的 GEO 矿机即可开采小块铀、下界冰和盐，货运可从矿机的输出槽提取。接通油泵并放入空桶即可提取原油，油桶可送往炼油机，燃料桶可用于内燃发电机。
 

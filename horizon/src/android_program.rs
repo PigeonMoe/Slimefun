@@ -7,6 +7,7 @@ pub(crate) const MAX_LENGTH: usize = 54;
 pub(crate) enum Mode {
     Normal(Tier),
     Farmer,
+    Miner,
     Fisherman(Tier),
     Archived,
 }
@@ -32,7 +33,7 @@ impl Mode {
     pub fn tier(self) -> Option<Tier> {
         Some(match self {
             Self::Normal(tier) | Self::Fisherman(tier) => tier,
-            Self::Farmer => Tier::Solid,
+            Self::Farmer | Self::Miner => Tier::Solid,
             Self::Archived => return None,
         })
     }
@@ -47,8 +48,8 @@ pub(crate) fn mode(id: &str) -> Option<Mode> {
         "PROGRAMMABLE_ANDROID_FISHERMAN" => Mode::Fisherman(Tier::Solid),
         "PROGRAMMABLE_ANDROID_2_FISHERMAN" => Mode::Fisherman(Tier::Liquid),
         "PROGRAMMABLE_ANDROID_3_FISHERMAN" => Mode::Fisherman(Tier::Nuclear),
-        "PROGRAMMABLE_ANDROID_MINER"
-        | "PROGRAMMABLE_ANDROID_WOODCUTTER"
+        "PROGRAMMABLE_ANDROID_MINER" => Mode::Miner,
+        "PROGRAMMABLE_ANDROID_WOODCUTTER"
         | "PROGRAMMABLE_ANDROID_BUTCHER"
         | "PROGRAMMABLE_ANDROID_2_FARMER"
         | "PROGRAMMABLE_ANDROID_2_BUTCHER"
@@ -67,6 +68,12 @@ pub(crate) enum Instruction {
     GoDown,
     TurnLeft,
     TurnRight,
+    DigUp,
+    DigForward,
+    DigDown,
+    MoveAndDigUp,
+    MoveAndDigForward,
+    MoveAndDigDown,
     CatchFish,
     FarmForward,
     FarmDown,
@@ -83,6 +90,24 @@ const INSTRUCTIONS: &[(&str, &str, Instruction)] = &[
     ("GO_DOWN", "Move downwards", Instruction::GoDown),
     ("TURN_LEFT", "Turn left", Instruction::TurnLeft),
     ("TURN_RIGHT", "Turn right", Instruction::TurnRight),
+    ("DIG_UP", "Dig upwards", Instruction::DigUp),
+    ("DIG_FORWARD", "Dig forward", Instruction::DigForward),
+    ("DIG_DOWN", "Dig downwards", Instruction::DigDown),
+    (
+        "MOVE_AND_DIG_UP",
+        "Dig and move upwards",
+        Instruction::MoveAndDigUp,
+    ),
+    (
+        "MOVE_AND_DIG_FORWARD",
+        "Dig and move forward",
+        Instruction::MoveAndDigForward,
+    ),
+    (
+        "MOVE_AND_DIG_DOWN",
+        "Dig and move downwards",
+        Instruction::MoveAndDigDown,
+    ),
     ("CATCH_FISH", "Catch Fish", Instruction::CatchFish),
     (
         "FARM_FORWARD",
@@ -125,6 +150,12 @@ impl Instruction {
     fn can_use(self, mode: Mode) -> bool {
         match self {
             Self::FarmForward | Self::FarmDown => mode == Mode::Farmer,
+            Self::DigUp
+            | Self::DigForward
+            | Self::DigDown
+            | Self::MoveAndDigUp
+            | Self::MoveAndDigForward
+            | Self::MoveAndDigDown => mode == Mode::Miner,
             Self::CatchFish => matches!(mode, Mode::Fisherman(_)),
             _ => mode != Mode::Archived,
         }
@@ -290,6 +321,21 @@ mod tests {
         assert_eq!(
             program.advance(Mode::Farmer, 1),
             Some((Instruction::Wait, 2))
+        );
+    }
+
+    #[test]
+    fn a_legacy_miner_replays_the_same_portable_instruction_after_loading() {
+        let script = Script::parse("START-DIG_UP-MOVE_AND_DIG_FORWARD-DIG_DOWN-REPEAT").unwrap();
+        assert!(script.can_run(Mode::Miner));
+        assert_eq!(
+            script.advance(Mode::Miner, 1),
+            Some((Instruction::MoveAndDigForward, 2))
+        );
+        assert_eq!(script.advance(Mode::Farmer, 1), None);
+        assert_eq!(
+            script.source(),
+            "START-DIG_UP-MOVE_AND_DIG_FORWARD-DIG_DOWN-REPEAT"
         );
     }
 

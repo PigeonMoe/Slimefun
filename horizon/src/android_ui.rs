@@ -694,6 +694,7 @@ fn choice_items(host: &dyn Host, mode: Mode) -> Vec<Option<ItemStack>> {
 }
 
 fn head(host: &dyn Host, key: &str, name: &str, lore: &[String]) -> Option<ItemStack> {
+    let key = key.strip_prefix("MOVE_AND_").unwrap_or(key);
     if let Some((_, texture)) = SKINS.iter().find(|(id, _)| *id == key) {
         head_icon(host, texture, name, lore)
     } else {
@@ -702,6 +703,27 @@ fn head(host: &dyn Host, key: &str, name: &str, lore: &[String]) -> Option<ItemS
 }
 
 const SKINS: &[(&str, HeadTexture)] = &[
+    (
+        "DIG_UP",
+        HeadTexture {
+            profile: [177738152, -712886039, -1887289086, -1381350062],
+            value: "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHBzOi8vdGV4dHVyZXMubWluZWNyYWZ0Lm5ldC90ZXh0dXJlLzJlNmNlMDExYWM5YTdhNzViMmZjZDQwOGFkMjFhM2FjMTcyMmY2ZTJlZWQ4NzgxY2FmZDEyNTUyMjgyYjg4In19fQ==",
+        },
+    ),
+    (
+        "DIG_FORWARD",
+        HeadTexture {
+            profile: [1919431423, 1855863686, -1851580769, -446152524],
+            value: "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHBzOi8vdGV4dHVyZXMubWluZWNyYWZ0Lm5ldC90ZXh0dXJlL2I2ZWEyMTM1ODM4NDYxNTM0MzcyZjJkYTZjODYyZDIxY2Q1ZjNkMmM3MTE5ZjJiYjY3NGJiZDQyNzkxIn19fQ==",
+        },
+    ),
+    (
+        "DIG_DOWN",
+        HeadTexture {
+            profile: [-77138982, -1332397099, -1746845057, 1867779294],
+            value: "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHBzOi8vdGV4dHVyZXMubWluZWNyYWZ0Lm5ldC90ZXh0dXJlLzhkODYyMDI0MTA4Yzc4NWJjMGVmNzE5OWVjNzdjNDAyZGJiZmNjNjI0ZTlmNDFmODNkOGFlZDhiMzlmZDEzIn19fQ==",
+        },
+    ),
     (
         "FUEL",
         HeadTexture {

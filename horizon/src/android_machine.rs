@@ -10,7 +10,7 @@ use mod_api::{
 };
 
 use crate::{
-    android_fishing,
+    android_fishing, android_mining,
     android_program::{self, Facing, Instruction, Script, Tier},
     factory::reactors::NEPTUNIUM,
     fuel_generators::BUCKET_OF_FUEL,
@@ -461,22 +461,31 @@ fn solid_fuel(host: &dyn Host, stack: &ItemStack) -> Option<u32> {
     Some(ticks)
 }
 
-/// Like BlockMenu.pushItem, use an existing compatible slot or the first vacant output.
-pub(crate) fn push_one(host: &dyn Host, machine: &mut Machine, stack: ItemStack) -> bool {
+/// Insert as much of the output as Paper would accept, in menu order.
+pub(crate) fn push(host: &dyn Host, machine: &mut Machine, stack: ItemStack) -> u32 {
     let resource = ItemResource::of(&stack);
     let capacity = crate::factory::max_stack(host, &resource);
+    let mut left = stack.count();
     for index in 0..FUEL {
-        let updated = match slot(host, machine, index) {
-            Some(held) if resource.matches(&held) && held.count() < capacity => {
-                resource.to_stack(held.count() + 1)
-            }
-            None => Some(stack.clone()),
-            _ => continue,
+        let held = match slot(host, machine, index) {
+            Some(held) if resource.matches(&held) => held.count(),
+            Some(_) => continue,
+            None => 0,
         };
-        return updated
-            .is_some_and(|stack| replace_slot(host, machine, index, Some(stack)).is_some());
+        let amount = left.min(capacity.saturating_sub(held));
+        if amount == 0 {
+            continue;
+        }
+        if let Some(updated) = resource.to_stack(held + amount)
+            && replace_slot(host, machine, index, Some(updated)).is_some()
+        {
+            left -= amount;
+        }
+        if left == 0 {
+            break;
+        }
     }
-    false
+    stack.count() - left
 }
 
 fn refill(host: &dyn Host, tier: Tier, machine: &mut Machine) -> Option<()> {
@@ -486,7 +495,7 @@ fn refill(host: &dyn Host, tier: Tier, machine: &mut Machine) -> Option<()> {
     if tier == Tier::Liquid {
         let empty = Kind::Vanilla("minecraft:bucket").stack(host, 1)?;
         // Paper still refuels when all output slots are full.
-        push_one(host, machine, empty);
+        push(host, machine, empty);
     }
     Some(())
 }
@@ -497,6 +506,7 @@ pub(crate) fn tick(
     pos: Position,
     item: &str,
     rolls: &Rolls,
+    reduced_block_updates: bool,
 ) -> Option<Movement> {
     let mode = android_program::mode(item)?;
     let tier = mode.tier()?;
@@ -524,6 +534,32 @@ pub(crate) fn tick(
     match instruction {
         Instruction::TurnLeft => turn(host, level, pos, facing.turned(-1)),
         Instruction::TurnRight => turn(host, level, pos, facing.turned(1)),
+        Instruction::DigUp
+        | Instruction::DigForward
+        | Instruction::DigDown
+        | Instruction::MoveAndDigUp
+        | Instruction::MoveAndDigForward
+        | Instruction::MoveAndDigDown => {
+            let direction = match instruction {
+                Instruction::DigUp | Instruction::MoveAndDigUp => [0, 1, 0],
+                Instruction::DigDown | Instruction::MoveAndDigDown => [0, -1, 0],
+                _ => facing.offset(),
+            };
+            let target = offset(pos, direction)?;
+            android_mining::dig(host, level, pos, target, owner, reduced_block_updates);
+            if matches!(
+                instruction,
+                Instruction::MoveAndDigUp
+                    | Instruction::MoveAndDigForward
+                    | Instruction::MoveAndDigDown
+            ) {
+                return Some(Movement {
+                    from: pos,
+                    to: target,
+                    rotation: facing.skull_rotation(),
+                });
+            }
+        }
         Instruction::CatchFish => {
             android_fishing::fish(host, level, pos, tier, rolls);
         }
@@ -564,7 +600,7 @@ pub(crate) struct Movement {
     pub rotation: u8,
 }
 
-fn offset([x, y, z]: Position, [dx, dy, dz]: Position) -> Option<Position> {
+pub(crate) fn offset([x, y, z]: Position, [dx, dy, dz]: Position) -> Option<Position> {
     Some([x.checked_add(dx)?, y.checked_add(dy)?, z.checked_add(dz)?])
 }
 

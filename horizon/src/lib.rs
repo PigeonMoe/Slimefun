@@ -17,6 +17,7 @@ mod android_fishing;
 mod android_items;
 mod android_library;
 mod android_machine;
+mod android_mining;
 mod android_program;
 mod android_ui;
 mod armor_forge;
@@ -146,6 +147,13 @@ impl Slimefun {
         self.transport.configure(&table);
         self.industrial_miners.configure(Some(&table));
         settings.book_binder = book_binder::Rules::read_config(&table);
+        if let Some(value) = table
+            .get("miner-android")
+            .and_then(|section| section.get("reduced-block-updates"))
+            .and_then(toml::Value::as_bool)
+        {
+            settings.android_reduced_block_updates = value;
+        }
         ancient_altar::configure(
             table
                 .get("ancient-altar")
@@ -279,6 +287,7 @@ impl Hooks for Slimefun {
         network_runtime::register_cargo(registrar);
         gps_transport::register(registrar);
         android_machine::register(registrar);
+        android_mining::register(registrar);
         crucible::register(registrar);
         industrial_miner::register(registrar);
         factory::register(registrar);
@@ -292,7 +301,7 @@ impl Hooks for Slimefun {
         event.configs.push(Config::new(
             "slimefun",
             ConfigKind::Server,
-            "double-ores = true\ncrucible-allow-water-in-nether = false\nlegacy-ore-washer = false\nlegacy-dust-washer = false\nlegacy-ore-grinder = true\nelectric-gold-pan-override-output-limit = [false, false, false]\nfreezer-use-vanilla-ratios = [false, false, false]\nfire-breaking-chance = 34\noutput-chest-enabled = true\ndrop-from-golems = true\ngolem-drop-chance = 75\n\n[networks]\nenable-visualizer = true\ncargo-ticker-delay = 0\n\n[book-binder]\nbypass-vanilla-max-level = false\nhas-custom-max-level = false\ncustom-max-level = 15\n\n[portable-teleporter]\nteleportation-cost = 10\n\n[produce-collector]\nrange = 2\n\n[ancient-altar]\nstep-delay = 8\n\n[industrial-miner]\ncan-mine-ancient-debris = false\ncan-mine-deepslate-ores = true\n\n[advanced-industrial-miner]\ncan-mine-ancient-debris = false\ncan-mine-deepslate-ores = true\n",
+            "double-ores = true\ncrucible-allow-water-in-nether = false\nlegacy-ore-washer = false\nlegacy-dust-washer = false\nlegacy-ore-grinder = true\nelectric-gold-pan-override-output-limit = [false, false, false]\nfreezer-use-vanilla-ratios = [false, false, false]\nfire-breaking-chance = 34\noutput-chest-enabled = true\ndrop-from-golems = true\ngolem-drop-chance = 75\n\n[networks]\nenable-visualizer = true\ncargo-ticker-delay = 0\n\n[book-binder]\nbypass-vanilla-max-level = false\nhas-custom-max-level = false\ncustom-max-level = 15\n\n[portable-teleporter]\nteleportation-cost = 10\n\n[produce-collector]\nrange = 2\n\n[ancient-altar]\nstep-delay = 8\n\n[miner-android]\nreduced-block-updates = true\n\n[industrial-miner]\ncan-mine-ancient-debris = false\ncan-mine-deepslate-ores = true\n\n[advanced-industrial-miner]\ncan-mine-ancient-debris = false\ncan-mine-deepslate-ores = true\n",
         ));
     }
 
@@ -761,7 +770,10 @@ impl Hooks for Slimefun {
             *event.cancellation_result = InteractionResult::Consume;
             return Flow::Cancel;
         }
-        if self.industrial_miners.activate(host, level, player, event.click.pos) {
+        if self
+            .industrial_miners
+            .activate(host, level, player, event.click.pos)
+        {
             *event.cancellation_result = InteractionResult::Consume;
             return Flow::Cancel;
         }
@@ -981,7 +993,10 @@ impl Hooks for Slimefun {
     }
 
     fn server_tick(&self, host: &mut dyn ServerHost, event: &mut mod_api::ServerTickEvent) {
-        if matches!(event.phase, mod_api::ServerTickPhase::ServerTickStart { .. }) {
+        if matches!(
+            event.phase,
+            mod_api::ServerTickPhase::ServerTickStart { .. }
+        ) {
             self.radiation.begin_tick(|| host.server_monotonic_millis());
         }
     }
@@ -1040,7 +1055,11 @@ impl Hooks for Slimefun {
         self.delayed_crafts.scheduled_task(host, event);
     }
 
-    fn validate_tickets(&self, _: &mut dyn ServerHost, event: &mut mod_api::ValidateTicketsEvent<'_>) {
+    fn validate_tickets(
+        &self,
+        _: &mut dyn ServerHost,
+        event: &mut mod_api::ValidateTicketsEvent<'_>,
+    ) {
         industrial_miner::validate_tickets(event);
     }
 
@@ -1071,7 +1090,9 @@ fn describe_recipe(id: &str, double_ores: bool) -> Vec<String> {
                 .split_once(':')
                 .is_some_and(|(_, name)| name.eq_ignore_ascii_case(id))
     };
-    let mut lines = industrial_miner::recipe_description(id).into_iter().collect::<Vec<_>>();
+    let mut lines = industrial_miner::recipe_description(id)
+        .into_iter()
+        .collect::<Vec<_>>();
     for (name, recipes, multiplier) in [
         ("Grind Stone", GRINDING, 1),
         ("Ore Crusher", CRUSHING, 1),

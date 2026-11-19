@@ -217,6 +217,7 @@ pub(crate) const RESEARCHES: &[&Research] = &[
 ];
 
 const ROD: Kind = Kind::Vanilla("minecraft:fishing_rod");
+const PICKAXE: Kind = Kind::Vanilla("minecraft:diamond_pickaxe");
 const CHEST: Kind = Kind::Vanilla("minecraft:chest");
 
 const fn fisherman(frame: Kind, kind: Kind, research: &'static Research) -> CraftingRecipe {
@@ -310,6 +311,24 @@ pub(crate) const CRAFTING: &[CraftingRecipe] = &[
         },
         research: &RESEARCH,
     },
+    CraftingRecipe {
+        inputs: [
+            None,
+            None,
+            None,
+            Some(PICKAXE),
+            Some(PROGRAMMABLE_ANDROID),
+            Some(PICKAXE),
+            None,
+            Some(ELECTRIC_MOTOR),
+            None,
+        ],
+        output: Stack {
+            kind: PROGRAMMABLE_ANDROID_MINER,
+            count: 1,
+        },
+        research: &RESEARCH,
+    },
     fisherman(
         PROGRAMMABLE_ANDROID,
         PROGRAMMABLE_ANDROID_FISHERMAN,
@@ -389,6 +408,7 @@ pub(crate) fn kind_and_research(mode: Mode) -> Option<(Kind, &'static Research)>
     Some(match mode {
         Mode::Normal(Tier::Solid) => (PROGRAMMABLE_ANDROID, &RESEARCH),
         Mode::Farmer => (PROGRAMMABLE_ANDROID_FARMER, &RESEARCH),
+        Mode::Miner => (PROGRAMMABLE_ANDROID_MINER, &RESEARCH),
         Mode::Fisherman(Tier::Solid) => (PROGRAMMABLE_ANDROID_FISHERMAN, &RESEARCH),
         Mode::Normal(Tier::Liquid) => (PROGRAMMABLE_ANDROID_2, &ADVANCED),
         Mode::Fisherman(Tier::Liquid) => (PROGRAMMABLE_ANDROID_2_FISHERMAN, &ADVANCED_FISHERMAN),
@@ -404,6 +424,7 @@ pub(crate) fn lore(id: &str) -> Option<Tag> {
     let function = match mode {
         Mode::Normal(_) => "None",
         Mode::Farmer => "Farming",
+        Mode::Miner => "Mining",
         Mode::Fisherman(_) => "Fishing",
         Mode::Archived => return None,
     };

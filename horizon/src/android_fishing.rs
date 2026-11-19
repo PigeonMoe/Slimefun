@@ -63,7 +63,7 @@ pub(crate) fn fish(
         junk_or_treasure(host, roll - fish_end)?
     };
     let mut machine = android_machine::data(host, level, position)?;
-    if android_machine::push_one(host, &mut machine, ItemStack::new(key, 1)?) {
+    if android_machine::push(host, &mut machine, ItemStack::new(key, 1)?) > 0 {
         android_machine::save(host, position, machine);
     }
     Some(())

@@ -52,6 +52,7 @@ pub(crate) struct Settings {
     pub cargo_visualizer: bool,
     pub cargo_tick_delay: u32,
     pub produce_collector_range: u8,
+    pub android_reduced_block_updates: bool,
 }
 
 impl Default for Settings {
@@ -70,6 +71,7 @@ impl Default for Settings {
             cargo_visualizer: true,
             cargo_tick_delay: 0,
             produce_collector_range: crate::factory::produce_collector::DEFAULT_RANGE,
+            android_reduced_block_updates: true,
         }
     }
 }
