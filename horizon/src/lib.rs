@@ -262,7 +262,22 @@ impl Slimefun {
         {
             settings.golem_drop_chance = value;
         }
+        if let Some(delay) = table
+            .get("URID")
+            .and_then(|section| section.get("custom-ticker-delay"))
+            .and_then(toml::Value::as_integer)
+            .and_then(|value| u32::try_from(value.max(1)).ok())
+        {
+            settings.block_ticker_delay = delay;
+        }
         if let Some(network) = table.get("networks").and_then(toml::Value::as_table) {
+            if let Some(budget) = network
+                .get("max-size")
+                .and_then(toml::Value::as_integer)
+                .and_then(|value| u32::try_from(value.max(1)).ok())
+            {
+                settings.network_discovery_budget = budget;
+            }
             if let Some(value) = network
                 .get("enable-visualizer")
                 .and_then(toml::Value::as_bool)
@@ -329,7 +344,7 @@ impl Hooks for Slimefun {
             "slimefun",
             ConfigKind::Server,
             &format!("{}{}",
-            "double-ores = true\ncrucible-allow-water-in-nether = false\nlegacy-ore-washer = false\nlegacy-dust-washer = false\nlegacy-ore-grinder = true\nelectric-gold-pan-override-output-limit = [false, false, false]\nfreezer-use-vanilla-ratios = [false, false, false]\nfire-breaking-chance = 34\noutput-chest-enabled = true\ndrop-from-golems = true\ngolem-drop-chance = 75\n\n[networks]\nenable-visualizer = true\ncargo-ticker-delay = 0\n\n[book-binder]\nbypass-vanilla-max-level = false\nhas-custom-max-level = false\ncustom-max-level = 15\n\n[portable-teleporter]\nteleportation-cost = 10\n\n[produce-collector]\nrange = 2\n\n[ancient-altar]\nstep-delay = 8\n\n[miner-android]\nreduced-block-updates = true\n\n[industrial-miner]\ncan-mine-ancient-debris = false\ncan-mine-deepslate-ores = true\n\n[advanced-industrial-miner]\ncan-mine-ancient-debris = false\ncan-mine-deepslate-ores = true\n",
+            "double-ores = true\ncrucible-allow-water-in-nether = false\nlegacy-ore-washer = false\nlegacy-dust-washer = false\nlegacy-ore-grinder = true\nelectric-gold-pan-override-output-limit = [false, false, false]\nfreezer-use-vanilla-ratios = [false, false, false]\nfire-breaking-chance = 34\noutput-chest-enabled = true\ndrop-from-golems = true\ngolem-drop-chance = 75\n\n[URID]\ncustom-ticker-delay = 10\n\n[networks]\nmax-size = 200\nenable-visualizer = true\ncargo-ticker-delay = 0\n\n[book-binder]\nbypass-vanilla-max-level = false\nhas-custom-max-level = false\ncustom-max-level = 15\n\n[portable-teleporter]\nteleportation-cost = 10\n\n[produce-collector]\nrange = 2\n\n[ancient-altar]\nstep-delay = 8\n\n[miner-android]\nreduced-block-updates = true\n\n[industrial-miner]\ncan-mine-ancient-debris = false\ncan-mine-deepslate-ores = true\n\n[advanced-industrial-miner]\ncan-mine-ancient-debris = false\ncan-mine-deepslate-ores = true\n",
                 enchantment_machines::default_config()),
         ));
     }
@@ -1174,6 +1189,7 @@ impl Hooks for Slimefun {
 
     fn level_unload(&self, host: &mut dyn ServerHost, event: &mut mod_api::LevelUnloadEvent<'_>) {
         rainbow::placed::unload_level(event.dimension);
+        self.networks.lock().unwrap().unload_level(event.dimension);
         self.block_placers.unload(host, event.dimension);
         self.industrial_miners.unload(host, event.dimension);
         self.butcher_androids.unload(host, event.dimension);

@@ -778,12 +778,6 @@ pub(crate) fn decorate(id: &str, components: &mut Compound) {
         ],
         "BEE_BOOTS" => &[buzzing, space, jump, soft],
         "BEE_HELMET" | "BEE_LEGGINGS" => &[buzzing],
-        "BOOTS_OF_THE_STOMPER" => &[
-            ("All Fall Damage you receive", "blue", false),
-            ("will be applied to nearby Mobs/Players", "blue", false),
-            space,
-            soft,
-        ],
         name if name.starts_with("GLOWSTONE_") => &[
             ("Shining like the sun!", "green", true),
             space,

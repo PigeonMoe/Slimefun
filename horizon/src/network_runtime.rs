@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap, VecDeque},
+    collections::{BTreeMap, HashMap},
     fmt::Write,
     sync::{Arc, Mutex},
 };
@@ -29,6 +29,8 @@ use crate::{
 mod cargo_menu;
 #[path = "cargo_topology.rs"]
 mod cargo_topology;
+#[path = "network_discovery.rs"]
+mod network_discovery;
 #[path = "network_visuals.rs"]
 mod network_visuals;
 #[path = "plain_network.rs"]
@@ -38,6 +40,7 @@ pub(crate) mod trash;
 
 pub(crate) use cargo_menu::{menu_click, menu_closed, register as register_cargo, use_node};
 use cargo_topology::{CargoSettings, FILTER_SLOTS};
+use network_discovery::Discovery;
 use network_visuals::Status;
 pub(crate) use plain_network::{
     CARRIERS as PLAIN_CARRIERS, dimension as dimension_name, is_carrier as is_plain_carrier,
@@ -436,6 +439,7 @@ pub(crate) struct Networks {
     menus: BTreeMap<u128, cargo_menu::Session>,
     round_robin: HashMap<(LevelRef, Position), usize>,
     cargo_ticks: HashMap<(LevelRef, Position), u32>,
+    discoveries: BTreeMap<String, Discovery>,
     gps_signals: BTreeMap<String, BTreeMap<Position, (u128, u32)>>,
 }
 
@@ -487,8 +491,13 @@ impl Networks {
         self.menus.clear();
         self.round_robin.clear();
         self.cargo_ticks.clear();
+        self.discoveries.clear();
         self.gps_signals.clear();
         plain_network::clear();
+    }
+
+    pub(crate) fn unload_level(&mut self, dimension: &str) {
+        self.discoveries.remove(dimension);
     }
 
     pub(crate) fn restore(
@@ -920,11 +929,17 @@ pub(crate) fn open_scanner(
 
 pub(crate) use network_visuals::compact as compact_energy;
 
-pub(crate) fn energy_buffer(host: &mut dyn ServerHost, level: LevelRef, pos: Position) -> Option<(u32, u32)> {
+pub(crate) fn energy_buffer(
+    host: &mut dyn ServerHost,
+    level: LevelRef,
+    pos: Position,
+) -> Option<(u32, u32)> {
     let state = block_data(host, level, pos)?;
     let capacity = match Component::for_item(&state.id)? {
-        Component::Capacitor(capacity) | Component::ElectricMachine { capacity, .. }
-        | Component::GpsTransmitter { capacity } | Component::FuelGenerator { capacity, .. } => capacity,
+        Component::Capacitor(capacity)
+        | Component::ElectricMachine { capacity, .. }
+        | Component::GpsTransmitter { capacity }
+        | Component::FuelGenerator { capacity, .. } => capacity,
         _ => return None,
     };
     (capacity > 0).then_some((state.charge.min(capacity), capacity))
@@ -1091,7 +1106,7 @@ pub(crate) fn tick(
     plain_network::clean_level(host, level);
     if !level
         .game_time(host)
-        .is_some_and(|time| time.rem_euclid(10) == 0)
+        .is_some_and(|time| time.rem_euclid(i64::from(settings.block_ticker_delay)) == 0)
     {
         return;
     }
@@ -1111,7 +1126,6 @@ pub(crate) fn tick(
                 .map(|data| (pos, (node, data.charge)))
         })
         .collect();
-    let mut claimed = BTreeSet::new();
     let mut labels = BTreeMap::new();
     networks
         .lock()
@@ -1144,15 +1158,15 @@ pub(crate) fn tick(
             move_android(networks, host, level, &dimension, node, movement);
         }
     }
-    for (&start, &(node, _)) in &active {
-        if !node.regulator() || claimed.contains(&start) {
-            continue;
-        }
-        let group: Vec<_> = connected(&active, start, node.family())
-            .into_iter()
-            .filter(|pos| claimed.insert(*pos))
-            .collect();
-        let (status, conflict) = match node.family() {
+    let groups = networks
+        .lock()
+        .unwrap()
+        .discoveries
+        .entry(dimension.clone())
+        .or_default()
+        .discover(&active, settings.network_discovery_budget);
+    for (start, family, group) in groups {
+        let (status, conflict) = match family {
             Network::Energy => {
                 let status = if group.iter().all(|pos| active[pos].0.regulator()) {
                     Some(Status::EnergyEmpty)
@@ -1393,39 +1407,6 @@ fn move_android(
     if save(host, dimension, &next).is_ok() {
         networks.levels.insert(dimension.to_owned(), Arc::new(next));
     }
-}
-
-fn connected(
-    active: &BTreeMap<Position, (&Node, u32)>,
-    start: Position,
-    family: Network,
-) -> BTreeSet<Position> {
-    // Paper's discoverNeighbors scans each axis, including range + 1.
-    let limit = match family {
-        Network::Energy => 7,
-        Network::Cargo => 6,
-        Network::Independent => return BTreeSet::new(),
-    };
-    let mut seen = BTreeSet::from([start]);
-    let mut queue = VecDeque::from([start]);
-    while let Some(pos) = queue.pop_front() {
-        for axis in 0..3 {
-            for offset in (-limit..=limit).filter(|offset| *offset != 0) {
-                let Some(value) = pos[axis].checked_add(offset) else {
-                    continue;
-                };
-                let mut neighbor = pos;
-                neighbor[axis] = value;
-                let Some(&(node, _)) = active.get(&neighbor) else {
-                    continue;
-                };
-                if node.family() == family && seen.insert(neighbor) && node.relays() {
-                    queue.push_back(neighbor);
-                }
-            }
-        }
-    }
-    seen
 }
 
 fn tick_energy(
@@ -1717,10 +1698,39 @@ mod tests {
             ([6, 70, 12], (&output, 0)),
             ([1, 70, 1], (&output, 0)),
         ]);
+        let groups = Discovery::default().discover(&active, 200);
+        assert_eq!(groups.len(), 1);
+        assert!(groups[0].1 == Network::Cargo);
         assert_eq!(
-            connected(&active, [0, 70, 0], Network::Cargo),
-            BTreeSet::from([[0, 70, 0], [6, 70, 0], [6, 70, 6], [6, 70, 5]])
+            groups[0].2,
+            [[0, 70, 0], [6, 70, 0], [6, 70, 5], [6, 70, 6]]
         );
+    }
+
+    #[test]
+    fn paper_network_discovery_counts_queued_air_and_never_caps_membership() {
+        let regulator = node("ENERGY_REGULATOR");
+        let connector = node("ENERGY_CONNECTOR");
+        let capacitor = node("SMALL_CAPACITOR");
+        let root = [0, 70, 0];
+        let relay = [1, 70, 0];
+        let target = [8, 70, 0];
+        let mut active = BTreeMap::from([(root, (&regulator, 0)), (relay, (&connector, 0))]);
+        active.insert(target, (&capacitor, 0));
+        let mut discovery = Discovery::default();
+        for _ in 0..7 {
+            assert_eq!(discovery.discover(&active, 1)[0].2, [root]);
+        }
+        assert_eq!(discovery.discover(&active, 1)[0].2, [root, relay]);
+        active.insert(target, (&capacitor, 17));
+        for _ in 0..35 {
+            assert_eq!(discovery.discover(&active, 1)[0].2, [root, relay]);
+        }
+        assert_eq!(discovery.discover(&active, 1)[0].2, [root, relay, target]);
+        active.remove(&relay);
+        assert_eq!(discovery.discover(&active, 200)[0].2, [root]);
+        active.insert(relay, (&connector, 0));
+        assert_eq!(discovery.discover(&active, 200)[0].2, [root, relay, target]);
     }
 
     #[test]
