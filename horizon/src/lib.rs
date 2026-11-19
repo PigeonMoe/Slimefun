@@ -35,6 +35,7 @@ mod composter;
 mod compressor;
 mod crucible;
 mod electric_processing;
+mod elevator;
 mod elemental_staves;
 mod enchantment_machines;
 mod enhanced_furnaces;
@@ -106,6 +107,7 @@ struct Slimefun {
     butcher_androids: android_butchery::Butchers,
     holograms: hologram_projector::Editors,
     transport: gps_transport::Transport,
+    elevators: elevator::Elevators,
     backpacks: backpacks::BackpackMenus,
     bee_wings: bee_wings::BeeWings,
     universal: universal_storage::UniversalStorage,
@@ -133,6 +135,7 @@ impl Default for Slimefun {
             butcher_androids: android_butchery::Butchers::default(),
             holograms: hologram_projector::Editors::default(),
             transport: gps_transport::Transport::default(),
+            elevators: elevator::Elevators::default(),
             backpacks: backpacks::BackpackMenus::default(),
             bee_wings: bee_wings::BeeWings::default(),
             universal: universal_storage::UniversalStorage::default(),
@@ -833,6 +836,10 @@ impl Hooks for Slimefun {
             *event.cancellation_result = InteractionResult::Consume;
             return Flow::Cancel;
         }
+        if self.elevators.editor(host, player, level, event.click.pos) {
+            *event.cancellation_result = InteractionResult::Consume;
+            return Flow::Cancel;
+        }
         if self.androids.use_at(host, player, level, event.click.pos) {
             *event.cancellation_result = InteractionResult::Consume;
             return Flow::Cancel;
@@ -974,6 +981,7 @@ impl Hooks for Slimefun {
         self.magnets.stop(event.player);
         self.holograms.logout(event.player);
         self.transport.logout(event.player);
+        self.elevators.logout(event.player);
     }
 
     #[listener(priority = -100)]
@@ -987,6 +995,7 @@ impl Hooks for Slimefun {
             .take_chat(host, event.player, event.raw_text)
             .or_else(|| self.androids.take_chat(host, event.player, event.raw_text))
             .or_else(|| self.holograms.take_chat(host, event.player, event.raw_text))
+            .or_else(|| self.elevators.chat(host, event.player, event.raw_text))
         {
             event.replies.push(reply);
             return Flow::Cancel;
@@ -1006,13 +1015,16 @@ impl Hooks for Slimefun {
                 .block_state(pos)
                 .and_then(|state| level.state_block(state))
                 == Some("minecraft:stone_pressure_plate")
-            && network_runtime::gps_plate_marked(level, &event.dimension, pos)
+            && let Some(id) = network_runtime::plate_marker(level, &event.dimension, pos)
         {
-            self.transport.step(
-                network_runtime::dimension_name(&event.dimension),
-                player,
-                pos,
-            );
+            let dimension = network_runtime::dimension_name(&event.dimension);
+            match id.as_str() {
+                "ELEVATOR_PLATE" => self.elevators.step(dimension, player, pos),
+                "GPS_ACTIVATION_DEVICE_SHARED" | "GPS_ACTIVATION_DEVICE_PERSONAL" => {
+                    self.transport.step(dimension, player, pos);
+                }
+                _ => {}
+            }
         }
         Flow::Continue
     }
@@ -1051,6 +1063,7 @@ impl Hooks for Slimefun {
         self.holograms.clicked(host, event);
         self.androids.clicked(host, event);
         self.transport.clicked(host, event);
+        self.elevators.clicked(host, event);
         network_runtime::menu_click(&self.networks, host, event);
     }
 
@@ -1063,6 +1076,7 @@ impl Hooks for Slimefun {
         self.androids.closed(event);
         self.holograms.closed(event);
         self.transport.close(event);
+        self.elevators.closed(event);
         network_runtime::menu_closed(&self.networks, event);
     }
 
@@ -1194,6 +1208,7 @@ impl Hooks for Slimefun {
             self.magnets.tick(host, event.level);
             self.bee_wings.tick(host, event.level);
             self.transport.tick(&self.networks, host, event.level);
+            self.elevators.tick(host, event.level);
         }
     }
 
@@ -1208,6 +1223,7 @@ impl Hooks for Slimefun {
     fn level_tick_pre(&self, host: HostSide<'_>, event: &mut LevelTickPreEvent) {
         if let HostSide::Server(host) = host {
             self.soulbound_rituals.tick(host, event.level);
+            self.elevators.tick_pre(host, event.level);
             self.block_placers.tick(host, event.level, &self.networks);
         }
     }
@@ -1222,6 +1238,7 @@ impl Hooks for Slimefun {
 
     fn level_unload(&self, host: &mut dyn ServerHost, event: &mut mod_api::LevelUnloadEvent<'_>) {
         self.soulbound_rituals.unload(host, event.dimension);
+        self.elevators.unload(host, event.dimension);
         rainbow::placed::unload_level(event.dimension);
         self.networks.lock().unwrap().unload_level(event.dimension);
         self.block_placers.unload(host, event.dimension);
@@ -1231,6 +1248,7 @@ impl Hooks for Slimefun {
 
     fn scheduled_task(&self, host: &mut dyn ServerHost, event: &mut ScheduledTaskEvent<'_>) {
         self.soulbound_rituals.due(host, event);
+        self.elevators.due(host, event);
         self.block_placers.due(host, event, &self.networks);
         self.delayed_crafts.scheduled_task(host, event);
     }
@@ -1246,6 +1264,7 @@ impl Hooks for Slimefun {
     fn server_stopping(&self, host: &mut dyn ServerHost, _: &mut ServerStoppingEvent) {
         self.item_clicks.clear();
         self.soulbound_rituals.clear();
+        self.elevators.clear();
         self.block_placers.clear();
         self.radiation.clear();
         rainbow::placed::clear();

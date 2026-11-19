@@ -100,6 +100,7 @@ const ALL_TYPES: &[Kind] = &[
     GPS_TELEPORTATION_MATRIX,
     GPS_ACTIVATION_DEVICE_SHARED,
     GPS_ACTIVATION_DEVICE_PERSONAL,
+    crate::elevator::ELEVATOR_PLATE,
     PORTABLE_TELEPORTER,
 ];
 pub(crate) fn item(id: &str) -> Option<Kind> {
@@ -113,7 +114,7 @@ pub(crate) fn fixed(id: &str) -> Option<Kind> {
 pub(crate) fn needs_owner(id: &str) -> bool {
     matches!(
         id,
-        "GPS_TELEPORTATION_MATRIX" | "GPS_ACTIVATION_DEVICE_PERSONAL"
+        "GPS_TELEPORTATION_MATRIX" | "GPS_ACTIVATION_DEVICE_PERSONAL" | "ELEVATOR_PLATE"
     )
 }
 

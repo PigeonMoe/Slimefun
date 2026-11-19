@@ -203,6 +203,8 @@ GPS 标记工具会记录右击方块对应的相邻位置，随后使用玩家�
 
 将传送矩阵放在八个 GPS 支柱中间，把个人或共享激活板放在矩阵上即可打开传送菜单。共享激活板会显示矩阵放置者的航点，个人激活板还要求玩家本人是激活板的放置者。便携传送器使用自己的航点，默认在打开菜单时扣除 10 J，并可在配置项 `[portable-teleporter]` 的 `teleportation-cost` 中调整。选择航点后须留在传送源附近，Horizon 会在实际传送时检查出发地与目的地的领地权限。传送矩阵和个人激活板的旧所有者可随 Paper 方块记录恢复。
 
+研究 `elevator` 后可在增强工作台制作电梯踏板。同一列的踏板从底部开始编号，踩上踏板后可在菜单中选择楼层。踏板的放置者可右键打开编辑菜单，用聊天输入带颜色代码的楼层名。`/sf storage restore-chunk` 可从 Paper 方块档案恢复踏板的 `owner` 和 `floor`，重复导入会保留已有改名。传送会经过当前的领地权限检查。
+
 Auto Enchanter 和 Auto Disenchanter 各有 I、II 两档。分别消耗附魔书或普通书，保留工具的耐久和其他组件。附魔机应用该物品支持的更高等级附魔，去附魔机将直接附魔和铁砧惩罚转移到新书。两个档位的每个处理刻分别消耗 9 J 和 24 J，使用 Paper 原始的输入槽 19、20 和输出槽 24、25，支持货运和库存恢复。前置材料 Wither-Proof Obsidian 可在增强工作台制作，放置后抵抗爆炸和凋灵拆除。默认沿用 Paper 的附魔转移规则。
 
 在 `slimefun-server.toml` 的 `[enchantment-machines.AUTO_ENCHANTER]`、`[enchantment-machines.AUTO_ENCHANTER_2]`、`[enchantment-machines.AUTO_DISENCHANTER]` 或 `[enchantment-machines.AUTO_DISENCHANTER_2]` 中可分别配置等级上限、词条数量和忽略 Lore。用 `use-enchant-level-limit`、`use-max-enchants` 及 `use-ignored-lores` 启用对应规则，再设置 `enchant-level-limit`、`max-enchants` 或 `ignored-lores`。Lore 逐行对比字面文本及 Paper 格式码。有人打开机器且遇到适用的超限词条时，第 22 槽显示提示，机器等待。无人查看时，机器跳过该词条，去附魔会保留原物品上的超限等级。附魔两档另可用 `override-existing-enchants-lvl` 允许同等级重附或覆盖成更低等级。物品专用的 `allow-enchanting` 和 `allow-disenchanting` 位于 `[item-settings.<Slimefun ID>]`。依赖 Bukkit 附魔事件的附加插件仍需兼容层。

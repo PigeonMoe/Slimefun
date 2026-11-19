@@ -59,6 +59,17 @@ struct BlockData {
     reactor_production: bool,
     stored_experience: i32,
     gps_owner: Option<u128>,
+    elevator_floor: Option<String>,
+}
+
+impl BlockData {
+    fn rename_floor(&mut self, owner: u128, name: &str) -> bool {
+        if self.gps_owner != Some(owner) {
+            return false;
+        }
+        self.elevator_floor = Some(name.to_owned());
+        true
+    }
 }
 
 // Marker presence binds a registration to the actual block entity. Replacing
@@ -91,6 +102,9 @@ static NETWORK_STATE: AttachmentType<BlockData> = AttachmentType {
                     "owner".into(),
                     Tag::String(format!("{owner:032x}").as_str().into()),
                 );
+            }
+            if let Some(floor) = &value.elevator_floor {
+                data.insert("floor".into(), Tag::String(floor.as_str().into()));
             }
             Ok(data)
         },
@@ -126,6 +140,13 @@ static NETWORK_STATE: AttachmentType<BlockData> = AttachmentType {
                         parse_uuid(&owner.to_string().map_err(|_| AttachmentError::Decode)?)
                             .ok_or(AttachmentError::Decode)?,
                     ),
+                    _ => return Err(AttachmentError::Decode),
+                },
+                elevator_floor: match data.get(&"floor".into()) {
+                    None => None,
+                    Some(Tag::String(floor)) => {
+                        Some(floor.to_string().map_err(|_| AttachmentError::Decode)?)
+                    }
                     _ => return Err(AttachmentError::Decode),
                 },
             })
@@ -224,6 +245,7 @@ impl ItemPart for NetworkPlacement {
                 || crate::crucible::refuses_placement(host, event)
                 || crate::composter::refuses_placement(host, event)
                 || crate::auto_crafter::refuses_placement(host, event)
+                || crate::elevator::refuses_placement(host, event)
                 || cargo_topology::block_invalid_placement(HostSide::Server(host), event)
             {
                 return Some(InteractionResult::Fail);
@@ -684,6 +706,13 @@ fn imported(id: &str, metadata: &toml::Table) -> Result<(Node, BlockData), &'sta
             .map(|owner| parse_uuid(owner).ok_or("Invalid Paper GPS device owner UUID."))
             .transpose()?;
     }
+    if id == crate::elevator::ELEVATOR_PLATE.id() {
+        data.elevator_floor = Some(match metadata.get("floor") {
+            None => crate::elevator::DEFAULT_FLOOR.to_owned(),
+            Some(toml::Value::String(floor)) => floor.clone(),
+            Some(_) => return Err("Invalid Paper elevator floor name."),
+        });
+    }
     Ok((node, data))
 }
 
@@ -873,17 +902,47 @@ pub(crate) fn saved_android_interface(
         })
 }
 
-pub(crate) fn gps_plate_marked(
+pub(crate) fn plate_marker(
     level: &dyn LevelHost,
     dimension: &mod_api::LevelDimension,
     pos: Position,
+) -> Option<String> {
+    plain_network::saved_at(level, dimension, pos)
+}
+
+fn elevator_data(host: &mut dyn ServerHost, level: LevelRef, pos: Position) -> Option<BlockData> {
+    let plate = crate::elevator::ELEVATOR_PLATE;
+    if level.block(host, pos)?.id(host) != plate.material() {
+        return None;
+    }
+    let data = block_data(host, level, pos)?;
+    (data.id == plate.id()).then_some(data)
+}
+
+pub(crate) fn elevator_floor(
+    host: &mut dyn ServerHost,
+    level: LevelRef,
+    pos: Position,
+) -> Option<(u128, String)> {
+    let data = elevator_data(host, level, pos)?;
+    Some((
+        data.gps_owner?,
+        data.elevator_floor
+            .unwrap_or_else(|| crate::elevator::DEFAULT_FLOOR.to_owned()),
+    ))
+}
+
+pub(crate) fn rename_elevator(
+    host: &mut dyn ServerHost,
+    level: LevelRef,
+    pos: Position,
+    owner: u128,
+    name: &str,
 ) -> bool {
-    plain_network::saved_at(level, dimension, pos).is_some_and(|id| {
-        matches!(
-            id.as_str(),
-            "GPS_ACTIVATION_DEVICE_SHARED" | "GPS_ACTIVATION_DEVICE_PERSONAL"
-        )
-    })
+    let Some(mut data) = elevator_data(host, level, pos) else {
+        return false;
+    };
+    data.rename_floor(owner, name) && write_data(host, pos, data).is_ok()
 }
 
 pub(crate) fn gps_device_at(
@@ -1600,6 +1659,42 @@ mod tests {
 
     fn node(id: &str) -> Node {
         imported(id, &toml::Table::new()).unwrap().0
+    }
+
+    #[test]
+    fn paper_elevator_floor_and_owner_survive_restart_and_only_the_owner_can_rename() {
+        use crate::elevator::{DEFAULT_FLOOR, ELEVATOR_PLATE};
+
+        let id = ELEVATOR_PLATE.id();
+        let owner = 0x2728_cc32_8191_44e7_86c9_2120_aa38_96c4;
+        let paper: toml::Table =
+            "owner = '2728cc32-8191-44e7-86c9-2120aa3896c4'\nfloor = '§b旧大厅'"
+                .parse()
+                .unwrap();
+        let (node, data) = imported(id, &paper).unwrap();
+        assert!(is_plain_node(node.component));
+        assert!(accepts_carrier(node.component, "minecraft:stone_pressure_plate"));
+        assert!(crate::gps_transport::needs_owner(id));
+        assert_eq!(data.gps_owner, Some(owner));
+        assert_eq!(data.elevator_floor.as_deref(), Some("§b旧大厅"));
+        assert_eq!(
+            imported(id, &toml::Table::new()).unwrap().1.elevator_floor.as_deref(),
+            Some(DEFAULT_FLOOR)
+        );
+        assert!(imported(id, &"floor = 17".parse::<toml::Table>().unwrap()).is_err());
+
+        let pos = [451, -23, -801];
+        let mut host = FakeHost::new();
+        write_data(&mut host, pos, data).unwrap();
+        host.attachments = mod_api::Attachments::from_nbt(host.attachments.to_nbt());
+        let mut loaded = plain_network::read_persisted(&mut host, pos).unwrap();
+        assert_eq!(loaded.gps_owner, Some(owner));
+        assert_eq!(loaded.elevator_floor.as_deref(), Some("§b旧大厅"));
+        assert!(!loaded.rename_floor(owner + 1, "Foreign name"));
+        assert!(loaded.rename_floor(owner, "&6大厅"));
+        write_data(&mut host, pos, loaded).unwrap();
+        let stored = plain_network::read_persisted(&mut host, pos).unwrap();
+        assert_eq!(stored.elevator_floor.as_deref(), Some("&6大厅"));
     }
 
     #[test]

@@ -187,6 +187,7 @@ impl SlimefunItem {
         crate::ancient_altar::decorate(self.id, &mut components);
         crate::soulbound_gear::decorate(self.id, &mut components);
         crate::rainbow::decorate(self.id, &mut components);
+        crate::elevator::decorate(self.id, &mut components);
         crate::medical::decorate(self.id, &mut components);
         crate::magic_eye::decorate(self.id, &mut components);
         crate::elemental_staves::decorate(self.id, &mut components);

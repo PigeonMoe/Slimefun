@@ -491,7 +491,7 @@ fn button(
     Some(stack)
 }
 
-fn colored_lore(label: &str) -> Tag {
+pub(crate) fn colored_lore(label: &str) -> Tag {
     let extras = formatted_runs(label)
         .into_iter()
         .map(|(value, style)| {
@@ -538,7 +538,7 @@ pub(crate) fn piston_protected(level: &dyn LevelHost, event: &mod_api::PistonPre
     })
 }
 
-fn colored_label(label: &str) -> Text {
+pub(crate) fn colored_label(label: &str) -> Text {
     let mut result = Text::literal("");
     for (value, style) in formatted_runs(label) {
         let mut run = Text::literal(value);
