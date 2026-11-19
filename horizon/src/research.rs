@@ -14,7 +14,7 @@ pub(crate) fn can_use(host: &dyn Host, player: PlayerRef, research: &Research) -
             .is_some_and(|data| unlocked(data, research))
 }
 
-fn unlocked(data: &Compound, research: &Research) -> bool {
+pub(crate) fn unlocked(data: &Compound, research: &Research) -> bool {
     match data.get(&PERSISTED.into()) {
         Some(Tag::Compound(saved)) => unlocked_persisted(saved, research),
         _ => false,

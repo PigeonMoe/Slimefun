@@ -230,6 +230,22 @@ pub(crate) const CRAFTING: &[CraftingRecipe] = &[
         &NECROMANCY,
     ),
     crate::infused::ALTAR,
+    altar_recipe(
+        [
+            MAGIC_LUMP_3,
+            ESSENCE_OF_AFTERLIFE,
+            MAGIC_LUMP_3,
+            ENDER_LUMP_3,
+            crate::armor_forge::ANCIENT_RUNE_ENDER,
+            ENDER_LUMP_3,
+            MAGIC_LUMP_3,
+            ESSENCE_OF_AFTERLIFE,
+            MAGIC_LUMP_3,
+        ],
+        crate::soulbound_rune::ANCIENT_RUNE_SOULBOUND,
+        1,
+        &crate::soulbound_rune::RESEARCH,
+    ),
 ];
 
 const fn altar_recipe(
@@ -1243,6 +1259,9 @@ pub(crate) fn decorate(id: &str, components: &mut Compound) {
             .collect();
         components.insert("minecraft:lore".into(), Tag::List(lines));
     }
+    if id == "ANCIENT_RUNE_SOULBOUND" {
+        components.insert("minecraft:lore".into(), crate::soulbound_rune::lore());
+    }
     let (element, element_color, rgb) = match id {
         "BLANK_RUNE" => ("", "dark_gray", 0),
         "ANCIENT_RUNE_AIR" => ("Air", "aqua", 0x00ffff),
@@ -1251,6 +1270,7 @@ pub(crate) fn decorate(id: &str, components: &mut Compound) {
         "ANCIENT_RUNE_WATER" => ("Water", "dark_blue", 0x0000ff),
         "ANCIENT_RUNE_ENDER" => ("Ender", "dark_purple", 0x800080),
         "ANCIENT_RUNE_RAINBOW" => ("Rainbow", "light_purple", 0xff00ff),
+        "ANCIENT_RUNE_SOULBOUND" => ("Soulbound", "dark_purple", 0x2f0075),
         _ => return,
     };
     components.insert(

@@ -188,6 +188,7 @@ pub(crate) fn researches() -> impl Iterator<Item = &'static Research> {
         .chain([
             &crate::ancient_altar::ALTAR_RESEARCH,
             &crate::ancient_altar::RUNES_RESEARCH,
+            &crate::soulbound_rune::RESEARCH,
         ])
         .chain(crate::network_runtime::trash::RESEARCHES)
         .chain(crate::factory::reactors::RESEARCHES)

@@ -977,6 +977,10 @@ pub(crate) fn network_item(id: &str) -> Option<Kind> {
         (pump.id() == id).then_some(pump)
     })
     .or_else(|| crate::rainbow::item(id))
+    .or_else(|| {
+        let rune = crate::soulbound_rune::ANCIENT_RUNE_SOULBOUND;
+        (rune.id() == id).then_some(rune)
+    })
     .or_else(|| crate::fuel_generators::generator(id).map(|spec| spec.item))
     .or_else(|| {
         [

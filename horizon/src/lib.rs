@@ -68,6 +68,7 @@ mod random;
 mod recipes;
 mod research;
 mod soulbound_gear;
+mod soulbound_rune;
 mod stomper;
 mod storage;
 mod tape_measure;
@@ -85,6 +86,7 @@ use recipes::{
 struct Slimefun {
     delayed_crafts: DelayedCrafts,
     radiation: radiation::Radiation,
+    soulbound_rituals: soulbound_rune::Rituals,
     block_placers: block_placer::Placers,
     composters: composter::Composters,
     crucibles: crucible::Crucibles,
@@ -110,6 +112,7 @@ impl Default for Slimefun {
         Self {
             delayed_crafts: DelayedCrafts::default(),
             radiation: radiation::Radiation::default(),
+            soulbound_rituals: soulbound_rune::Rituals::default(),
             block_placers: block_placer::Placers::default(),
             composters: composter::Composters::default(),
             crucibles: crucible::Crucibles::default(),
@@ -913,13 +916,16 @@ impl Hooks for Slimefun {
         host: &dyn mod_api::Host,
         event: &mut mod_api::PlayerKeepDeathItemEvent<'_>,
     ) -> Flow {
-        if backpacks::keep_on_death(host, event.stack)
-            || soulbound_gear::keeps_on_death(host, event.stack)
-        {
+        if soulbound_rune::is_bound(host, event.stack) {
             Flow::Cancel
         } else {
             Flow::Continue
         }
+    }
+
+    fn item_toss(&self, host: &mut dyn ServerHost, event: &mut mod_api::ItemTossEvent) -> Flow {
+        self.soulbound_rituals.tossed(host, event);
+        Flow::Continue
     }
 
     fn player_logged_in(&self, host: &mut dyn ServerHost, event: &mut PlayerLoggedInEvent<'_>) {
@@ -1175,6 +1181,7 @@ impl Hooks for Slimefun {
 
     fn level_tick_pre(&self, host: HostSide<'_>, event: &mut LevelTickPreEvent) {
         if let HostSide::Server(host) = host {
+            self.soulbound_rituals.tick(host, event.level);
             self.block_placers.tick(host, event.level, &self.networks);
         }
     }
@@ -1188,6 +1195,7 @@ impl Hooks for Slimefun {
     }
 
     fn level_unload(&self, host: &mut dyn ServerHost, event: &mut mod_api::LevelUnloadEvent<'_>) {
+        self.soulbound_rituals.unload(host, event.dimension);
         rainbow::placed::unload_level(event.dimension);
         self.networks.lock().unwrap().unload_level(event.dimension);
         self.block_placers.unload(host, event.dimension);
@@ -1196,6 +1204,7 @@ impl Hooks for Slimefun {
     }
 
     fn scheduled_task(&self, host: &mut dyn ServerHost, event: &mut ScheduledTaskEvent<'_>) {
+        self.soulbound_rituals.due(host, event);
         self.block_placers.due(host, event, &self.networks);
         self.delayed_crafts.scheduled_task(host, event);
     }
@@ -1209,6 +1218,7 @@ impl Hooks for Slimefun {
     }
 
     fn server_stopping(&self, host: &mut dyn ServerHost, _: &mut ServerStoppingEvent) {
+        self.soulbound_rituals.clear();
         self.block_placers.clear();
         self.radiation.clear();
         rainbow::placed::clear();
