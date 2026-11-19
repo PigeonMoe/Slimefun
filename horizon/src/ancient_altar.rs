@@ -1,5 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
+#[path = "ancient_altar/paper_projection.rs"]
+mod paper_projection;
+
+pub(crate) fn item_expire(event: &mut mod_api::ItemExpireEvent<'_>) {
+    if event.extra_life <= 0 && paper_projection::keep_until_restore(event.stack) {
+        event.extra_life = 6000;
+    }
+}
+
 use std::sync::{
     OnceLock,
     atomic::{AtomicI32, Ordering},
@@ -334,83 +343,6 @@ pub(crate) fn paper_device(id: &str) -> Option<Kind> {
         .find(|kind| kind.id() == id)
 }
 
-fn legacy_probe_text(text: &str) -> bool {
-    let mut characters = text.chars();
-    let mut plain = String::new();
-    while let Some(character) = characters.next() {
-        if character == '§' {
-            characters.next();
-        } else {
-            plain.push(character);
-        }
-        if plain.len() > 64 {
-            break;
-        }
-    }
-    plain.starts_with("ALTAR Probe - ")
-}
-
-fn probe_name(name: &Tag, prefix: &mut String, depth: u8) {
-    if depth == 16 || prefix.len() >= 64 {
-        return;
-    }
-    match name {
-        Tag::String(text) => {
-            for character in text.to_string_lossy().chars().take(64) {
-                prefix.push(character);
-            }
-        }
-        Tag::Compound(text) => {
-            if let Some(text) = text.get(&"text".into()) {
-                probe_name(text, prefix, depth + 1);
-            }
-            if let Some(extra) = text.get(&"extra".into()) {
-                probe_name(extra, prefix, depth + 1);
-            }
-        }
-        Tag::List(parts) => {
-            for part in parts {
-                if prefix.len() >= 64 {
-                    break;
-                }
-                probe_name(part, prefix, depth + 1);
-            }
-        }
-        _ => {}
-    }
-}
-
-fn has_paper_display(host: &dyn Host, level: LevelRef, pos: Pos) -> Option<bool> {
-    let [x, y, z] = pos.map(f64::from);
-    let candidates = level.entities_in(host, [x, y + 0.7, z], [x + 1.0, y + 1.7, z + 1.0])?;
-    Some(candidates.into_iter().any(|entity| {
-        if entity
-            .name(host)
-            .is_some_and(|name| legacy_probe_text(&name))
-        {
-            return true;
-        }
-        let Some(item) = host.item_entity(entity) else {
-            return false;
-        };
-        if item.pickup_delay(host) == Some(i32::from(i16::MAX)) {
-            return true;
-        }
-        let Some(stack) = item.stack(host) else {
-            return false;
-        };
-        let Some(name) = stack
-            .components()
-            .and_then(|data| data.as_nbt().get(&"minecraft:custom_name".into()))
-        else {
-            return false;
-        };
-        let mut prefix = String::new();
-        probe_name(name, &mut prefix, 0);
-        legacy_probe_text(&prefix)
-    }))
-}
-
 fn paper_ingredient(
     host: &dyn ServerHost,
     kind: Kind,
@@ -473,18 +405,26 @@ pub(crate) fn restore_paper(
     {
         return Err("This carrier already belongs to a different Slimefun device.".into());
     }
-    let item = paper_ingredient(host, kind, row)?;
-    if kind == ANCIENT_PEDESTAL {
-        if has_paper_display(host, level, pos) != Some(false) {
-            return Err("A Paper pedestal display may still be in the world. Recover its item in Paper before restoring this marker. The original archive and entities remain in place.".into());
-        }
+    let archived = paper_ingredient(host, kind, row)?;
+    let projection = if kind == ANCIENT_PEDESTAL {
         let storage = level
             .capability(host, &ITEMS, pos, None)
             .ok_or("The Paper pedestal has no loaded dispenser inventory.")?;
         if (0..storage.size(host)).any(|slot| storage.amount(host, slot) != 0) {
             return Err("The pedestal carrier's vanilla dispenser still contains items.".into());
         }
-    }
+        let projection = paper_projection::find(host, level, pos)?;
+        if projection.is_some() && row.contains_key("paper_inventory") {
+            return Err("Both a pedestal inventory archive and a live Paper projection exist. The archive and entities remain in place.".into());
+        }
+        projection
+    } else {
+        None
+    };
+    let item = projection
+        .as_ref()
+        .map(|projection| &projection.ingredient)
+        .or(archived.as_ref());
     let mut marker = Compound::from([("id".into(), Tag::String(kind.id().into()))]);
     let has_item = item.is_some();
     if let Some(item) = item {
@@ -499,6 +439,11 @@ pub(crate) fn restore_paper(
             .map_err(|_| "Could not save the Paper altar marker.")?;
         if has_item {
             watch_display(host, pos)?;
+        }
+        if let Some(projection) = projection
+            && (!projection.item.discard(host) || !projection.stand.discard(host))
+        {
+            return Err("The original Paper projection changed during restore. Nothing was moved.");
         }
         Ok::<_, &'static str>(())
     })?;
@@ -1347,21 +1292,6 @@ mod tests {
             .parse()
             .unwrap();
         assert!(paper_ingredient(&host, ANCIENT_PEDESTAL, &wrong).is_err());
-        let mut prefix = String::new();
-        probe_name(
-            &Tag::compound([
-                ("text", Tag::String("ALTAR ".into())),
-                (
-                    "extra",
-                    Tag::List(vec![Tag::String("Probe - 178899".into())]),
-                ),
-            ]),
-            &mut prefix,
-            0,
-        );
-        assert!(legacy_probe_text(&prefix));
-        assert!(legacy_probe_text("§dALTAR §3Probe - §e79387"));
-        assert!(!legacy_probe_text("My ALTAR Probe - 178899"));
     }
 
     #[test]

@@ -979,6 +979,10 @@ impl Hooks for Slimefun {
         Flow::Continue
     }
 
+    fn item_expire(&self, _: &mut dyn ServerHost, event: &mut mod_api::ItemExpireEvent<'_>) {
+        ancient_altar::item_expire(event);
+    }
+
     fn player_logged_in(&self, host: &mut dyn ServerHost, event: &mut PlayerLoggedInEvent<'_>) {
         if let Some(player) = host.player(event.player) {
             research::import_legacy(host, player);
