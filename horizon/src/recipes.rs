@@ -100,6 +100,18 @@ pub(crate) struct Research {
     pub cost: i32,
 }
 
+pub(crate) fn crafting_container(material: &str) -> Option<Kind> {
+    Some(Kind::Vanilla(match material {
+        "minecraft:water_bucket" | "minecraft:lava_bucket" | "minecraft:milk_bucket" => {
+            "minecraft:bucket"
+        }
+        "minecraft:dragon_breath" | "minecraft:potion" | "minecraft:honey_bottle" => {
+            "minecraft:glass_bottle"
+        }
+        _ => return None,
+    }))
+}
+
 pub(crate) fn crafting() -> impl Iterator<Item = &'static CraftingRecipe> {
     CRAFTING
         .iter()
@@ -118,6 +130,7 @@ pub(crate) fn crafting() -> impl Iterator<Item = &'static CraftingRecipe> {
         .chain(crate::gps_transport::CRAFTING)
         .chain(crate::backpacks::CRAFTING)
         .chain(crate::food_machines::CRAFTING)
+        .chain(crate::medical::CRAFTING)
         .chain([&crate::auto_brewer::CRAFTING])
         .chain([&crate::factory::fluid_pump::CRAFTING])
         .chain([&crate::factory::charging_bench::CRAFTING])

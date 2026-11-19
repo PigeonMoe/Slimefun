@@ -162,11 +162,6 @@ item!(
 item!(CLOTH, "paper", "Cloth", "aqua", None, None);
 
 const LEATHER: Option<Kind> = Some(Kind::Vanilla("minecraft:leather"));
-const UNRESTRICTED: Research = Research {
-    id: "",
-    name: "",
-    cost: 0,
-};
 
 const fn casing(material: Option<Kind>, gold: Kind, center: Kind) -> [Option<Kind>; 9] {
     [
@@ -225,7 +220,7 @@ pub(crate) const CRAFTING: &[CraftingRecipe] = &[
             kind: CLOTH,
             count: 8,
         },
-        research: &UNRESTRICTED,
+        research: &crate::food_machines::FIRST_AID,
     },
     recipe(
         casing(LEATHER, GOLD_6K, Kind::Vanilla("minecraft:chest")),

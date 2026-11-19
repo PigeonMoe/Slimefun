@@ -268,7 +268,7 @@ pub(crate) fn restore_drop(level: &dyn LevelHost, event: &mut BlockDropsEvent<'_
     }
 }
 
-const FIRST_AID: Research = Research {
+pub(crate) const FIRST_AID: Research = Research {
     id: "first_aid",
     name: "First Aid",
     cost: 2,

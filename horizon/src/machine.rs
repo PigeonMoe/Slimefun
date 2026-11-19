@@ -483,11 +483,13 @@ impl Machine {
                         .ok_or(Refusal::Unavailable)?;
                     backpacks::prepare_craft(host, tx, player, &slots, &mut output)
                         .map_err(Refusal::Backpack)?;
-                    for (slot, item) in slots.iter().enumerate() {
-                        if let Some(item) = item {
-                            consume(host, tx, &dispenser.place(slot), item, 1)?;
-                        }
-                    }
+                    pay_crafting_inputs(
+                        host,
+                        tx,
+                        dispenser,
+                        &slots,
+                        matches!(self, Self::Crafting),
+                    )?;
                     if matches!(self, Self::MagicCrafting { .. } | Self::ArmorCrafting) {
                         host.transaction(|host, tx| {
                             Err::<(), _>(deposit_output(host, tx, dispenser, &output))
@@ -642,6 +644,39 @@ fn opposite_on_axis(
             .block_state(host, pos)
             .is_some_and(|state| supported.contains(&state.block().id(host).as_str()))
     })
+}
+
+fn pay_crafting_inputs(
+    host: &mut dyn ServerHost,
+    tx: &Transaction,
+    dispenser: Dispenser,
+    slots: &[Option<ItemStack>; 9],
+    return_containers: bool,
+) -> Result<(), Refusal> {
+    for (slot, item) in slots.iter().enumerate() {
+        if let Some(item) = item {
+            consume(host, tx, &dispenser.place(slot), item, 1)?;
+        }
+    }
+    if !return_containers {
+        return Ok(());
+    }
+    for (slot, item) in slots.iter().enumerate() {
+        let Some(container) = item
+            .as_ref()
+            .and_then(|item| crate::recipes::crafting_container(&item.item().id(host)))
+        else {
+            continue;
+        };
+        let stack = container.stack(host, 1).ok_or(Refusal::Unavailable)?;
+        let original_slot = ItemPlace::Strict(Box::new(dispenser.place(slot)));
+        if original_slot.insert(host, tx, &ItemResource::of(&stack), 1) == 0
+            && deposit_stack(host, tx, dispenser, &stack, 1) != 0
+        {
+            return Err(Refusal::NoOutputSpace);
+        }
+    }
+    Ok(())
 }
 
 fn consume(
@@ -904,11 +939,50 @@ mod tests {
         assert_eq!(slots[0].as_ref().unwrap().count(), 64);
     }
 
+    #[test]
+    fn enhanced_workbench_returns_the_milk_bucket_without_losing_it_to_a_failed_output() {
+        let (mut host, dispenser) = dispenser();
+        let milk = Kind::Vanilla("minecraft:milk_bucket");
+        let bucket = Kind::Vanilla("minecraft:bucket");
+        let milk_stack = milk.stack(&host, 1).unwrap();
+        set_slot(&mut host, 0, milk_stack);
+        let recipe = crafting()
+            .find(|recipe| recipe.output.kind == crate::medical::HEAVY_CREAM)
+            .unwrap();
+        let input = dispenser.slots(&mut host);
+        assert_eq!(recipe.inputs[0], Some(milk));
+        let cream = recipe.output.kind.stack(&host, recipe.output.count).unwrap();
+        let result = (&mut host as &mut dyn ServerHost).transaction(|host, tx| {
+            pay_crafting_inputs(host, tx, dispenser, &input, true)?;
+            Err::<(), _>(Refusal::NoOutputSpace)
+        });
+        assert!(matches!(result, Err(Refusal::NoOutputSpace)));
+        let restored = dispenser.slots(&mut host);
+        assert!(milk.matches(&host, restored[0].as_ref().unwrap()));
+        let result = (&mut host as &mut dyn ServerHost).transaction(|host, tx| {
+            pay_crafting_inputs(host, tx, dispenser, &input, true)?;
+            (deposit_stack(host, tx, dispenser, &cream, cream.count()) == 0)
+                .then_some(())
+                .ok_or(Refusal::NoOutputSpace)
+        });
+        assert!(result.is_ok());
+        let slots = dispenser.slots(&mut host);
+        assert!(bucket.matches(&host, slots[0].as_ref().unwrap()));
+        assert_eq!(slots[1], Some(cream));
+    }
+
     fn dispenser() -> (FakeHost, Dispenser) {
         let mut host = FakeHost::new();
         host.registries
             .resolve_items(
-                [BLAZE_ROD.id(), BLAZE_POWDER.id()].map(|id| Identifier::parse(id).unwrap()),
+                [
+                    BLAZE_ROD.id(),
+                    BLAZE_POWDER.id(),
+                    "minecraft:milk_bucket",
+                    "minecraft:bucket",
+                    "minecraft:snowball",
+                ]
+                .map(|id| Identifier::parse(id).unwrap()),
             )
             .unwrap();
         host.level.block_entity(POSITION).with_items(9);

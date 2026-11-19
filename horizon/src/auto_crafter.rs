@@ -563,20 +563,10 @@ fn payments(
 }
 
 fn leftover(host: &dyn Host, payment: &Payment) -> Result<Option<ItemStack>, ()> {
-    let material = payment.stack.item().id(host);
-    let item = match material.as_str() {
-        "minecraft:water_bucket" | "minecraft:lava_bucket" | "minecraft:milk_bucket" => {
-            "minecraft:bucket"
-        }
-        "minecraft:dragon_breath" | "minecraft:potion" | "minecraft:honey_bottle" => {
-            "minecraft:glass_bottle"
-        }
-        _ => return Ok(None),
+    let Some(container) = crate::recipes::crafting_container(&payment.stack.item().id(host)) else {
+        return Ok(None);
     };
-    Kind::Vanilla(item)
-        .stack(host, payment.amount)
-        .map(Some)
-        .ok_or(())
+    container.stack(host, payment.amount).map(Some).ok_or(())
 }
 
 fn insert_all(

@@ -56,6 +56,7 @@ mod infused;
 mod items;
 mod juice;
 mod machine;
+mod medical;
 mod network_recipes;
 mod network_runtime;
 mod networks;
@@ -682,6 +683,13 @@ impl Hooks for Slimefun {
         let Some(player) = host.player(event.click.player) else {
             return Flow::Continue;
         };
+        if *event.use_item != TriState::False
+            && let Some(held) = event.click.stack
+            && medical::use_supply(host, player, event.click.hand, held)
+        {
+            *event.cancellation_result = InteractionResult::Consume;
+            return Flow::Cancel;
+        }
         if !matches!(
             player.game_mode(host),
             Some(GameMode::Survival | GameMode::Creative)
@@ -854,13 +862,22 @@ impl Hooks for Slimefun {
 
     #[listener(priority = -100)]
     fn right_click_item(&self, host: HostSide<'_>, event: &mut RightClickItemEvent<'_>) -> Flow {
-        if let HostSide::Server(host) = host
-            && let Some(player) = host.player(event.click.player)
-            && matches!(
-                player.game_mode(host),
-                Some(GameMode::Survival | GameMode::Creative)
-            )
-            && (tape_measure::in_air(host, player, event.click.stack)
+        let HostSide::Server(host) = host else {
+            return Flow::Continue;
+        };
+        let Some(player) = host.player(event.click.player) else {
+            return Flow::Continue;
+        };
+        if medical::HEAVY_CREAM.matches(host, event.click.stack)
+            || medical::use_supply(host, player, event.click.hand, event.click.stack)
+        {
+            *event.cancellation_result = InteractionResult::Consume;
+            return Flow::Cancel;
+        }
+        if matches!(
+            player.game_mode(host),
+            Some(GameMode::Survival | GameMode::Creative)
+        ) && (tape_measure::in_air(host, player, event.click.stack)
                 || portable_crafter::use_held(host, player, event.click.stack)
                 || self.backpacks.use_held(host, player, event.click.hand)
                 || network_runtime::trash::portable(host, player, event.click.hand)
@@ -1010,11 +1027,14 @@ impl Hooks for Slimefun {
         match host {
             HostSide::Server(host) => {
                 let result = thermal_machines::start_eating_jerky(host, event);
-                if result == Flow::Continue {
-                    juice::start(host, event)
-                } else {
-                    result
+                if result != Flow::Continue {
+                    return result;
                 }
+                let result = medical::start(host, event);
+                if result != Flow::Continue {
+                    return result;
+                }
+                juice::start(host, event)
             }
             _ => Flow::Continue,
         }
@@ -1028,6 +1048,7 @@ impl Hooks for Slimefun {
         if let HostSide::Server(host) = host {
             juice::finish(host, event);
             thermal_machines::finish_eating_jerky(host, event);
+            medical::finish(host, event);
         }
     }
 

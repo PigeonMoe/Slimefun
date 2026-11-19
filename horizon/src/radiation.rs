@@ -141,7 +141,7 @@ impl Radiation {
             return;
         };
         // Keep an explicit zero so the original Paper tag is never imported again.
-        let _ = EXPOSURE.set(host, Holder::Player(player.uuid()), 0);
+        clear_exposure(host, player);
         let now = host.server_monotonic_millis();
         let mut state = self.0.lock().unwrap();
         let deadline = now.saturating_add(state.rules.grace_ms);
@@ -218,6 +218,10 @@ fn colored(text: impl Into<String>, color: &str) -> Text {
     let mut style = TextStyle::default();
     style.color = Some(color.into());
     Text::literal(text).with_style(style)
+}
+
+pub(crate) fn clear_exposure(host: &mut dyn ServerHost, player: PlayerRef) {
+    let _ = EXPOSURE.set(host, Holder::Player(player.uuid()), 0);
 }
 
 fn exposure(host: &mut dyn ServerHost, player: PlayerRef) -> Option<(u8, bool)> {
