@@ -3,8 +3,8 @@
 use std::{collections::BTreeMap, sync::LazyLock};
 
 use crate::{
-    ancient_altar, armor_forge,
-    items::Kind,
+    ancient_altar, armor_forge, food_machines, industrial_miner,
+    items::{self, Kind},
     rainbow,
     recipes::{self, CraftingRecipe, Research, SingleRecipe, Stack},
     soulbound_gear,
@@ -12,40 +12,87 @@ use crate::{
 
 #[derive(Clone, Copy)]
 pub(super) struct RecipeType {
-    pub material: &'static str,
+    pub icon: Kind,
     pub name: &'static str,
+    pub lore: &'static [&'static str],
 }
 
-pub(super) const ENHANCED_CRAFTING: RecipeType = RecipeType {
-    material: "minecraft:crafting_table",
-    name: "Enhanced Crafting Table",
+impl RecipeType {
+    const fn plain(material: &'static str, name: &'static str) -> Self {
+        Self {
+            icon: Kind::Vanilla(material),
+            name,
+            lore: &[],
+        }
+    }
+}
+
+pub(super) const ENHANCED_CRAFTING: RecipeType =
+    RecipeType::plain("minecraft:crafting_table", "Enhanced Crafting Table");
+const MAGIC_WORKBENCH: RecipeType = RecipeType::plain("minecraft:bookshelf", "Magic Workbench");
+const ARMOR_FORGE: RecipeType = RecipeType::plain("minecraft:anvil", "Armor Forge");
+const ANCIENT_ALTAR: RecipeType = RecipeType::plain("minecraft:enchanting_table", "Ancient Altar");
+const SMELTERY: RecipeType = RecipeType::plain("minecraft:furnace", "Smeltery");
+const MULTIBLOCK: RecipeType = RecipeType::plain("minecraft:bricks", "MultiBlock");
+
+const WASHER: RecipeType = RecipeType {
+    lore: &["", "&a&oWash it in an Ore Washer"],
+    ..RecipeType::plain("minecraft:cauldron", "Ore Washer")
 };
-const MAGIC_WORKBENCH: RecipeType = RecipeType {
-    material: "minecraft:bookshelf",
-    name: "Magic Workbench",
+const GOLD_PAN: RecipeType = RecipeType {
+    icon: items::GOLD_PAN,
+    name: "Gold Pan",
+    lore: &["", "&a&oUse a Gold Pan on Gravel to obtain this Item"],
 };
-const ARMOR_FORGE: RecipeType = RecipeType {
-    material: "minecraft:anvil",
-    name: "Armor Forge",
+const MOB_DROP: RecipeType = RecipeType {
+    lore: &["", "&rKill the specified Mob to obtain this Item"],
+    ..RecipeType::plain("minecraft:iron_sword", "Mob Drop")
 };
-const ANCIENT_ALTAR: RecipeType = RecipeType {
-    material: "minecraft:enchanting_table",
-    name: "Ancient Altar",
+const FOOD_FABRICATOR: RecipeType = RecipeType {
+    icon: food_machines::FOOD_FABRICATOR,
+    name: "Food Fabricator",
+    lore: &[],
 };
-const SMELTERY: RecipeType = RecipeType {
-    material: "minecraft:furnace",
-    name: "Smeltery",
+const FOOD_COMPOSTER: RecipeType = RecipeType {
+    icon: food_machines::FOOD_COMPOSTER,
+    name: "Food Composter",
+    lore: &[],
 };
-const MULTIBLOCK: RecipeType = RecipeType {
-    material: "minecraft:bricks",
-    name: "MultiBlock",
-};
+
+const IRON_GOLEM: &[IngredientVisual] = &[IngredientVisual {
+    slot: 4,
+    label: "&aIron Golem",
+    profile: Some(items::HeadTexture {
+        profile: [669471756, -955559616, -1944180456, -1177071508],
+        value: "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHA6Ly90ZXh0dXJlcy5taW5lY3JhZnQubmV0L3RleHR1cmUvODkwOTFkNzllYTBmNTllZjdlZjk0ZDdiYmE2ZTVmMTdmMmY3ZDQ1NzJjNDRmOTBmNzZjNDgxOWE3MTQifX19",
+    }),
+}];
+
+pub(super) struct IngredientVisual {
+    pub slot: usize,
+    pub label: &'static str,
+    pub profile: Option<items::HeadTexture>,
+}
+
+const FACED_PISTONS: &[IngredientVisual] = &[
+    IngredientVisual {
+        slot: 3,
+        label: "Piston (facing up)",
+        profile: None,
+    },
+    IngredientVisual {
+        slot: 5,
+        label: "Piston (facing up)",
+        profile: None,
+    },
+];
 
 #[derive(Clone, Copy)]
 pub(super) struct Entry {
     pub item: Stack,
     pub label: Option<&'static str>,
     pub ingredients: [Option<Stack>; 9],
+    pub visuals: &'static [IngredientVisual],
     pub recipe_type: RecipeType,
     pub research: Option<&'static Research>,
 }
@@ -275,6 +322,53 @@ fn multiblocks(entries: &mut BTreeMap<String, Entry>) {
             Some(&recipes::ORE_WASHER),
         ),
         (
+            "TABLE_SAW",
+            "Table Saw",
+            "minecraft:stonecutter",
+            &[
+                (3, "minecraft:smooth_stone_slab"),
+                (4, "minecraft:stonecutter"),
+                (5, "minecraft:smooth_stone_slab"),
+                (7, "minecraft:iron_block"),
+            ],
+            Some(&recipes::TABLE_SAW),
+        ),
+        (
+            "AUTOMATED_PANNING_MACHINE",
+            "Automated Panning Machine",
+            "minecraft:bowl",
+            &[(4, "minecraft:oak_trapdoor"), (7, "minecraft:cauldron")],
+            Some(&recipes::AUTOMATED_PANNING_MACHINE),
+        ),
+        (
+            "INDUSTRIAL_MINER",
+            "Industrial Miner",
+            "minecraft:golden_pickaxe",
+            &[
+                (3, "minecraft:piston"),
+                (4, "minecraft:chest"),
+                (5, "minecraft:piston"),
+                (6, "minecraft:iron_block"),
+                (7, "minecraft:blast_furnace"),
+                (8, "minecraft:iron_block"),
+            ],
+            Some(&industrial_miner::RESEARCH),
+        ),
+        (
+            "ADVANCED_INDUSTRIAL_MINER",
+            "Advanced Industrial Miner",
+            "minecraft:diamond_pickaxe",
+            &[
+                (3, "minecraft:piston"),
+                (4, "minecraft:chest"),
+                (5, "minecraft:piston"),
+                (6, "minecraft:diamond_block"),
+                (7, "minecraft:blast_furnace"),
+                (8, "minecraft:diamond_block"),
+            ],
+            Some(&industrial_miner::ADVANCED_RESEARCH),
+        ),
+        (
             "JUICER",
             "Juicer",
             "minecraft:glass_bottle",
@@ -296,6 +390,11 @@ fn multiblocks(entries: &mut BTreeMap<String, Entry>) {
                 item: stack_of(Kind::Vanilla(icon)),
                 label: Some(name),
                 ingredients: stacks,
+                visuals: if matches!(id, "INDUSTRIAL_MINER" | "ADVANCED_INDUSTRIAL_MINER") {
+                    FACED_PISTONS
+                } else {
+                    &[]
+                },
                 recipe_type: MULTIBLOCK,
                 research,
             },
@@ -318,6 +417,7 @@ fn workbench(recipe_type: RecipeType, recipe: &CraftingRecipe) -> Entry {
         item: recipe.output,
         label: None,
         ingredients: recipe.inputs.map(|entry| entry.map(stack_of)),
+        visuals: &[],
         recipe_type,
         research: (!recipe.research.id.is_empty()).then_some(recipe.research),
     }
@@ -330,6 +430,7 @@ fn processing(recipe_type: RecipeType, recipe: &SingleRecipe) -> Entry {
         item: recipe.output,
         label: None,
         ingredients,
+        visuals: &[],
         recipe_type,
         research: recipes::output_research(recipe.output.kind),
     }
@@ -371,6 +472,7 @@ fn build() -> BTreeMap<String, Entry> {
                 item: r.output,
                 label: None,
                 ingredients,
+                visuals: &[],
                 recipe_type: SMELTERY,
                 research: recipes::output_research(r.output.kind),
             });
@@ -389,7 +491,7 @@ fn build() -> BTreeMap<String, Entry> {
     ] {
         for recipe in recipes {
             if matches!(recipe.output.kind, Kind::Slimefun(_)) {
-                let recipe_type = RecipeType { material, name };
+                let recipe_type = RecipeType::plain(material, name);
                 entries
                     .entry(canonical(recipe.output.kind.id()))
                     .or_insert_with(|| processing(recipe_type, recipe));
@@ -397,5 +499,84 @@ fn build() -> BTreeMap<String, Entry> {
         }
     }
     multiblocks(&mut entries);
+    stock_sources(&mut entries);
     entries
+}
+
+fn stock_sources(entries: &mut BTreeMap<String, Entry>) {
+    let mut add = |recipe_type,
+                   output: Kind,
+                   count,
+                   inputs: &[(usize, Kind)],
+                   research: Option<&'static Research>,
+                   visuals: &'static [IngredientVisual]| {
+        let mut ingredients = [None; 9];
+        for &(slot, kind) in inputs {
+            ingredients[slot] = Some(stack_of(kind));
+        }
+        entries.insert(
+            canonical(output.id()),
+            Entry {
+                item: Stack {
+                    kind: output,
+                    count,
+                },
+                label: None,
+                ingredients,
+                visuals,
+                recipe_type,
+                research,
+            },
+        );
+    };
+
+    add(
+        GOLD_PAN,
+        items::SIFTED_ORE,
+        1,
+        &[(0, Kind::Vanilla("minecraft:gravel"))],
+        Some(&recipes::ORE_WASHER),
+        &[],
+    );
+    add(
+        MOB_DROP,
+        items::BASIC_CIRCUIT_BOARD,
+        1,
+        &[(4, Kind::Vanilla("minecraft:player_head"))],
+        Some(&recipes::BASIC_CIRCUIT_BOARD_RESEARCH),
+        IRON_GOLEM,
+    );
+
+    // Paper's iron and gold entries are registered to the Ore Crusher. Copper
+    // and the six Slimefun-only metals list the Ore Washer's sifted ore route.
+    for &dust in recipes::WASHER_DUSTS {
+        if !matches!(dust, items::IRON_DUST | items::GOLD_DUST) {
+            add(WASHER, dust, 1, &[(0, items::SIFTED_ORE)], None, &[]);
+        }
+    }
+
+    let food = food_machines::RESEARCHES
+        .iter()
+        .find(|topic| topic.id == "organic_food");
+    let fertilizer = food_machines::RESEARCHES
+        .iter()
+        .find(|topic| topic.id == "organic_fertilizer");
+    for produce in food_machines::PRODUCE {
+        add(
+            FOOD_FABRICATOR,
+            produce.food,
+            2,
+            &[(0, food_machines::CAN), (1, produce.crop)],
+            food,
+            &[],
+        );
+        add(
+            FOOD_COMPOSTER,
+            produce.fertilizer,
+            2,
+            &[(0, produce.food)],
+            fertilizer,
+            &[],
+        );
+    }
 }

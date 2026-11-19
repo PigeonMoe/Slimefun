@@ -533,7 +533,11 @@ fn render(host: &dyn Host, saved: Option<&Compound>, screen: &Page) -> Menu {
             pagination(host, &mut menu, group, *page, pages);
         }
         Page::Recipe(entry) => {
-            for (slot, input) in INGREDIENT_SLOTS.into_iter().zip(entry.ingredients) {
+            for (index, (slot, input)) in INGREDIENT_SLOTS
+                .into_iter()
+                .zip(entry.ingredients)
+                .enumerate()
+            {
                 let linked = input.and_then(|stack| lookup(stack.kind.id()));
                 if let Some(locked) = linked.filter(|entry| !unlocked(saved, entry)) {
                     menu.set(
@@ -549,22 +553,12 @@ fn render(host: &dyn Host, saved: Option<&Compound>, screen: &Page) -> Menu {
                 } else {
                     menu.set(
                         slot,
-                        input.and_then(|item| item.kind.stack(host, item.count)),
+                        input.and_then(|item| ingredient_icon(host, entry, index, item)),
                         linked.map(|entry| Action::Push(Page::Recipe(entry))),
                     );
                 }
             }
-            let method = entry.recipe_type;
-            menu.slots[10] = icon(
-                host,
-                method.material,
-                &format!("&b{}", method.name),
-                if entry.label.is_some() {
-                    &["", "&a&oBuild it in the World"]
-                } else {
-                    &[]
-                },
-            );
+            menu.slots[10] = method_icon(host, entry);
             menu.slots[16] = entry_icon(host, entry);
         }
         Page::Info => {
@@ -721,6 +715,72 @@ fn pagination(host: &dyn Host, menu: &mut Menu, group: &'static Group, page: usi
     }
 }
 
+fn method_icon(host: &dyn Host, entry: &Entry) -> Option<ItemStack> {
+    let method = entry.recipe_type;
+    if matches!(method.icon, Kind::Vanilla(_)) {
+        let lore = if entry.label.is_some() {
+            &["", "&a&oBuild it in the World"][..]
+        } else {
+            method.lore
+        };
+        return icon(
+            host,
+            method.icon.material(),
+            &format!("&b{}", method.name),
+            lore,
+        );
+    }
+    let mut stack = method.icon.stack(host, 1)?;
+    if !method.lore.is_empty() {
+        let mut lore = stack
+            .components()
+            .and_then(|patch| patch.as_nbt().get(&"minecraft:lore".into()))
+            .and_then(|tag| match tag {
+                Tag::List(lines) => Some(lines.clone()),
+                _ => None,
+            })
+            .unwrap_or_default();
+        lore.extend(method.lore.iter().map(|line| colored_lore(line)));
+        stack
+            .apply_components(&Compound::from([(
+                "minecraft:lore".into(),
+                Tag::List(lore),
+            )]))
+            .ok()?;
+    }
+    Some(stack)
+}
+
+fn ingredient_icon(
+    host: &dyn Host,
+    entry: &Entry,
+    index: usize,
+    item: crate::recipes::Stack,
+) -> Option<ItemStack> {
+    let mut stack = item.kind.stack(host, item.count)?;
+    if let Some(visual) = entry.visuals.iter().find(|visual| visual.slot == index) {
+        let mut parts =
+            Compound::from([("minecraft:custom_name".into(), colored_lore(visual.label))]);
+        if let Some(profile) = &visual.profile {
+            parts.insert(
+                "minecraft:profile".into(),
+                Tag::compound([
+                    ("id", Tag::IntArray(profile.profile.to_vec())),
+                    (
+                        "properties",
+                        Tag::List(vec![Tag::compound([
+                            ("name", Tag::String("textures".into())),
+                            ("value", Tag::String(profile.value.into())),
+                        ])]),
+                    ),
+                ]),
+            );
+        }
+        stack.apply_components(&parts).ok()?;
+    }
+    Some(stack)
+}
+
 fn entry_name(entry: &Entry) -> String {
     match entry.label {
         Some(label) => label.to_owned(),
@@ -868,6 +928,124 @@ mod tests {
         assert_eq!(shown(13).as_deref(), Some("minecraft:crafting_table"));
         assert_eq!(shown(16).as_deref(), Some("minecraft:crafting_table"));
         assert_eq!(shown(22).as_deref(), Some("minecraft:dispenser"));
+    }
+
+    #[test]
+    fn exact_paper_machine_matrices_and_item_sources_are_visible_in_the_guide() {
+        const MATERIALS: &[&str] = &[
+            "minecraft:gray_stained_glass_pane",
+            "minecraft:comparator",
+            "minecraft:name_tag",
+            "minecraft:stonecutter",
+            "minecraft:smooth_stone_slab",
+            "minecraft:iron_block",
+            "minecraft:oak_trapdoor",
+            "minecraft:bowl",
+            "minecraft:cauldron",
+            "minecraft:piston",
+            "minecraft:chest",
+            "minecraft:blast_furnace",
+            "minecraft:bricks",
+            "minecraft:diamond_block",
+            "minecraft:golden_pickaxe",
+            "minecraft:diamond_pickaxe",
+            "minecraft:iron_sword",
+            "minecraft:player_head",
+            "minecraft:ghast_tear",
+            "minecraft:gravel",
+            "minecraft:green_terracotta",
+            "minecraft:green_stained_glass",
+            "minecraft:wheat",
+        ];
+        let mut host = FakeHost::new();
+        host.registries
+            .resolve_items(MATERIALS.iter().map(|id| Identifier::parse(id).unwrap()))
+            .unwrap();
+        let table = lookup("TABLE_SAW").unwrap();
+        let menu = render(&host, None, &Page::Recipe(table));
+        for (slot, material) in [
+            (12, "smooth_stone_slab"),
+            (13, "stonecutter"),
+            (14, "smooth_stone_slab"),
+            (22, "iron_block"),
+        ] {
+            assert_eq!(
+                menu.slots[slot].as_ref().unwrap().item().id(&host),
+                format!("minecraft:{material}")
+            );
+        }
+        assert_eq!(table.research.unwrap().cost, 4);
+        let pan = lookup("AUTOMATED_PANNING_MACHINE").unwrap();
+        assert_eq!(
+            pan.ingredients[4].unwrap().kind.material(),
+            "minecraft:oak_trapdoor"
+        );
+        assert_eq!(
+            pan.ingredients[7].unwrap().kind.material(),
+            "minecraft:cauldron"
+        );
+        for (id, base, cost) in [
+            ("INDUSTRIAL_MINER", "minecraft:iron_block", 28),
+            ("ADVANCED_INDUSTRIAL_MINER", "minecraft:diamond_block", 36),
+        ] {
+            let miner = lookup(id).unwrap();
+            assert_eq!(miner.research.unwrap().cost, cost);
+            let shown = render(&host, None, &Page::Recipe(miner));
+            assert_eq!(
+                shown.slots[13].as_ref().unwrap().item().id(&host),
+                "minecraft:chest"
+            );
+            assert_eq!(shown.slots[21].as_ref().unwrap().item().id(&host), base);
+            assert_eq!(
+                shown.slots[22].as_ref().unwrap().item().id(&host),
+                "minecraft:blast_furnace"
+            );
+            assert_eq!(shown.slots[23].as_ref().unwrap().item().id(&host), base);
+            for slot in [12, 14] {
+                let parts = shown.slots[slot].as_ref().unwrap().components().unwrap();
+                assert_eq!(
+                    parts.as_nbt().get(&"minecraft:custom_name".into()),
+                    Some(&colored_lore("Piston (facing up)"))
+                );
+            }
+        }
+        for row in crate::food_machines::PRODUCE {
+            let food = lookup(row.food.id()).unwrap();
+            assert_eq!(food.item.count, 2);
+            assert_eq!(food.ingredients[0].unwrap().kind, crate::food_machines::CAN);
+            assert_eq!(food.ingredients[1].unwrap().kind, row.crop);
+            assert_eq!(food.recipe_type.name, "Food Fabricator");
+            assert_eq!(food.research.unwrap().id, "organic_food");
+            let fertilizer = lookup(row.fertilizer.id()).unwrap();
+            assert_eq!(fertilizer.item.count, 2);
+            assert_eq!(fertilizer.ingredients[0].unwrap().kind, row.food);
+            assert_eq!(fertilizer.recipe_type.name, "Food Composter");
+            assert_eq!(fertilizer.research.unwrap().id, "organic_fertilizer");
+        }
+        let tin = lookup("TIN_DUST").unwrap();
+        assert_eq!(tin.recipe_type.name, "Ore Washer");
+        assert_eq!(tin.ingredients[0].unwrap().kind, crate::items::SIFTED_ORE);
+        let sifted = lookup("SIFTED_ORE").unwrap();
+        assert_eq!(sifted.recipe_type.name, "Gold Pan");
+        assert_eq!(
+            sifted.ingredients[0].unwrap().kind.material(),
+            "minecraft:gravel"
+        );
+        assert_eq!(sifted.research.unwrap().id, "ore_washer");
+        let circuit = lookup("BASIC_CIRCUIT_BOARD").unwrap();
+        let shown = render(&host, None, &Page::Recipe(circuit));
+        let head = shown.slots[13].as_ref().unwrap();
+        assert_eq!(head.item().id(&host), "minecraft:player_head");
+        assert!(
+            head.components()
+                .unwrap()
+                .as_nbt()
+                .contains_key(&"minecraft:profile".into())
+        );
+        assert_eq!(
+            shown.slots[10].as_ref().unwrap().item().id(&host),
+            "minecraft:iron_sword"
+        );
     }
 
     #[test]
