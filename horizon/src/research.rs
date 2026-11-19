@@ -27,45 +27,141 @@ pub(crate) fn unlocked_persisted(data: &Compound, research: &Research) -> bool {
 }
 
 pub(crate) fn unlock(host: &mut dyn ServerHost, player: PlayerRef, research: &Research) -> String {
-    let Some(mut data) = player.persistent_data(host) else {
-        return "Slimefun could not read your research data.".into();
-    };
-    if unlocked(&data, research) {
-        return format!("Already researched {}.", research.name);
+    let free = player.game_mode(host) == Some(GameMode::Creative);
+    match begin(host, player, research, free, false) {
+        Ok(()) => format!("Researched {}.", research.name),
+        Err(message) => message,
     }
-    let creative = player.game_mode(host) == Some(GameMode::Creative);
-    let Some(experience) = player.experience(host) else {
-        return "Slimefun could not read your experience.".into();
-    };
-    if !creative && experience.level < research.cost {
-        return format!(
-            "{} costs {} experience levels.",
-            research.name, research.cost
-        );
-    }
+}
 
-    let saved = data
+const PENDING: &str = "slimefun:pending_research";
+const UPDATE_ERROR: &str = "Slimefun could not update your research data.";
+
+fn saved_data(data: &mut Compound) -> Option<&mut Compound> {
+    let Tag::Compound(saved) = data
         .entry(PERSISTED.into())
-        .or_insert_with(|| Tag::Compound(Compound::new()));
-    let Tag::Compound(saved) = saved else {
-        return "Slimefun could not update your research data.".into();
+        .or_insert_with(|| Tag::Compound(Compound::new()))
+    else {
+        return None;
     };
-    saved.insert(
+    Some(saved)
+}
+
+fn mark_learned(data: &mut Compound, research: &Research) {
+    data.insert(
         format!("slimefun:{}", research.id).as_str().into(),
         Tag::Byte(1),
     );
+}
 
-    let result = host.transaction(|host, _| {
-        player.set_persistent_data(host, data).map_err(|_| ())?;
-        if !creative && !player.set_experience_levels(host, experience.level - research.cost) {
-            return Err(());
+fn store_payment(data: &mut Compound, research: &Research, delayed: bool) -> Result<(), String> {
+    if unlocked(data, research) {
+        return Err(format!("Already researched {}.", research.name));
+    }
+    let saved = saved_data(data).ok_or(UPDATE_ERROR)?;
+    if saved.contains_key(&PENDING.into()) {
+        return Err("Finish your current research first.".into());
+    }
+    if delayed {
+        saved.insert(
+            PENDING.into(),
+            Tag::compound([
+                ("id", Tag::String(research.id.into())),
+                ("step", Tag::Byte(0)),
+            ]),
+        );
+    } else {
+        mark_learned(saved, research);
+    }
+    Ok(())
+}
+
+/// Persist the purchased topic together with its experience cost. Delayed topics
+/// remain locked until the last step replaces the record with the learned flag.
+pub(crate) fn begin(
+    host: &mut dyn ServerHost,
+    player: PlayerRef,
+    research: &Research,
+    free: bool,
+    delayed: bool,
+) -> Result<(), String> {
+    let mut data = player
+        .persistent_data(host)
+        .ok_or("Slimefun could not read your research data.")?;
+    store_payment(&mut data, research, delayed)?;
+    let experience = if free {
+        None
+    } else {
+        let experience = player
+            .experience(host)
+            .ok_or("Slimefun could not read your experience.")?;
+        if experience.level < research.cost {
+            return Err(format!(
+                "{} costs {} experience levels.",
+                research.name, research.cost
+            ));
+        }
+        Some(experience.level - research.cost)
+    };
+    host.transaction(|host, _| {
+        player
+            .set_persistent_data(host, data)
+            .map_err(|_| UPDATE_ERROR)?;
+        if let Some(level) = experience
+            && !player.set_experience_levels(host, level)
+        {
+            return Err(UPDATE_ERROR);
         }
         Ok(())
-    });
-    match result {
-        Ok(()) => format!("Researched {}.", research.name),
-        Err(()) => "Slimefun could not update your research data.".into(),
+    })
+    .map_err(str::to_owned)
+}
+
+pub(crate) fn pending(data: &Compound) -> Option<(String, usize)> {
+    let saved = data.get(&PERSISTED.into())?;
+    let record = saved.get(PENDING)?;
+    let (Tag::String(id), Tag::Byte(step)) = (record.get("id")?, record.get("step")?) else {
+        return None;
+    };
+    Some((id.to_string_lossy(), (*step).try_into().ok()?))
+}
+
+/// Return false when the pending record is gone or has already advanced. A host
+/// write failure is retryable and keeps the last durable step.
+pub(crate) fn advance(
+    host: &mut dyn ServerHost,
+    player: PlayerRef,
+    research: &Research,
+    step: usize,
+    next: Option<i8>,
+) -> Result<bool, ()> {
+    let mut data = player.persistent_data(host).ok_or(())?;
+    if !advance_saved(&mut data, research, step, next) {
+        return Ok(false);
     }
+    player.set_persistent_data(host, data).map_err(|_| ())?;
+    Ok(true)
+}
+
+fn advance_saved(data: &mut Compound, research: &Research, step: usize, next: Option<i8>) -> bool {
+    let Some((id, saved_step)) = pending(data) else {
+        return false;
+    };
+    if id != research.id || saved_step != step {
+        return false;
+    }
+    let Some(saved) = saved_data(data) else {
+        return false;
+    };
+    if let Some(next) = next {
+        if let Some(Tag::Compound(record)) = saved.get_mut(&PENDING.into()) {
+            record.insert("step".into(), Tag::Byte(next));
+        }
+    } else {
+        saved.remove(&PENDING.into());
+        mark_learned(saved, research);
+    }
+    true
 }
 
 /// Import canonical research IDs prepared from a Paper legacy profile when its UUID joins.
@@ -138,6 +234,32 @@ mod tests {
             Some(&Tag::Byte(1))
         );
         assert!(merge_import(merged, ID, IMPORT).is_none());
+    }
+
+    #[test]
+    fn paid_research_remains_locked_at_each_saved_step_until_completion() {
+        let mut data = Compound::new();
+        store_payment(&mut data, &LUMPS, true).unwrap();
+        assert!(!unlocked(&data, &LUMPS));
+        assert_eq!(pending(&data), Some((LUMPS.id.into(), 0)));
+        let original = data.clone();
+        assert!(store_payment(&mut data, &LUMPS, false).is_err());
+        assert!(!advance_saved(&mut data, &LUMPS, 1, Some(2)));
+        assert_eq!(data, original);
+        for step in 0..5 {
+            assert!(advance_saved(
+                &mut data,
+                &LUMPS,
+                step,
+                Some((step + 1) as i8)
+            ));
+            assert!(!unlocked(&data, &LUMPS));
+            assert_eq!(pending(&data), Some((LUMPS.id.into(), step + 1)));
+        }
+        assert!(advance_saved(&mut data, &LUMPS, 5, None));
+        assert!(pending(&data).is_none());
+        assert!(unlocked(&data, &LUMPS));
+        assert!(!advance_saved(&mut data, &LUMPS, 5, None));
     }
 
     #[test]

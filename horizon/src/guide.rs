@@ -22,6 +22,7 @@ use crate::{
 };
 
 mod catalog;
+mod learning;
 use catalog::{Entry, GROUPS, Group, group_entries, lookup, named_group_entries};
 
 const TITLE: &str = "Slimefun Guide";
@@ -98,6 +99,7 @@ enum Action {
     Replace(Page),
     Back,
     Research(&'static Research),
+    ToggleLearning,
     SearchPrompt,
     Link(&'static str),
 }
@@ -119,6 +121,7 @@ struct Reader {
 pub(crate) struct Guide {
     readers: Mutex<BTreeMap<u128, Reader>>,
     receive_on_first_join: AtomicBool,
+    learning: learning::Learning,
 }
 
 impl Default for Guide {
@@ -126,12 +129,18 @@ impl Default for Guide {
         Self {
             readers: Mutex::new(BTreeMap::new()),
             receive_on_first_join: AtomicBool::new(true),
+            learning: learning::Learning::default(),
         }
     }
 }
 
 impl Guide {
-    pub(crate) fn configure(&self, section: Option<&toml::Value>) {
+    pub(crate) fn configure(
+        &self,
+        section: Option<&toml::Value>,
+        researches: Option<&toml::Value>,
+    ) {
+        self.learning.configure(researches);
         let receive = section
             .and_then(|section| section.get("receive-on-first-join"))
             .and_then(toml::Value::as_bool)
@@ -146,6 +155,16 @@ impl Guide {
             give(host, player);
         }
     }
+    pub(crate) fn logged_in(&self, host: &dyn Host, player: PlayerRef) {
+        self.learning.resume(host, player);
+    }
+
+    pub(crate) fn tick(&self, host: &mut dyn ServerHost, player: PlayerRef) {
+        if let Some(page) = self.learning.tick(host, player) {
+            self.show(host, player, page);
+        }
+    }
+
     fn last_path(&self, player: u128) -> Vec<Page> {
         self.readers
             .lock()
@@ -203,6 +222,40 @@ impl Guide {
         };
         let research = player.persistent_data(host);
         let mut menu = render(host, research.as_ref(), page);
+        if matches!(page, Page::Info)
+            && let Some(enabled) = self.learning.option(host, player)
+        {
+            let (material, title, click) = if enabled {
+                (
+                    "minecraft:map",
+                    "&bLearning Animation: &aYes",
+                    "&eClick to disable your learning animation",
+                )
+            } else {
+                (
+                    "minecraft:paper",
+                    "&bLearning Animation: &4No",
+                    "&eClick to enable your learning animation",
+                )
+            };
+            menu.set(
+                19,
+                icon(
+                    host,
+                    material,
+                    title,
+                    &[
+                        "",
+                        "&7You can now toggle whether you",
+                        "&7will see information about your pondering in chat",
+                        "&7upon researching an item.",
+                        "",
+                        click,
+                    ],
+                ),
+                Some(Action::ToggleLearning),
+            );
+        }
         if path.len() > 1 {
             let back = usize::from(!matches!(page, Page::Recipe(_) | Page::Info));
             menu.set(
@@ -287,13 +340,13 @@ impl Guide {
                 path.pop();
             }
             Action::Research(topic) => {
-                if !learned(host, player, topic) {
-                    let reply = research::unlock(host, player, topic);
-                    if !learned(host, player, topic) {
-                        let _ = player.tell(host, colored_label(&format!("&4{reply}")));
-                        return;
-                    }
+                if !learned(host, player, topic) && !self.learning.start(host, player, topic, &path)
+                {
+                    return;
                 }
+            }
+            Action::ToggleLearning => {
+                self.learning.toggle(host, player);
             }
             Action::SearchPrompt => {
                 host.close_menu(event.uuid);
@@ -332,10 +385,12 @@ impl Guide {
     }
 
     pub(crate) fn logout(&self, player: u128) {
+        self.learning.forget(player);
         self.readers.lock().unwrap().remove(&player);
     }
 
     pub(crate) fn clear(&self) {
+        self.learning.clear();
         self.readers.lock().unwrap().clear();
     }
 }
@@ -744,10 +799,10 @@ mod tests {
         let config = "[guide]\nreceive-on-first-join = false"
             .parse::<toml::Table>()
             .unwrap();
-        guide.configure(config.get("guide"));
+        guide.configure(config.get("guide"), None);
         guide.first_join(&mut host, 1);
         assert!(host.players.get(1).unwrap().slots.is_empty());
-        guide.configure(None);
+        guide.configure(None, None);
         guide.first_join(&mut host, 1);
         assert!(is_book(
             &host,

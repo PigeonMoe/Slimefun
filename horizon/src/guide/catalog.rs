@@ -116,6 +116,13 @@ pub(super) fn lookup(id: &str) -> Option<&'static Entry> {
     CATALOG.get(&canonical(id))
 }
 
+pub(super) fn research_topic(id: &str) -> Option<&'static Research> {
+    CATALOG
+        .values()
+        .filter_map(|item| item.research)
+        .find(|topic| topic.id == id)
+}
+
 pub(super) fn group_entries(group: &Group) -> impl Iterator<Item = &'static Entry> {
     named_group_entries(group).map(|(_, entry)| entry)
 }
