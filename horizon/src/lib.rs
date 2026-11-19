@@ -53,6 +53,7 @@ mod network_recipes;
 mod network_runtime;
 mod networks;
 mod output_chest;
+mod radiation;
 mod random;
 mod recipes;
 mod research;
@@ -70,6 +71,7 @@ use recipes::{
 
 struct Slimefun {
     delayed_crafts: DelayedCrafts,
+    radiation: radiation::Radiation,
     block_placers: block_placer::Placers,
     composters: composter::Composters,
     crucibles: crucible::Crucibles,
@@ -89,6 +91,7 @@ impl Default for Slimefun {
     fn default() -> Self {
         Self {
             delayed_crafts: DelayedCrafts::default(),
+            radiation: radiation::Radiation::default(),
             block_placers: block_placer::Placers::default(),
             composters: composter::Composters::default(),
             crucibles: crucible::Crucibles::default(),
@@ -114,6 +117,7 @@ impl Slimefun {
         let mut settings = self.settings.lock().unwrap();
         if fresh {
             *settings = Settings::default();
+            self.radiation.configure(None);
             self.block_placers.configure(None);
             output_chest::set_enabled(true);
             self.crucibles.configure(false);
@@ -122,6 +126,7 @@ impl Slimefun {
         let Ok(table) = config.text.parse::<toml::Table>() else {
             return;
         };
+        self.radiation.configure(table.get("radiation"));
         self.block_placers.configure(
             table
                 .get("block-placer")
@@ -965,6 +970,26 @@ impl Hooks for Slimefun {
         armor_forge::gliding_impact(event)
     }
 
+    fn server_tick(&self, host: &mut dyn ServerHost, event: &mut mod_api::ServerTickEvent) {
+        if matches!(event.phase, mod_api::ServerTickPhase::ServerTickStart { .. }) {
+            self.radiation.begin_tick(|| host.server_monotonic_millis());
+        }
+    }
+
+    fn player_tick_post(&self, host: HostSide<'_>, event: &mut mod_api::PlayerTickPostEvent) {
+        if let HostSide::Server(host) = host {
+            self.radiation.player_tick(host, event.player);
+        }
+    }
+
+    fn living_death_post(
+        &self,
+        host: &mut dyn ServerHost,
+        event: &mut mod_api::LivingDeathPostEvent<'_>,
+    ) {
+        self.radiation.death(host, event.entity);
+    }
+
     fn level_tick_post(&self, host: HostSide<'_>, event: &mut LevelTickPostEvent) {
         if let HostSide::Server(host) = host {
             let settings = *self.settings.lock().unwrap();
@@ -1005,6 +1030,7 @@ impl Hooks for Slimefun {
 
     fn server_stopping(&self, _: &mut dyn ServerHost, _: &mut ServerStoppingEvent) {
         self.block_placers.clear();
+        self.radiation.clear();
         auto_crafter::clear();
         self.backpacks.clear();
         self.bee_wings.clear();
