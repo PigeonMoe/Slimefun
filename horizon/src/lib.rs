@@ -41,6 +41,7 @@ mod elevator;
 mod explosive_tools;
 mod elemental_staves;
 mod enchantment_machines;
+mod enchantment_rune;
 mod enhanced_furnaces;
 mod energy_gadgets;
 mod factory;
@@ -210,6 +211,7 @@ impl Slimefun {
             self.solar_helmet.configure(None);
             self.beheading.configure(None);
             ancient_altar::configure(None);
+            self.soulbound_rituals.configure(None);
         }
         let Ok(table) = config.text.parse::<toml::Table>() else {
             return;
@@ -217,6 +219,7 @@ impl Slimefun {
         self.guide.configure(table.get("guide"), table.get("researches"));
         self.ore_tools.configure(&table);
         self.talismans.configure(&table);
+        self.soulbound_rituals.configure(table.get("items"));
         self.teleposition_scroll
             .configure(table.get("scroll-of-dimensional-teleposition"));
         self.explosive_tools.configure(&table);

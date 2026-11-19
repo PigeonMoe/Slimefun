@@ -72,6 +72,12 @@ Java 版源码和原有构建指令位于仓库根目录。
 
 Magician 可从当前注册表中选择相容附魔。默认仅对可接受该附魔的装备生效。服务器可在 `[magician-talisman]` 启用 `allow-enchantment-books`，或在 `[magician-talisman.allow-enchantments.minecraft.efficiency.level]` 将 `"2"` 设为 `false`，停用该附魔等级。Wizard 可在有资格的工具上给出三级至五级时运，精准采集出现在当次附魔列表时不会触发。Wise 只尝试翻倍经验球修补后剩余的经验。使用 `[talismans]` 的 `use-actionbar = false` 可改为聊天提示。
 
+## 附魔符文
+
+用古代祭坛制作闪电符文，再用四块魔法玻璃制作附魔符文。研究 Ancient Enchanting 后，将附魔符文和一件装备投到一起。符文等待 20 刻后查找附近第一件非附魔符文的掉落物。从支持该装备且与已有附魔相容的选项中随机抽选，再显示无伤害的闪电。10 刻后仍能验证两件原掉落物时，才消耗符文并生成保留原组件的附魔成品。
+
+绑定诅咒和消失诅咒不会被选中。服主可用 `[items.<Paper ID>]` 下的 `allow-enchanting = false` 阻止符文给对应 Slimefun 物品附魔。
+
 ## 本地开发增量
 
 本节描述开发分支的变更。使用当前 PigeonMoe Horizon Fork 构建以取得最新的设备和背包接口。

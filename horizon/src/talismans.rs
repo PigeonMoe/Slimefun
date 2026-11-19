@@ -86,7 +86,7 @@ const COMMON_RESEARCH: Research = Research {
     name: "Common Talisman",
     cost: 14,
 };
-const GLASS_RESEARCH: Research = Research {
+pub(crate) const GLASS_RESEARCH: Research = Research {
     id: "enchantment_rune",
     name: "Ancient Enchanting",
     cost: 24,

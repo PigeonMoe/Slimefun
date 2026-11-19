@@ -217,6 +217,7 @@ pub(crate) fn researches() -> impl Iterator<Item = &'static Research> {
         .chain([&crate::beheading::RESEARCH, &crate::explosive_tools::RESEARCH])
         .chain([&crate::teleposition_scroll::RESEARCH])
         .chain(crate::talismans::RESEARCHES.iter().copied())
+        .chain([&crate::enchantment_rune::LIGHTNING_RESEARCH])
         .chain([&crate::knowledge_tome::RESEARCH])
         .chain(crate::jet_boots::RESEARCHES.iter().copied())
         .chain(crate::jetpack::RESEARCHES.iter().copied())

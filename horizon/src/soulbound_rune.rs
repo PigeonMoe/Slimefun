@@ -9,7 +9,9 @@ use mod_api::{
 };
 
 use crate::{
-    items::{item, text},
+    enchantment_rune::{self, ANCIENT_RUNE_ENCHANTMENT},
+    items::{Kind, item, text},
+    random::Rolls,
     recipes::Research,
     research,
 };
@@ -35,7 +37,11 @@ const SUCCEEDED: &str =
     "You have successfully bound this item to your soul! You will keep it when you die.";
 
 #[derive(Default)]
-pub(crate) struct Rituals(Mutex<Queue>);
+pub(crate) struct Rituals {
+    queue: Mutex<Queue>,
+    enchanting: Mutex<enchantment_rune::Rules>,
+    rolls: Rolls,
+}
 
 #[derive(Default)]
 struct Queue {
@@ -47,7 +53,40 @@ struct Ritual {
     level: LevelRef,
     player: u128,
     rune: ItemEntityRef,
+    kind: Rune,
     stage: Stage,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum Rune {
+    Soulbound,
+    Enchantment,
+}
+
+impl Rune {
+    fn kind(self) -> Kind {
+        match self {
+            Self::Soulbound => ANCIENT_RUNE_SOULBOUND,
+            Self::Enchantment => ANCIENT_RUNE_ENCHANTMENT,
+        }
+    }
+
+    fn research(self) -> &'static Research {
+        match self {
+            Self::Soulbound => &RESEARCH,
+            Self::Enchantment => &crate::talismans::GLASS_RESEARCH,
+        }
+    }
+
+    fn accepts(self, host: &dyn Host, item: ItemEntityRef, stack: &ItemStack) -> bool {
+        if self.kind().matches(host, stack) {
+            return false;
+        }
+        match self {
+            Self::Soulbound => item.pickup_delay(host) == Some(0) && !is_bound(host, stack),
+            Self::Enchantment => true,
+        }
+    }
 }
 
 enum Stage {
@@ -56,29 +95,38 @@ enum Stage {
         origin: [f64; 3],
         target: ItemEntityRef,
         original: ItemStack,
+        result: Option<ItemStack>,
     },
 }
 
 impl Rituals {
+    pub(crate) fn configure(&self, section: Option<&toml::Value>) {
+        *self.enchanting.lock().unwrap() = enchantment_rune::Rules::from_config(section);
+    }
+
     pub(crate) fn tossed(&self, host: &mut dyn ServerHost, event: &ItemTossEvent) {
         let Some(stack) = event.item.stack(host) else {
             return;
         };
-        if !ANCIENT_RUNE_SOULBOUND.matches(host, &stack) {
+        let Some(kind) = [Rune::Soulbound, Rune::Enchantment]
+            .into_iter()
+            .find(|kind| kind.kind().matches(host, &stack))
+        else {
             return;
-        }
+        };
         let Some(player) = host.player(event.player) else {
             return;
         };
+        let topic = kind.research();
         if !player
             .persistent_data(host)
             .as_ref()
-            .is_some_and(|saved| research::unlocked(saved, &RESEARCH))
+            .is_some_and(|saved| research::unlocked(saved, topic))
         {
             tell(
                 host,
                 event.player,
-                "Unlock this research with /sf research soulbound_rune.",
+                &format!("Unlock this research with /sf research {}.", topic.id),
                 "red",
             );
             return;
@@ -93,6 +141,7 @@ impl Rituals {
                 level,
                 player: event.player,
                 rune: event.item,
+                kind,
                 stage: Stage::Search,
             },
         );
@@ -100,7 +149,7 @@ impl Rituals {
 
     fn schedule(&self, host: &mut dyn ServerHost, delay: u32, ritual: Ritual) {
         if let Ok(id) = host.schedule_task(delay, 0) {
-            self.0.lock().unwrap().pending.insert(id, ritual);
+            self.queue.lock().unwrap().pending.insert(id, ritual);
         }
     }
 
@@ -108,19 +157,19 @@ impl Rituals {
         if event.owner != "slimefun" {
             return;
         }
-        let ritual = self.0.lock().unwrap().pending.remove(&event.id);
+        let ritual = self.queue.lock().unwrap().pending.remove(&event.id);
         if let Some(ritual) = ritual {
             if ritual.level.in_place(host) {
                 self.advance(host, ritual);
             } else {
-                self.0.lock().unwrap().ready.push(ritual);
+                self.queue.lock().unwrap().ready.push(ritual);
             }
         }
     }
 
     pub(crate) fn tick(&self, host: &mut dyn ServerHost, level: LevelRef) {
         let ready: Vec<_> = self
-            .0
+            .queue
             .lock()
             .unwrap()
             .ready
@@ -132,14 +181,14 @@ impl Rituals {
     }
 
     fn advance(&self, host: &mut dyn ServerHost, ritual: Ritual) {
-        if let Some(ritual) = ritual.advance(host) {
+        if let Some(ritual) = ritual.advance(host, &self.enchanting, &self.rolls) {
             self.schedule(host, 10, ritual);
         }
     }
 
     pub(crate) fn unload(&self, host: &mut dyn ServerHost, dimension: &str) {
         let cancelled = {
-            let mut queue = self.0.lock().unwrap();
+            let mut queue = self.queue.lock().unwrap();
             let still_open =
                 |ritual: &Ritual| ritual.level.dimension().id(host).as_deref() != Some(dimension);
             queue.ready.retain(still_open);
@@ -155,28 +204,47 @@ impl Rituals {
     }
 
     pub(crate) fn clear(&self) {
-        *self.0.lock().unwrap() = Queue::default();
+        *self.queue.lock().unwrap() = Queue::default();
+        self.rolls.clear();
     }
 }
 
 impl Ritual {
-    fn advance(mut self, host: &mut dyn ServerHost) -> Option<Self> {
+    fn advance(
+        mut self,
+        host: &mut dyn ServerHost,
+        enchanting: &Mutex<enchantment_rune::Rules>,
+        rolls: &Rolls,
+    ) -> Option<Self> {
         match self.stage {
             Stage::Search => {
                 if !self.live_rune(host) {
                     return None;
                 }
                 let origin = self.rune.entity().position(host)?;
-                let (target, original) = nearby_item(host, self.level, origin)?;
-                if original.count() != 1 {
-                    tell(host, self.player, FAILED, "red");
-                    return None;
-                }
+                let (target, original) = nearby_item(host, self.level, origin, self.kind)?;
+                let output = match self.kind {
+                    Rune::Soulbound => (original.count() == 1).then_some(None).ok_or(FAILED),
+                    Rune::Enchantment => enchanting
+                        .lock()
+                        .unwrap()
+                        .apply(host, self.level, &original, rolls)
+                        .map(Some)
+                        .map_err(enchantment_rune::Failure::message),
+                };
+                let result = match output {
+                    Ok(output) => output,
+                    Err(message) => {
+                        tell(host, self.player, message, "red");
+                        return None;
+                    }
+                };
                 self.level.strike_lightning(host, origin, true);
                 self.stage = Stage::Bind {
                     origin,
                     target,
                     original,
+                    result,
                 };
                 Some(self)
             }
@@ -184,10 +252,31 @@ impl Ritual {
                 origin,
                 target,
                 ref original,
+                ref result,
             } => {
-                if self.bind(host, origin, target, original) {
-                    tell(host, self.player, SUCCEEDED, "green");
-                } else {
+                let soulbound;
+                let output = match result {
+                    Some(chosen) => Some(chosen),
+                    None => {
+                        soulbound = mark(original);
+                        soulbound.as_ref()
+                    }
+                };
+                if output.is_some_and(|output| {
+                    self.replace_items(host, origin, target, original, output)
+                }) {
+                    let message = match self.kind {
+                        Rune::Soulbound => {
+                            self.soulbound_fx(host, origin);
+                            SUCCEEDED
+                        }
+                        Rune::Enchantment => {
+                            enchantment_rune::finish_fx(host, self.level, origin);
+                            enchantment_rune::SUCCESS
+                        }
+                    };
+                    tell(host, self.player, message, "green");
+                } else if self.kind == Rune::Soulbound {
                     tell(host, self.player, FAILED, "red");
                 }
                 None
@@ -200,7 +289,7 @@ impl Ritual {
             && self
                 .rune
                 .stack(host)
-                .is_some_and(|stack| ANCIENT_RUNE_SOULBOUND.matches(host, &stack))
+                .is_some_and(|stack| self.kind.kind().matches(host, &stack))
     }
 
     fn has_inputs(&self, host: &dyn Host, target: ItemEntityRef, original: &ItemStack) -> bool {
@@ -209,19 +298,17 @@ impl Ritual {
             && target.stack(host).as_ref() == Some(original)
     }
 
-    fn bind(
+    fn replace_items(
         &self,
         host: &mut dyn ServerHost,
         origin: [f64; 3],
         target: ItemEntityRef,
         original: &ItemStack,
+        output: &ItemStack,
     ) -> bool {
         if !self.has_inputs(host, target, original) {
             return false;
         }
-        let Some(output) = mark(original) else {
-            return false;
-        };
         let Some([x, y, z]) = self.level.with_random(host, |random| {
             let mut at = origin.map(|axis| axis + (random.next_double() * 0.5 - 0.25));
             at[1] -= 0.125; // Bukkit dropItemNaturally subtracts half the dropped item's height.
@@ -240,7 +327,7 @@ impl Ritual {
                     .item_entity(spawned)
                     .and_then(|item| item.stack(host))
                     .as_ref()
-                    != Some(&output)
+                    != Some(output)
                 || !target.entity().discard(host)
                 || !self.rune.entity().discard(host)
             {
@@ -252,6 +339,10 @@ impl Ritual {
             spawned.discard(host);
             return false;
         }
+        true
+    }
+
+    fn soulbound_fx(&self, host: &mut dyn ServerHost, origin: [f64; 3]) {
         let _ = self.level.explode(
             host,
             None,
@@ -276,7 +367,6 @@ impl Ritual {
             0.3,
             1.0,
         );
-        true
     }
 }
 
@@ -284,6 +374,7 @@ fn nearby_item(
     host: &dyn Host,
     level: LevelRef,
     at: [f64; 3],
+    rune: Rune,
 ) -> Option<(ItemEntityRef, ItemStack)> {
     level
         .entities_in(
@@ -294,12 +385,8 @@ fn nearby_item(
         .into_iter()
         .filter_map(|entity| host.item_entity(entity))
         .find_map(|item| {
-            if item.pickup_delay(host)? > 0 {
-                return None;
-            }
             let stack = item.stack(host)?;
-            (!ANCIENT_RUNE_SOULBOUND.matches(host, &stack) && !is_bound(host, &stack))
-                .then_some((item, stack))
+            rune.accepts(host, item, &stack).then_some((item, stack))
         })
 }
 

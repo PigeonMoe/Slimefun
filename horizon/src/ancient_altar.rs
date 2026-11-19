@@ -241,6 +241,8 @@ pub(crate) const CRAFTING: &[CraftingRecipe] = &[
     crate::infused::ALTAR,
     crate::spawner_repair::ALTAR,
     crate::infernal_bonemeal::ALTAR,
+    crate::enchantment_rune::CRAFTING[0],
+    crate::enchantment_rune::CRAFTING[1],
     altar_recipe(
         [
             MAGIC_LUMP_3,
@@ -492,6 +494,10 @@ pub(crate) fn denies_placement(host: &dyn Host, level: LevelRef, pos: mod_api::B
     pos.y
         .checked_sub(1)
         .is_some_and(|below| is_pedestal(host, level, [pos.x, below, pos.z]))
+}
+
+pub(crate) fn enchanted_hit_particle() -> Option<ParticleKey> {
+    RITUAL_PARTICLES.get().map(|particles| particles[3])
 }
 
 pub(crate) fn register(registrar: &mut dyn Registrar) {
@@ -1212,6 +1218,9 @@ pub(crate) fn decorate(id: &str, components: &mut Compound) {
     if id == "ANCIENT_RUNE_SOULBOUND" {
         components.insert("minecraft:lore".into(), crate::soulbound_rune::lore());
     }
+    if id == "ANCIENT_RUNE_ENCHANTMENT" {
+        components.insert("minecraft:lore".into(), crate::enchantment_rune::lore());
+    }
     let (element, element_color, rgb) = match id {
         "BLANK_RUNE" => ("", "dark_gray", 0),
         "ANCIENT_RUNE_AIR" => ("Air", "aqua", 0x00ffff),
@@ -1221,6 +1230,8 @@ pub(crate) fn decorate(id: &str, components: &mut Compound) {
         "ANCIENT_RUNE_ENDER" => ("Ender", "dark_purple", 0x800080),
         "ANCIENT_RUNE_RAINBOW" => ("Rainbow", "light_purple", 0xff00ff),
         "ANCIENT_RUNE_SOULBOUND" => ("Soulbound", "dark_purple", 0x2f0075),
+        "ANCIENT_RUNE_LIGHTNING" => ("Lightning", "yellow", 0xffff5f),
+        "ANCIENT_RUNE_ENCHANTMENT" => ("Enchantment", "gold", 0xffd919),
         _ => return,
     };
     components.insert(
