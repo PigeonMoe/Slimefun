@@ -180,11 +180,12 @@ pub(super) fn lookup(id: &str) -> Option<&'static Entry> {
     CATALOG.get(&canonical(id))
 }
 
+pub(super) fn research_topics() -> impl Iterator<Item = &'static Research> {
+    CATALOG.values().filter_map(|item| item.research)
+}
+
 pub(super) fn research_topic(id: &str) -> Option<&'static Research> {
-    CATALOG
-        .values()
-        .filter_map(|item| item.research)
-        .find(|topic| topic.id == id)
+    research_topics().find(|topic| topic.id == id)
 }
 
 pub(super) fn group_entries(group: &Group) -> impl Iterator<Item = &'static Entry> {

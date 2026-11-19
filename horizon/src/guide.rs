@@ -65,6 +65,10 @@ fn is_book(host: &dyn Host, item: &ItemStack) -> bool {
         )
 }
 
+pub(crate) fn research_topics() -> impl Iterator<Item = &'static Research> {
+    catalog::research_topics()
+}
+
 pub(crate) fn prevent_research_firework_damage(item: &ItemStack) -> bool {
     learning::research_rocket(item)
 }
@@ -160,6 +164,15 @@ impl Guide {
             give(host, player);
         }
     }
+    pub(crate) fn announce_shared_research(
+        &self,
+        host: &mut dyn ServerHost,
+        player: PlayerRef,
+        name: &str,
+    ) {
+        self.learning.announce_completion(host, player, name);
+    }
+
     pub(crate) fn logged_in(&self, host: &dyn Host, player: PlayerRef) {
         self.learning.resume(host, player);
     }
@@ -632,7 +645,7 @@ fn render(host: &dyn Host, saved: Option<&Compound>, screen: &Page) -> Menu {
     menu
 }
 
-fn strip_colors(input: &str) -> String {
+pub(crate) fn strip_colors(input: &str) -> String {
     let mut chars = input.chars().peekable();
     let mut plain = String::new();
     while let Some(c) = chars.next() {

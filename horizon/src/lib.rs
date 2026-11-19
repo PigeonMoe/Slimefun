@@ -65,6 +65,7 @@ mod items;
 mod jet_boots;
 mod jetpack;
 mod juice;
+mod knowledge_tome;
 mod lumber_axe;
 mod machine;
 mod magic_eye;
@@ -964,6 +965,7 @@ impl Hooks for Slimefun {
             if self.ore_tools.seek(host, player, event.click.hand, held, &self.rolls)
                 || medical::use_supply(host, player, event.click.hand, held)
                 || magic_eye::use_held(host, player, held)
+                || knowledge_tome::use_held(host, player, event.click.hand, held, &self.guide)
             {
                 self.item_clicks
                     .record_block_use(host, event.click.player, event.click.hand, held);
@@ -1182,6 +1184,9 @@ impl Hooks for Slimefun {
             || medical::HEAVY_CREAM.matches(host, event.click.stack)
             || medical::use_supply(host, player, event.click.hand, event.click.stack)
             || magic_eye::use_held(host, player, event.click.stack)
+            || knowledge_tome::use_held(
+                host, player, event.click.hand, event.click.stack, &self.guide,
+            )
             || self.teleposition_scroll.use_held(host, player, event.click.stack)
             || snacks::use_sugar(host, player, event.click.hand, event.click.stack, None)
             || elemental_staves::use_staff(host, player, event.click.stack, || {

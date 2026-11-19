@@ -236,6 +236,7 @@ impl SlimefunItem {
         crate::medical::decorate(self.id, &mut components);
         crate::magic_eye::decorate(self.id, &mut components);
         crate::climbing_pick::decorate(self.id, &mut components);
+        crate::knowledge_tome::decorate(self.id, &mut components);
         crate::zombie_pills::decorate(self.id, &mut components);
         crate::nether_goo::decorate(self.id, &mut components);
         if self.id == crate::infernal_bonemeal::INFERNAL_BONEMEAL.id() {
@@ -1044,6 +1045,7 @@ item!(
 pub(crate) fn network_item(id: &str) -> Option<Kind> {
     [
         crate::block_placer::BLOCK_PLACER,
+        crate::knowledge_tome::TOME_OF_KNOWLEDGE_SHARING,
         crate::infused::INFUSED_HOPPER,
         ENERGY_REGULATOR,
         ENERGY_CONNECTOR,

@@ -129,7 +129,7 @@ impl Learning {
             return false;
         }
         if !delayed {
-            self.announce_completion(host, player, topic);
+            self.announce_completion(host, player, topic.name);
             return true;
         }
         self.active.lock().unwrap().insert(
@@ -215,19 +215,24 @@ impl Learning {
             }
             Ok(true) => {
                 let study = self.active.lock().unwrap().remove(&uuid);
-                self.announce_completion(host, player, topic);
+                self.announce_completion(host, player, topic.name);
                 study?.return_path
             }
         }
     }
 
-    fn announce_completion(&self, host: &mut dyn ServerHost, player: PlayerRef, topic: &Research) {
+    pub(super) fn announce_completion(
+        &self,
+        host: &mut dyn ServerHost,
+        player: PlayerRef,
+        name: &str,
+    ) {
         if self.option(host, player, Preference::Fireworks) == Some(true) {
             fireworks::launch(host, player, &self.rolls);
         }
         let _ = player.tell(
             host,
-            colored_label(&format!("&bYou have unlocked &7\"{}\"", topic.name)),
+            colored_label(&format!("&bYou have unlocked &7\"{name}\"")),
         );
     }
 

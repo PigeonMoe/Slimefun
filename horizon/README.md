@@ -62,6 +62,8 @@ Java 版源码和原有构建指令位于仓库根目录。
 
 `[researches]` 的 `free-in-creative-mode` 默认为 `true`，创造模式玩家可立即免费学习。`disable-learning-animation = true` 会为整个服务器关闭学习动画。解锁研究时默认发射 Paper 研究烟花。玩家可以在指南设置里关闭烟花，服主可以设置 `enable-fireworks = false`。旧 Paper 玩家档案里的烟花设置仍然可用。研究烟花保留爆裂效果并免除爆裂伤害。
 
+知识共享典籍在魔法工作台制作，需先解锁 `tome_of_knowledge_sharing`（30 级）。第一次右键按玩家 UUID 绑定，转交后右键可复制持有人已完成的研究。在线读取实时研究，离线读取该 UUID 的原版玩家档案和已导入的 Paper 研究。复制无需经验，生存模式消耗一册，创造模式保留。
+
 季节分类、原版配方索引和语言设置仍待移植。
 
 ## 本地开发增量

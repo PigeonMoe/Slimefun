@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use mod_api::{Compound, GameMode, Host, HostTransaction, PlayerRef, ServerHost, Tag};
+use std::collections::BTreeSet;
+
+use mod_api::{
+    Compound, ConfigFileError, ConfigPath, GameMode, Host, HostTransaction, Identifier, PlayerRef,
+    ServerHost, Tag,
+};
 
 use crate::recipes::Research;
 
@@ -164,45 +169,85 @@ fn advance_saved(data: &mut Compound, research: &Research, step: usize, next: Op
     true
 }
 
+/// Merge a settled donor's recognized research flags without sharing their
+/// settings or pending study. A matching paid study is now complete.
+pub(crate) fn grant_shared(
+    data: &mut Compound,
+    known: &BTreeSet<String>,
+) -> Result<Vec<String>, &'static str> {
+    let active = pending(data).map(|(id, _)| format!("slimefun:{id}"));
+    let saved = saved_data(data).ok_or(UPDATE_ERROR)?;
+    let mut learned = Vec::new();
+    for key in known {
+        if saved.get(&key.as_str().into()) != Some(&Tag::Byte(1)) {
+            saved.insert(key.as_str().into(), Tag::Byte(1));
+            learned.push(key.to_owned());
+            if active.as_ref() == Some(key) {
+                saved.remove(&PENDING.into());
+            }
+        }
+    }
+    Ok(learned)
+}
+
+fn read_legacy(host: &dyn ServerHost, uuid: &str) -> Result<Option<String>, &'static str> {
+    let path = ConfigPath::new(&format!("research-import/{uuid}.txt"))
+        .expect("a hexadecimal UUID is a valid import file name");
+    match host.world_data_files().read(&path) {
+        Ok(bytes) if bytes.len() <= 64 * 1024 => String::from_utf8(bytes)
+            .map(Some)
+            .map_err(|_| "The saved Paper research archive is invalid."),
+        Err(ConfigFileError::NotFound) => Ok(None),
+        _ => Err("The saved Paper research archive is unreadable."),
+    }
+}
+
+pub(crate) fn legacy_research_flags(
+    host: &dyn ServerHost,
+    uuid: u128,
+) -> Result<Option<Vec<String>>, &'static str> {
+    let uuid = format!("{uuid:032x}");
+    read_legacy(host, &uuid)?
+        .map(|text| {
+            legacy_research_ids(&uuid, &text)
+                .map(|ids| ids.into_iter().map(str::to_owned).collect())
+                .ok_or("The saved Paper research archive is invalid.")
+        })
+        .transpose()
+}
+
 /// Import canonical research IDs prepared from a Paper legacy profile when its UUID joins.
 pub(crate) fn import_legacy(host: &mut dyn ServerHost, player: PlayerRef) {
     let uuid = format!("{:032x}", player.uuid());
-    let path = mod_api::ConfigPath::new(&format!("research-import/{uuid}.txt"))
-        .expect("a hexadecimal UUID is a valid import file name");
-    let Ok(bytes) = host.world_data_files().read(&path) else {
-        return;
-    };
-    if bytes.len() > 64 * 1024 {
-        return;
-    }
-    let Ok(text) = std::str::from_utf8(&bytes) else {
+    let Ok(Some(text)) = read_legacy(host, &uuid) else {
         return;
     };
     let Some(data) = player.persistent_data(host) else {
         return;
     };
-    if let Some(merged) = merge_import(data, &uuid, text) {
+    if let Some(merged) = merge_import(data, &uuid, &text) {
         let _ = player.set_persistent_data(host, merged);
     }
 }
 
-fn merge_import(mut data: Compound, uuid: &str, text: &str) -> Option<Compound> {
+fn legacy_research_ids<'a>(uuid: &str, text: &'a str) -> Option<Vec<&'a str>> {
     let mut lines = text.lines();
     if lines.next()? != "slimefun-research-import-v1" || lines.next()? != uuid {
         return None;
     }
-    let saved = data
-        .entry(PERSISTED.into())
-        .or_insert_with(|| Tag::Compound(Compound::new()));
-    let Tag::Compound(saved) = saved else {
-        return None;
-    };
+    lines
+        .map(|line| {
+            let id = Identifier::parse(line).ok()?;
+            (id.namespace() == "slimefun" && line.starts_with("slimefun:")).then_some(line)
+        })
+        .collect()
+}
+
+fn merge_import(mut data: Compound, uuid: &str, text: &str) -> Option<Compound> {
+    let keys = legacy_research_ids(uuid, text)?;
+    let saved = saved_data(&mut data)?;
     let mut changed = false;
-    for line in lines {
-        let id = mod_api::Identifier::parse(line).ok()?;
-        if id.namespace() != "slimefun" || !line.starts_with("slimefun:") {
-            return None;
-        }
+    for line in keys {
         let old = saved.insert(line.into(), Tag::Byte(1));
         changed |= old != Some(Tag::Byte(1));
     }
@@ -260,6 +305,35 @@ mod tests {
         assert!(pending(&data).is_none());
         assert!(unlocked(&data, &LUMPS));
         assert!(!advance_saved(&mut data, &LUMPS, 5, None));
+    }
+
+    #[test]
+    fn shared_flags_merge_without_overwriting_other_data_or_finishing_an_unrelated_study() {
+        let mut data = Compound::from([(
+            PERSISTED.into(),
+            Tag::compound([("slimefun:research_fireworks", Tag::Byte(0))]),
+        )]);
+        store_payment(&mut data, &LUMPS, true).unwrap();
+        let brewing = BTreeSet::from(["slimefun:auto_brewer".to_owned()]);
+        assert_eq!(
+            grant_shared(&mut data, &brewing).unwrap(),
+            ["slimefun:auto_brewer"]
+        );
+        assert_eq!(pending(&data), Some((LUMPS.id.into(), 0)));
+        assert!(grant_shared(&mut data, &brewing).unwrap().is_empty());
+        let matching = BTreeSet::from(["slimefun:lumps".to_owned()]);
+        assert_eq!(
+            grant_shared(&mut data, &matching).unwrap(),
+            ["slimefun:lumps"]
+        );
+        assert!(unlocked(&data, &LUMPS));
+        assert!(pending(&data).is_none());
+        assert_eq!(
+            data.get(&PERSISTED.into())
+                .unwrap()
+                .get("slimefun:research_fireworks"),
+            Some(&Tag::Byte(0))
+        );
     }
 
     #[test]
