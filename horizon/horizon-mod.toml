@@ -5,4 +5,4 @@ description = "PigeonMoe's Slimefun server mod for Horizon 26.3. Development bui
 authors = ["Slimefun contributors", "PigeonMoe"]
 api = "0.2"
 side = "server"
-capabilities = ["registries", "tags"]
+capabilities = ["registries"]
