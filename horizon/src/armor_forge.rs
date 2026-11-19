@@ -864,9 +864,16 @@ fn footwear_response(
     persisted: Option<&Compound>,
 ) -> Option<Option<&'static str>> {
     let (unlock, sound) = footwear_rule(action, &crate::items::item_id(boots)?)?;
-    (mode == mod_api::GameMode::Creative
-        || persisted.is_some_and(|saved| research::unlocked_persisted(saved, unlock)))
-    .then_some(sound)
+    equipment_researched(mode, persisted, unlock).then_some(sound)
+}
+
+fn equipment_researched(
+    mode: mod_api::GameMode,
+    persisted: Option<&Compound>,
+    unlock: &Research,
+) -> bool {
+    mode == mod_api::GameMode::Creative
+        || persisted.is_some_and(|saved| research::unlocked_persisted(saved, unlock))
 }
 
 pub(crate) fn footwear(event: &mut mod_api::PlayerFootwearReactionEvent<'_>) -> mod_api::Flow {
@@ -875,6 +882,23 @@ pub(crate) fn footwear(event: &mut mod_api::PlayerFootwearReactionEvent<'_>) -> 
         return mod_api::Flow::Continue;
     };
     *event.sound = sound.map(str::to_owned);
+    mod_api::Flow::Cancel
+}
+
+fn protects_gliding_impact(
+    helmet: &mod_api::ItemStack,
+    mode: mod_api::GameMode,
+    persisted: Option<&Compound>,
+) -> bool {
+    crate::items::item_id(helmet).as_deref() == Some(ELYTRA_CAP.id())
+        && equipment_researched(mode, persisted, &ELYTRA_CAP_RESEARCH)
+}
+
+pub(crate) fn gliding_impact(event: &mut mod_api::PlayerGlidingImpactEvent<'_>) -> mod_api::Flow {
+    if !protects_gliding_impact(event.helmet, event.actor.1, event.persisted) {
+        return mod_api::Flow::Continue;
+    }
+    *event.reaction = (Some("minecraft:block.stone.hit".into()), true);
     mod_api::Flow::Cancel
 }
 
@@ -939,6 +963,27 @@ mod tests {
     use mod_api::{Identifier, testing::FakeHost};
 
     use super::*;
+
+    #[test]
+    fn gliding_protection_requires_a_real_researched_elytra_cap() {
+        let mut host = FakeHost::new();
+        host.registries
+            .resolve_items([Identifier::parse("minecraft:leather_helmet").unwrap()])
+            .unwrap();
+        let cap = ELYTRA_CAP.stack(&host, 1).unwrap();
+        let vanilla = Kind::Vanilla("minecraft:leather_helmet")
+            .stack(&host, 1)
+            .unwrap();
+        let research = Compound::from([("slimefun:elytra_cap".into(), Tag::Byte(1))]);
+        let survival = mod_api::GameMode::Survival;
+        assert!(!protects_gliding_impact(&cap, survival, None));
+        assert!(!protects_gliding_impact(
+            &vanilla,
+            survival,
+            Some(&research)
+        ));
+        assert!(protects_gliding_impact(&cap, survival, Some(&research)));
+    }
 
     #[test]
     fn each_boot_reacts_only_to_its_original_action_and_research() {

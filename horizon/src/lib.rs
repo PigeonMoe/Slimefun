@@ -951,6 +951,14 @@ impl Hooks for Slimefun {
         armor_forge::footwear(event)
     }
 
+    fn player_gliding_impact(
+        &self,
+        _: &dyn mod_api::LoopContext,
+        event: &mut mod_api::PlayerGlidingImpactEvent<'_>,
+    ) -> Flow {
+        armor_forge::gliding_impact(event)
+    }
+
     fn level_tick_post(&self, host: HostSide<'_>, event: &mut LevelTickPostEvent) {
         if let HostSide::Server(host) = host {
             let settings = *self.settings.lock().unwrap();
