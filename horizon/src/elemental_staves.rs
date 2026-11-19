@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use mod_api::{Compound, GameMode, Host, ItemStack, PlayerRef, ServerHost, SoundSource, Tag, Text};
+use mod_api::{Compound, GameMode, ItemStack, PlayerRef, ServerHost, SoundSource, Tag, Text};
 
 use crate::{
     ancient_altar::ANCIENT_RUNE_FIRE,

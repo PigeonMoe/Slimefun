@@ -184,11 +184,11 @@ pub(crate) struct Fuel {
 }
 
 impl Generator {
-    pub(crate) fn progress_icon(self) -> (&'static str, u32) {
+    pub(crate) fn progress_icon(self) -> &'static str {
         if self.fuel == FuelKind::Bio {
-            ("minecraft:golden_hoe", 31)
+            "minecraft:golden_hoe"
         } else {
-            ("minecraft:flint_and_steel", 63)
+            "minecraft:flint_and_steel"
         }
     }
 

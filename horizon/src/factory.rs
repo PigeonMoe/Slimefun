@@ -943,72 +943,124 @@ fn menu_items(
 }
 
 fn progress_item(host: &dyn Host, data: &Compound, furnace: ElectricMachine) -> Option<ItemStack> {
-    match remaining(data) {
-        Some(remaining) => {
-            let total = match data.get(&TOTAL.into()) {
-                Some(Tag::Int(total @ 0..)) => *total as u32,
-                _ => furnace.work_ticks,
-            };
-            let progress = if total == 0 {
-                100
-            } else {
-                let displayed_remaining = if matches!(furnace.family, RecipeFamily::GeoMiner) {
-                    remaining
-                } else {
-                    remaining.saturating_add(1)
-                };
-                100 - (u64::from(displayed_remaining.min(total)) * 100 / u64::from(total)) as u32
-            };
-            let (icon, damage) = match furnace.family {
-                RecipeFamily::Furnace | RecipeFamily::HeatedPressure => {
-                    ("minecraft:flint_and_steel", 63)
-                }
-                RecipeFamily::OreGrinder | RecipeFamily::IngotPulverizer => {
-                    ("minecraft:iron_pickaxe", 249)
-                }
-                RecipeFamily::Processing(spec) => match spec.family {
-                    Family::Press => ("minecraft:iron_hoe", 249),
-                    Family::GoldPan => ("minecraft:diamond_shovel", 1560),
-                    Family::DustWasher => ("minecraft:golden_shovel", 31),
-                    Family::IngotFactory => ("minecraft:flint_and_steel", 63),
-                },
-                RecipeFamily::Fuel(spec) => spec.progress_icon(),
-                RecipeFamily::ProduceCollector => ("minecraft:shears", 237),
-                RecipeFamily::Advanced(spec) => match spec.family {
-                    advanced_processing::Family::CarbonPress => ("minecraft:diamond_pickaxe", 1560),
-                    advanced_processing::Family::Freezer => ("minecraft:golden_pickaxe", 31),
-                    advanced_processing::Family::FoodFabricator
-                    | advanced_processing::Family::FoodComposter => ("minecraft:golden_hoe", 31),
-                    advanced_processing::Family::AutoBrewer => ("minecraft:fishing_rod", 63),
-                    advanced_processing::Family::AutoAnvil => ("minecraft:iron_pickaxe", 249),
-                    advanced_processing::Family::ChargingBench => ("minecraft:golden_pickaxe", 31),
-                    advanced_processing::Family::AutoEnchanter => {
-                        ("minecraft:golden_chestplate", 112)
-                    }
-                    advanced_processing::Family::AutoDisenchanter => {
-                        ("minecraft:diamond_chestplate", 528)
-                    }
-                    advanced_processing::Family::BookBinder => ("minecraft:iron_chestplate", 240),
-                    _ => ("minecraft:flint_and_steel", 63),
-                },
-                RecipeFamily::GeoMiner => ("minecraft:diamond_pickaxe", 1560),
-                RecipeFamily::OilPump | RecipeFamily::FluidPump => {
-                    ("minecraft:diamond_shovel", 1560)
-                }
-                RecipeFamily::Reactor(_)
-                | RecipeFamily::ReactorPort
-                | RecipeFamily::Assembler(_)
-                | RecipeFamily::FeedingMachine
-                | RecipeFamily::ExperienceCollector => return None,
-            };
-            let mut bar = display_item(host, icon, &format!("{progress}%"));
-            if let Some(stack) = &mut bar {
-                stack.set_damage(damage - progress * damage / 100);
-            }
-            bar
-        }
-        _ => display_item(host, "minecraft:black_stained_glass_pane", " "),
+    let Some(remaining) = remaining(data) else {
+        return display_item(host, "minecraft:black_stained_glass_pane", " ");
+    };
+    let total = match data.get(&TOTAL.into()) {
+        Some(Tag::Int(total @ 0..)) => *total as u32,
+        _ => furnace.work_ticks,
+    };
+    let displayed_remaining = if matches!(furnace.family, RecipeFamily::GeoMiner) {
+        remaining
+    } else {
+        remaining.saturating_add(1).min(total)
+    };
+    let icon = match furnace.family {
+        RecipeFamily::Furnace | RecipeFamily::HeatedPressure => "minecraft:flint_and_steel",
+        RecipeFamily::OreGrinder | RecipeFamily::IngotPulverizer => "minecraft:iron_pickaxe",
+        RecipeFamily::Processing(spec) => match spec.family {
+            Family::Press => "minecraft:iron_hoe",
+            Family::GoldPan => "minecraft:diamond_shovel",
+            Family::DustWasher => "minecraft:golden_shovel",
+            Family::IngotFactory => "minecraft:flint_and_steel",
+        },
+        RecipeFamily::Fuel(spec) => spec.progress_icon(),
+        RecipeFamily::ProduceCollector => "minecraft:shears",
+        RecipeFamily::Advanced(spec) => match spec.family {
+            advanced_processing::Family::CarbonPress => "minecraft:diamond_pickaxe",
+            advanced_processing::Family::Freezer => "minecraft:golden_pickaxe",
+            advanced_processing::Family::FoodFabricator
+            | advanced_processing::Family::FoodComposter => "minecraft:golden_hoe",
+            advanced_processing::Family::AutoBrewer => "minecraft:fishing_rod",
+            advanced_processing::Family::AutoAnvil => "minecraft:iron_pickaxe",
+            advanced_processing::Family::ChargingBench => "minecraft:golden_pickaxe",
+            advanced_processing::Family::AutoEnchanter => "minecraft:golden_chestplate",
+            advanced_processing::Family::AutoDisenchanter => "minecraft:diamond_chestplate",
+            advanced_processing::Family::BookBinder => "minecraft:iron_chestplate",
+            _ => "minecraft:flint_and_steel",
+        },
+        RecipeFamily::GeoMiner => "minecraft:diamond_pickaxe",
+        RecipeFamily::OilPump | RecipeFamily::FluidPump => "minecraft:diamond_shovel",
+        RecipeFamily::Reactor(_)
+        | RecipeFamily::ReactorPort
+        | RecipeFamily::Assembler(_)
+        | RecipeFamily::FeedingMachine
+        | RecipeFamily::ExperienceCollector => return None,
+    };
+    paper_progress_item(host, Kind::Vanilla(icon), displayed_remaining, total)
+}
+
+fn paper_progress_item(
+    host: &dyn Host,
+    icon: Kind,
+    remaining: u32,
+    total: u32,
+) -> Option<ItemStack> {
+    // Paper's MachineProcessor skips jobs with no duration and no remaining ticks.
+    if total == 0 {
+        return display_item(host, "minecraft:black_stained_glass_pane", " ");
     }
+    let remaining = remaining.min(total);
+    let mut item = icon.stack(host, 1)?;
+    if let Some(durability) = host.max_damage(item.item()) {
+        // Bukkit's ChestMenuUtils divides first, so short jobs use the native durability bar.
+        item.set_damage((durability / total) * remaining);
+    }
+    let percentage = (((total - remaining) as f32 * 100.0) / total as f32).round() as u32;
+    let filled = (percentage / 5) as usize;
+    let color = match percentage {
+        0..=15 => "dark_red",
+        16..=31 => "red",
+        32..=47 => "gold",
+        48..=63 => "yellow",
+        64..=79 => "dark_green",
+        _ => "green",
+    };
+    let seconds = remaining / 2;
+    let time = if seconds >= 60 {
+        format!("{}m {}s", seconds / 60, seconds % 60)
+    } else {
+        format!("{seconds}s")
+    };
+    let mut segments = Vec::with_capacity(2);
+    if filled > 0 {
+        segments.push(crate::items::text(&":".repeat(filled), color, false));
+    }
+    segments.push(crate::items::text(
+        &format!("{} - {percentage}.0%", ":".repeat(20 - filled)),
+        "gray",
+        false,
+    ));
+    let progress = Tag::compound([
+        ("text", Tag::String("".into())),
+        ("extra", Tag::List(segments)),
+    ]);
+    item.apply_components(&Compound::from([
+        (
+            "minecraft:custom_name".into(),
+            Tag::compound([
+                ("text", Tag::String("".into())),
+                ("extra", Tag::List(vec![Tag::String(" ".into())])),
+            ]),
+        ),
+        (
+            "minecraft:lore".into(),
+            Tag::List(vec![
+                progress,
+                Tag::String("".into()),
+                crate::items::text(&time, "gray", false),
+            ]),
+        ),
+        (
+            "minecraft:tooltip_display".into(),
+            Tag::compound([(
+                "hidden_components",
+                Tag::List(vec![Tag::String("minecraft:attribute_modifiers".into())]),
+            )]),
+        ),
+    ]))
+    .ok()?;
+    Some(item)
 }
 
 fn display_item(host: &dyn Host, material: &str, name: &str) -> Option<ItemStack> {
@@ -2082,7 +2134,87 @@ pub(crate) fn restore_paper_inventory(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mod_api::testing::FakeHost;
+    use mod_api::{prelude::ItemsHost, testing::FakeHost};
+
+    #[test]
+    fn factory_slots_render_paper_progress_for_enchantment_machines_and_geo() {
+        #[rustfmt::skip]
+        let cases = [
+            ("AUTO_ENCHANTER_2", 22, "minecraft:golden_chestplate", 112, 29, 50, 60, "gold", 8, "40.0%", "15s"),
+            ("AUTO_DISENCHANTER_2", 22, "minecraft:diamond_chestplate", 528, 39, 60, 320, "gold", 6, "33.0%", "20s"),
+            ("BOOK_BINDER", 22, "minecraft:iron_chestplate", 240, 19, 50, 80, "yellow", 12, "60.0%", "10s"),
+            ("GEO_MINER", 4, "minecraft:diamond_pickaxe", 1561, 7, 14, 777, "yellow", 10, "50.0%", "3s"),
+            ("ELECTRIC_FURNACE", 22, "minecraft:flint_and_steel", 64, 6, 8, 56, "dark_red", 2, "13.0%", "3s"),
+        ];
+        let mut host = recipe_host([
+            "minecraft:black_stained_glass_pane",
+            "minecraft:golden_chestplate",
+            "minecraft:diamond_chestplate",
+            "minecraft:iron_chestplate",
+            "minecraft:diamond_pickaxe",
+            "minecraft:flint_and_steel",
+        ]);
+        for (id, slot, icon, maximum, remaining, total, damage, color, filled, percent, time) in
+            cases
+        {
+            host.registries
+                .item_component(icon, "minecraft:max_damage", Tag::Int(maximum));
+            let machine = ElectricMachine::for_item(id).unwrap();
+            let idle = menu_items(&host, &Compound::new(), machine);
+            assert_eq!(
+                idle[slot].as_ref().unwrap().item(),
+                host.item_key(&Identifier::parse("minecraft:black_stained_glass_pane").unwrap())
+                    .unwrap()
+            );
+            let state = Compound::from([
+                (REMAINING.into(), Tag::Int(remaining)),
+                (TOTAL.into(), Tag::Int(total)),
+            ]);
+            let displayed = menu_items(&host, &state, machine);
+            let item = displayed[slot].as_ref().unwrap();
+            assert_eq!(
+                item.item(),
+                host.item_key(&Identifier::parse(icon).unwrap()).unwrap()
+            );
+            assert_eq!(item.damage_component(), Some(damage));
+            let patch = item.components().unwrap().as_nbt();
+            assert_eq!(
+                patch
+                    .get(&"minecraft:custom_name".into())
+                    .and_then(|name| name.get("extra")),
+                Some(&Tag::List(vec![Tag::String(" ".into())]))
+            );
+            assert_eq!(
+                patch.get(&"minecraft:lore".into()),
+                Some(&Tag::List(vec![
+                    Tag::compound([
+                        ("text", Tag::String("".into())),
+                        (
+                            "extra",
+                            Tag::List(vec![
+                                crate::items::text(&":".repeat(filled), color, false),
+                                crate::items::text(
+                                    &format!("{} - {percent}", ":".repeat(20 - filled)),
+                                    "gray",
+                                    false
+                                ),
+                            ])
+                        ),
+                    ]),
+                    Tag::String("".into()),
+                    crate::items::text(time, "gray", false),
+                ]))
+            );
+            assert_eq!(
+                patch
+                    .get(&"minecraft:tooltip_display".into())
+                    .and_then(|display| display.get("hidden_components")),
+                Some(&Tag::List(vec![Tag::String(
+                    "minecraft:attribute_modifiers".into()
+                )])),
+            );
+        }
+    }
 
     #[test]
     fn animal_machines_keep_the_paper_seven_input_layout_and_crafting() {

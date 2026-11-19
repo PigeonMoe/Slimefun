@@ -6,10 +6,11 @@ use mod_api::{
 };
 
 use super::{
-    ElectricMachine, Position, RecipeFamily, Storage, VIEWERS, data_at, display_item, place, save,
-    stack_in,
+    ElectricMachine, Position, RecipeFamily, Storage, VIEWERS, data_at, display_item,
+    paper_progress_item, place, save, stack_in,
 };
 use crate::{
+    elemental_staves::LAVA_CRYSTAL,
     heated_pressure::{BOOSTED_URANIUM, NETHER_ICE_COOLANT_CELL, PLUTONIUM, URANIUM},
     items::{
         CORINTHIAN_BRONZE_INGOT, ELECTRIC_MOTOR, HeadTexture, Kind, LEAD_INGOT, REINFORCED_PLATE,
@@ -89,6 +90,7 @@ pub(crate) struct Fuel {
 
 pub(crate) struct Reactor {
     pub(crate) item: Kind,
+    progress_icon: Kind,
     pub(crate) title: &'static str,
     pub(crate) research: &'static Research,
     pub(crate) capacity: u32,
@@ -101,6 +103,7 @@ pub(crate) struct Reactor {
 const STAR: Kind = Kind::Vanilla("minecraft:nether_star");
 static NUCLEAR: Reactor = Reactor {
     item: NUCLEAR_REACTOR,
+    progress_icon: LAVA_CRYSTAL,
     title: "Nuclear Reactor",
     research: &NUCLEAR_RESEARCH,
     capacity: 16_384,
@@ -127,6 +130,7 @@ static NUCLEAR: Reactor = Reactor {
 };
 static NETHER: Reactor = Reactor {
     item: NETHERSTAR_REACTOR,
+    progress_icon: STAR,
     title: "Nether Star Reactor",
     research: &NETHER_RESEARCH,
     capacity: 32_768,
@@ -340,8 +344,7 @@ pub(super) fn menu_items(
     items[22] = match machine.family {
         RecipeFamily::Reactor(spec) => progress(data, spec)
             .and_then(|(done, total)| {
-                let status = format!("{}%", done * 100 / total);
-                named_item(host, fuel, &status)
+                paper_progress_item(host, spec.progress_icon, total.saturating_sub(done), total)
             })
             .or_else(|| display_item(host, "minecraft:black_stained_glass_pane", " ")),
         _ => named_item(host, PLUTONIUM, "Byproduct Slot"),
@@ -775,6 +778,48 @@ fn move_stack(
 mod tests {
     use super::*;
     use mod_api::{Identifier, testing::FakeHost};
+
+    #[test]
+    fn reactor_indicators_use_the_paper_objects_without_losing_the_skull_profile() {
+        let mut host = FakeHost::new();
+        host.registries
+            .resolve_items(
+                ["minecraft:player_head", "minecraft:nether_star"]
+                    .map(|item| Identifier::parse(item).unwrap()),
+            )
+            .unwrap();
+        for (reactor, time) in [(&NUCLEAR, "7m 30s"), (&NETHER, "11m 15s")] {
+            let mut data = Compound::new();
+            Operation {
+                fuel_index: 0,
+                progress: reactor.fuels[0].ticks / 4,
+                missing_water: false,
+            }
+            .store(&mut data);
+            let machine = ElectricMachine::for_item(reactor.item.id()).unwrap();
+            let displayed = menu_items(&host, &data, machine);
+            let indicator = displayed[22].as_ref().unwrap();
+            let original = reactor.progress_icon.stack(&host, 1).unwrap();
+            assert_eq!(indicator.item(), original.item());
+            assert_eq!(indicator.damage_component(), Some(0));
+            let components = indicator.components().unwrap().as_nbt();
+            let Some(Tag::List(lines)) = components.get(&"minecraft:lore".into()) else {
+                panic!("a running Paper reactor displays a progress bar");
+            };
+            assert_eq!(lines[2], crate::items::text(time, "gray", false));
+            if reactor.item == NUCLEAR_REACTOR {
+                assert!(LAVA_CRYSTAL.matches(&host, indicator));
+                assert_eq!(
+                    components.get(&"minecraft:profile".into()),
+                    original
+                        .components()
+                        .unwrap()
+                        .as_nbt()
+                        .get(&"minecraft:profile".into())
+                );
+            }
+        }
+    }
 
     #[test]
     fn paper_reactors_keep_fuel_and_progress_through_a_snapshot() {
