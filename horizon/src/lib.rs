@@ -49,6 +49,7 @@ mod gold_pan;
 mod gps_controls;
 mod gps_transport;
 mod gps_waypoints;
+mod guide;
 mod hand_machine;
 mod heated_pressure;
 mod hologram_projector;
@@ -115,6 +116,7 @@ struct Slimefun {
     chest: Mutex<Option<ItemKey>>,
     networks: Arc<Mutex<network_runtime::Networks>>,
     gps: gps_controls::Controls,
+    guide: guide::Guide,
     androids: android_ui::Menus,
     butcher_androids: android_butchery::Butchers,
     holograms: hologram_projector::Editors,
@@ -148,6 +150,7 @@ impl Default for Slimefun {
             chest: Mutex::new(None),
             networks: Arc::default(),
             gps: gps_controls::Controls::default(),
+            guide: guide::Guide::default(),
             androids: android_ui::Menus::default(),
             butcher_androids: android_butchery::Butchers::default(),
             holograms: hologram_projector::Editors::default(),
@@ -589,6 +592,8 @@ impl Hooks for Slimefun {
             Command::new("sf"),
             Command::new("slimefun guide"),
             Command::new("sf guide"),
+            Command::new("slimefun open_guide"),
+            Command::new("sf open_guide"),
             Command::new("slimefun status"),
             Command::new("sf status"),
             Command::new("slimefun recipe <item:text>"),
@@ -673,6 +678,18 @@ impl Hooks for Slimefun {
             return Flow::Continue;
         }
         let lines = match path.next() {
+            Some(action @ ("guide" | "open_guide")) => {
+                if let CommandSource::Player { player, .. } = *event.source {
+                    if action == "guide" {
+                        guide::give(host, player);
+                    } else {
+                        self.guide.open(host, player);
+                    }
+                } else {
+                    let _ = host.commands().feedback(Text::literal("Only players can use this command."));
+                }
+                return Flow::Cancel;
+            }
             Some("storage") => storage::command(host, event, path.next(), &self.networks, &self.universal),
             Some("restore-backpack") => {
                 let message = match *event.source {
@@ -722,7 +739,7 @@ impl Hooks for Slimefun {
                     _ => vec!["A player must unlock their own research.".into()],
                 }
             }
-            None | Some("guide") => vec![
+            None => vec![
                 "Slimefun Horizon development".into(),
                 "Build a Grind Stone by putting a wooden fence above a dispenser. Load the dispenser and right-click the fence.".into(),
                 "Build an Enhanced Crafting Table by putting a crafting table on a dispenser. Arrange the recipe in its 3×3 grid and right-click the table.".into(),
@@ -768,6 +785,10 @@ impl Hooks for Slimefun {
             return Flow::Continue;
         };
         if *event.use_item != TriState::False && let Some(held) = event.click.stack {
+            if self.guide.right_click(host, player, held) {
+                *event.cancellation_result = InteractionResult::Consume;
+                return Flow::Cancel;
+            }
             if jet_boots::STEEL_THRUSTER.matches(host, held)
                 || jetpack::CHAIN.matches(host, held)
                 || player.entity().level(host).is_some_and(|level| {
@@ -983,7 +1004,8 @@ impl Hooks for Slimefun {
         let Some(player) = host.player(event.click.player) else {
             return Flow::Continue;
         };
-        if self.item_clicks.consume_fallthrough(
+        if self.guide.right_click(host, player, event.click.stack)
+            || self.item_clicks.consume_fallthrough(
             host,
             event.click.player,
             event.click.hand,
@@ -1062,6 +1084,7 @@ impl Hooks for Slimefun {
         self.spawners.forget(event.player);
         self.bee_wings.stop(event.player);
         self.gps.logout(event.player);
+        self.guide.logout(event.player);
         self.androids.logout(event.player);
         self.magnets.stop(event.player);
         self.holograms.logout(event.player);
@@ -1144,6 +1167,7 @@ impl Hooks for Slimefun {
     }
 
     fn menu_clicked(&self, host: &mut dyn ServerHost, event: &mut mod_api::MenuClickedEvent) {
+        self.guide.clicked(host, event);
         auto_crafter::clicked(host, event);
         factory::VIEWERS.clicked(host, event);
         self.gps.click(&self.networks, host, event);
@@ -1155,6 +1179,7 @@ impl Hooks for Slimefun {
     }
 
     fn menu_closed(&self, _: &mut dyn ServerHost, event: &mut mod_api::MenuClosedEvent) {
+        self.guide.closed(event);
         auto_crafter::closed(event);
         self.backpacks.closed(event);
         self.universal.closed(event);
@@ -1382,6 +1407,7 @@ impl Hooks for Slimefun {
         self.bee_wings.clear();
         self.universal.clear();
         self.gps.clear();
+        self.guide.clear();
         self.androids.clear();
         self.magnets.clear();
         self.butcher_androids.clear();
