@@ -836,9 +836,11 @@ fn start_ritual(
     let items: [ItemStack; 8] = items.try_into().map_err(|_| "Incomplete pedestal ring.")?;
     let recipe =
         ritual_recipe(host, &catalyst, &items).ok_or("No Ancient Altar recipe matched.")?;
-    if !research::can_use(host, player, recipe.research) {
+    if !recipe.research.id.is_empty() && !research::can_use(host, player, recipe.research) {
         return Err(match recipe.research.id {
             "essence_of_afterlife" => "Unlock Necromancy with /sf research essence_of_afterlife.",
+            "special_runes" => "Unlock Purple Runes with /sf research special_runes.",
+            "rainbow_blocks" => "Unlock Rainbow Blocks with /sf research rainbow_blocks.",
             _ => "Unlock Elemental Runes with /sf research ancient_runes.",
         });
     }
@@ -1215,6 +1217,7 @@ fn ritual_recipe(
     CRAFTING
         .iter()
         .chain(crate::armor_forge::ALTAR_RECIPES)
+        .chain(crate::rainbow::ALTAR_RECIPES)
         .find(|recipe| {
             recipe.inputs[4].is_some_and(|kind| kind.matches(host, catalyst))
                 && (0..8).any(|rotation| {

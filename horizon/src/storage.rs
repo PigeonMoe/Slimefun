@@ -373,6 +373,10 @@ fn at(
             return crate::hologram_projector::restore_paper(host, level, pos, row)
                 .map(|restored| vec![restored]);
         }
+        if action == "restore-network" && crate::rainbow::block(id).is_some() {
+            return crate::rainbow::placed::restore_paper(host, level, pos, id)
+                .map(|restored| vec![restored]);
+        }
         if action == "restore-inventory" && !has_restorable_menu(component) {
             return Err(format!(
                 "Restoring the Paper menu for {id} is not supported yet."
@@ -532,6 +536,7 @@ fn restore_chunk(
                 || id == block_placer::BLOCK_PLACER.id()
                 || id == crate::network_recipes::HOLOGRAM_PROJECTOR.id()
                 || Component::for_item(id).is_some()
+                || crate::rainbow::block(id).is_some()
                 || ancient_altar::paper_device(id).is_some())
             .then_some((pos, row, id))
         })
@@ -561,6 +566,8 @@ fn restore_chunk(
             crate::hologram_projector::restore_paper(host, level, pos, row)
         } else if unsupported_menu {
             Err("This block has archived items without a supported menu.".into())
+        } else if crate::rainbow::block(id).is_some() {
+            crate::rainbow::placed::restore_paper(host, level, pos, id)
         } else if id == "OUTPUT_CHEST" {
             restore_output(host, level, pos)
         } else {

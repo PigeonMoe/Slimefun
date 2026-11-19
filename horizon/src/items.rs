@@ -182,6 +182,7 @@ impl SlimefunItem {
         }
         crate::enchantment_machines::decorate(self.id, &mut components);
         crate::ancient_altar::decorate(self.id, &mut components);
+        crate::rainbow::decorate(self.id, &mut components);
         crate::armor_forge::decorate(self.id, &mut components);
         crate::auto_crafter::decorate(self.id, &mut components);
         if let Some(texture) = &self.texture {
@@ -970,6 +971,7 @@ pub(crate) fn network_item(id: &str) -> Option<Kind> {
         let pump = crate::factory::fluid_pump::FLUID_PUMP;
         (pump.id() == id).then_some(pump)
     })
+    .or_else(|| crate::rainbow::item(id))
     .or_else(|| crate::fuel_generators::generator(id).map(|spec| spec.item))
     .or_else(|| {
         [

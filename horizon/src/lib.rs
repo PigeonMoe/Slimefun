@@ -62,6 +62,7 @@ mod networks;
 mod output_chest;
 mod portable_crafter;
 mod radiation;
+mod rainbow;
 mod random;
 mod recipes;
 mod research;
@@ -313,6 +314,7 @@ impl Hooks for Slimefun {
         factory::register(registrar);
         backpacks::register(registrar);
         ancient_altar::register(registrar);
+        rainbow::register(registrar);
         hologram_projector::register(registrar);
         auto_crafter::register(registrar);
         self.universal.register(registrar);
@@ -368,6 +370,7 @@ impl Hooks for Slimefun {
         android_machine::drop_items(level, event);
         food_machines::restore_drop(level, event);
         ancient_altar::restore_drops(level, event);
+        rainbow::placed::drop_item(level, event);
         hologram_projector::restore_drop(level, event);
         Flow::Continue
     }
@@ -376,6 +379,7 @@ impl Hooks for Slimefun {
         network_runtime::observe_plain_change(level, event);
         self.crucibles.anchor_changed(level, event);
         hologram_projector::observe_change(level, event);
+        rainbow::placed::changed(level, event);
         network_runtime::observe_gps_change(&self.networks, level, event);
     }
 
@@ -1051,11 +1055,11 @@ impl Hooks for Slimefun {
     }
 
     fn server_tick(&self, host: &mut dyn ServerHost, event: &mut mod_api::ServerTickEvent) {
-        if matches!(
-            event.phase,
-            mod_api::ServerTickPhase::ServerTickStart { .. }
-        ) {
+        if let mod_api::ServerTickPhase::ServerTickStart { world_running } = event.phase {
             self.radiation.begin_tick(|| host.server_monotonic_millis());
+            if world_running {
+                rainbow::placed::begin_tick();
+            }
         }
     }
 
@@ -1091,6 +1095,7 @@ impl Hooks for Slimefun {
             self.industrial_miners.tick(host, event.level, &self.rolls);
             self.composters.tick(host, event.level, &self.rolls);
             ancient_altar::tick(host, event.level);
+            rainbow::placed::tick(host, event.level);
             hologram_projector::tick(host, event.level);
             auto_crafter::refresh(host, event.level);
             armor_forge::tick_equipment(host, event.level);
@@ -1115,7 +1120,16 @@ impl Hooks for Slimefun {
         }
     }
 
+    fn chunk_load(&self, host: &mut dyn ServerHost, event: &mut mod_api::ChunkLoadEvent<'_>) {
+        rainbow::placed::loaded(host, event.dimension, event.chunk);
+    }
+
+    fn chunk_unload(&self, _: &mut dyn ServerHost, event: &mut mod_api::ChunkUnloadEvent<'_>) {
+        rainbow::placed::unloaded(event.dimension, event.chunk);
+    }
+
     fn level_unload(&self, host: &mut dyn ServerHost, event: &mut mod_api::LevelUnloadEvent<'_>) {
+        rainbow::placed::unload_level(event.dimension);
         self.block_placers.unload(host, event.dimension);
         self.industrial_miners.unload(host, event.dimension);
         self.butcher_androids.unload(host, event.dimension);
@@ -1137,6 +1151,7 @@ impl Hooks for Slimefun {
     fn server_stopping(&self, host: &mut dyn ServerHost, _: &mut ServerStoppingEvent) {
         self.block_placers.clear();
         self.radiation.clear();
+        rainbow::placed::clear();
         auto_crafter::clear();
         self.backpacks.clear();
         self.bee_wings.clear();
@@ -1380,6 +1395,7 @@ fn describe_recipe(id: &str, double_ores: bool) -> Vec<String> {
             ancient_altar::CRAFTING
                 .iter()
                 .chain(armor_forge::ALTAR_RECIPES)
+                .chain(rainbow::ALTAR_RECIPES)
                 .map(|recipe| ("Ancient Altar", recipe)),
         );
     for (workbench, recipe) in workbenches.filter(|(bench, recipe)| {

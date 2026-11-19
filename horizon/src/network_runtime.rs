@@ -769,6 +769,9 @@ fn protected_block(
     dimension: &mod_api::LevelDimension,
     pos: Position,
 ) -> bool {
+    if crate::rainbow::placed::protected(level, dimension, pos) {
+        return true;
+    }
     let Some(material) = level
         .block_state(pos)
         .and_then(|state| level.state_block(state))
@@ -995,7 +998,8 @@ pub(crate) fn ignition_chamber_at(
 }
 
 pub(crate) fn has_block_marker(host: &mut dyn ServerHost, level: LevelRef, pos: Position) -> bool {
-    block_data(host, level, pos).is_some()
+    crate::rainbow::placed::marked(host, level, pos)
+        || block_data(host, level, pos).is_some()
         || host.block_entity(level, pos).is_some_and(|entity| {
             host.block_entity_saved_attachment(entity, NETWORK_STATE.namespace, NETWORK_STATE.name)
                 .is_some()

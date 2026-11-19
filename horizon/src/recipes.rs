@@ -131,6 +131,7 @@ pub(crate) fn crafting() -> impl Iterator<Item = &'static CraftingRecipe> {
         .chain(crate::factory::reactors::CRAFTING)
         .chain([&crate::factory::experience_collector::COLLECTOR_RECIPE])
         .chain(crate::enchantment_machines::CRAFTING)
+        .chain([&crate::rainbow::COOKIE_RECIPE])
         .chain(crate::auto_anvil::CRAFTING)
         .chain(crate::enhanced_furnaces::CRAFTING)
         .chain([&crate::book_binder::CRAFTING])
@@ -181,6 +182,7 @@ pub(crate) fn researches() -> impl Iterator<Item = &'static Research> {
             &crate::factory::experience_collector::FLASK_RESEARCH,
         ])
         .chain(crate::enchantment_machines::RESEARCHES)
+        .chain([&crate::rainbow::RESEARCH])
         .chain(crate::auto_anvil::RESEARCHES)
         .chain(crate::enhanced_furnaces::RESEARCHES)
         .chain([&crate::book_binder::RESEARCH])
