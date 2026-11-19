@@ -617,7 +617,10 @@ impl Networks {
                     .as_ref()
                     .is_none_or(|cargo| !cargo.imported_paper && cargo.filters.is_empty())
             });
-        if old.is_none() || restore_inventory {
+        let restore_owner = import
+            && crate::gps_transport::needs_owner(&data.id)
+            && old.as_ref().is_some_and(|old| old.gps_owner.is_none());
+        if old.is_none() || restore_inventory || restore_owner {
             if let Component::Capacitor(capacity) = component {
                 set_capacitor_profile(host, level, pos, data.charge, capacity);
             }
@@ -1064,6 +1067,7 @@ fn is_plain_node(component: Component) -> bool {
             | Component::ManualComposter
             | Component::ReactorPort
             | Component::WitherProofObsidian
+            | Component::GpsDevice(_)
     ) {
         return true;
     }
@@ -1621,19 +1625,30 @@ mod tests {
     fn paper_transport_recovers_independent_matrix_and_personal_plate_owners() {
         let id = "aaaa0000-1111-2222-3333-444455556666";
         let metadata = toml::Table::from_iter([("owner".into(), toml::Value::String(id.into()))]);
-        for (paper_id, material) in [
-            ("GPS_TELEPORTATION_MATRIX", "minecraft:iron_block"),
+        let mut host = FakeHost::new();
+        for (paper_id, material, position) in [
+            ("GPS_TELEPORTATION_MATRIX", "minecraft:iron_block", [-1, 65, 15]),
             (
                 "GPS_ACTIVATION_DEVICE_PERSONAL",
                 "minecraft:stone_pressure_plate",
+                [0, 65, 16],
             ),
         ] {
             let (node, data) = imported(paper_id, &metadata).unwrap();
             assert!(matches!(node.family(), Network::Independent));
+            assert!(is_plain_node(node.component));
             assert!(accepts_carrier(node.component, material));
+            assert_eq!(data.gps_owner, parse_uuid(id));
+            write_data(&mut host, position, data).unwrap();
+        }
+        let mut reopened = FakeHost::new();
+        reopened.attachments = mod_api::Attachments::from_nbt(host.attachments.to_nbt());
+        for position in [[-1, 65, 15], [0, 65, 16]] {
+            let data = plain_network::read_persisted(&mut reopened, position).unwrap();
             assert_eq!(data.gps_owner, parse_uuid(id));
         }
         let (shared, data) = imported("GPS_ACTIVATION_DEVICE_SHARED", &toml::Table::new()).unwrap();
+        assert!(is_plain_node(shared.component));
         assert!(accepts_carrier(
             shared.component,
             "minecraft:stone_pressure_plate"

@@ -7,7 +7,7 @@ use mod_api::{
     Holder, LevelDimension, LevelHost, LevelRef, ServerHost, Tag,
 };
 
-use super::{BlockData, Position, accepts_carrier, saved_id};
+use super::{BlockData, NETWORK_STATE, Position, accepts_carrier, saved_id};
 
 pub(crate) const CARRIERS: &[&str] = &[
     "minecraft:light_gray_stained_glass",
@@ -133,14 +133,8 @@ pub(super) fn read_persisted(host: &mut dyn ServerHost, pos: Position) -> Option
     let Tag::Compound(data) = saved.get(&key(pos).as_str().into())? else {
         return None;
     };
-    let Tag::Int(charge) = data.get(&"charge".into())? else {
-        return None;
-    };
-    Some(BlockData {
-        id: saved_id(data)?,
-        charge: u32::try_from(*charge).ok()?,
-        ..BlockData::default()
-    })
+    let codec = NETWORK_STATE.codec.as_ref()?;
+    (codec.decode)(data).ok()
 }
 
 pub(super) fn write(
@@ -150,16 +144,8 @@ pub(super) fn write(
 ) -> Result<(), AttachmentError> {
     let holder = Holder::Chunk(chunk(pos));
     let mut map = NODES.get_existing(host, holder)?.unwrap_or_default();
-    map.insert(
-        key(pos).as_str().into(),
-        Tag::compound([
-            ("id", Tag::String(data.id.as_str().into())),
-            (
-                "charge",
-                Tag::Int(i32::try_from(data.charge).map_err(|_| AttachmentError::Decode)?),
-            ),
-        ]),
-    );
+    let codec = NETWORK_STATE.codec.as_ref().ok_or(AttachmentError::Decode)?;
+    map.insert(key(pos).as_str().into(), Tag::Compound((codec.encode)(data)?));
     NODES.set(host, holder, map)
 }
 
