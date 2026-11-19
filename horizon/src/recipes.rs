@@ -207,7 +207,7 @@ pub(crate) fn researches() -> impl Iterator<Item = &'static Research> {
         ])
         .chain(crate::enchantment_machines::RESEARCHES)
         .chain(crate::elemental_staves::RESEARCHES.iter().copied())
-        .chain([&crate::magic_eye::RESEARCH])
+        .chain([&crate::magic_eye::RESEARCH, &crate::nether_goo::RESEARCH])
         .chain([&crate::infernal_bonemeal::RESEARCH, &crate::zombie_pills::RESEARCH])
         .chain(crate::snacks::RESEARCHES.iter().copied())
         .chain([&crate::smelters_pickaxe::RESEARCH])

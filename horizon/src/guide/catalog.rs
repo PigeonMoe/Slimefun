@@ -3,9 +3,9 @@
 use std::{collections::BTreeMap, sync::LazyLock};
 
 use crate::{
-    ancient_altar, armor_forge, food_machines, industrial_miner,
+    ancient_altar, armor_forge, food_machines, fuel_generators, industrial_miner,
     items::{self, Kind},
-    rainbow,
+    nether_goo, rainbow,
     recipes::{self, CraftingRecipe, Research, SingleRecipe, Stack},
     soulbound_gear,
 };
@@ -48,6 +48,14 @@ const MOB_DROP: RecipeType = RecipeType {
     lore: &["", "&rKill the specified Mob to obtain this Item"],
     ..RecipeType::plain("minecraft:iron_sword", "Mob Drop")
 };
+const BARTER_DROP: RecipeType = RecipeType {
+    lore: &[
+        "",
+        "&aBarter with piglins for a chance",
+        "&ato obtain this item",
+    ],
+    ..RecipeType::plain("minecraft:gold_ingot", "Barter Drop")
+};
 const FOOD_FABRICATOR: RecipeType = RecipeType {
     icon: food_machines::FOOD_FABRICATOR,
     name: "Food Fabricator",
@@ -65,6 +73,15 @@ const IRON_GOLEM: &[IngredientVisual] = &[IngredientVisual {
     profile: Some(items::HeadTexture {
         profile: [669471756, -955559616, -1944180456, -1177071508],
         value: "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHA6Ly90ZXh0dXJlcy5taW5lY3JhZnQubmV0L3RleHR1cmUvODkwOTFkNzllYTBmNTllZjdlZjk0ZDdiYmE2ZTVmMTdmMmY3ZDQ1NzJjNDRmOTBmNzZjNDgxOWE3MTQifX19",
+    }),
+}];
+
+const PIGLIN: &[IngredientVisual] = &[IngredientVisual {
+    slot: 4,
+    label: "&fPiglin",
+    profile: Some(items::HeadTexture {
+        profile: [1031950828, 1086148763, -1932514438, -1171656326],
+        value: "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHA6Ly90ZXh0dXJlcy5taW5lY3JhZnQubmV0L3RleHR1cmUvMjg4MmFmMTI5NGE3NDAyM2U2OTE5YTMxZDFhMDI3MzEwZjJlMTQyYWZiNDY2N2QyMzBkMTU1ZTdmMjFkYmI0MSJ9fX0=",
     }),
 }];
 
@@ -545,6 +562,15 @@ fn stock_sources(entries: &mut BTreeMap<String, Entry>) {
         &[(4, Kind::Vanilla("minecraft:player_head"))],
         Some(&recipes::BASIC_CIRCUIT_BOARD_RESEARCH),
         IRON_GOLEM,
+    );
+
+    add(
+        BARTER_DROP,
+        fuel_generators::STRANGE_NETHER_GOO,
+        1,
+        &[(4, Kind::Vanilla("minecraft:player_head"))],
+        Some(&nether_goo::RESEARCH),
+        PIGLIN,
     );
 
     // Paper's iron and gold entries are registered to the Ore Crusher. Copper

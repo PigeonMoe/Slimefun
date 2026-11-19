@@ -70,6 +70,7 @@ mod machine;
 mod magic_eye;
 mod magic_weapons;
 mod medical;
+mod nether_goo;
 mod network_recipes;
 mod network_runtime;
 mod networks;
@@ -124,6 +125,7 @@ struct Slimefun {
     magic_weapons: magic_weapons::Weapons,
     beheading: beheading::Beheading,
     ore_tools: ore_tools::OreTools,
+    nether_goo: nether_goo::NetherGoo,
     teleposition_scroll: teleposition_scroll::Scroll,
     explosive_tools: explosive_tools::ExplosiveTools,
     rolls: Rolls,
@@ -164,6 +166,7 @@ impl Default for Slimefun {
             magic_weapons: magic_weapons::Weapons::default(),
             beheading: beheading::Beheading::default(),
             ore_tools: ore_tools::OreTools::default(),
+            nether_goo: nether_goo::NetherGoo::default(),
             teleposition_scroll: teleposition_scroll::Scroll::default(),
             explosive_tools: explosive_tools::ExplosiveTools::default(),
             rolls: Rolls::default(),
@@ -194,6 +197,7 @@ impl Slimefun {
             enchantment_machines::configure(&toml::Table::new());
             self.radiation.configure(None);
             self.climbing.configure(None);
+            self.nether_goo.configure(None);
             self.block_placers.configure(None);
             output_chest::set_enabled(true);
             self.crucibles.configure(false);
@@ -347,6 +351,11 @@ impl Slimefun {
         }
         self.climbing
             .configure(table.get("climbing-pick").and_then(toml::Value::as_table));
+        self.nether_goo.configure(
+            table
+                .get("strange-nether-goo")
+                .and_then(toml::Value::as_table),
+        );
         if let Some(network) = table.get("networks").and_then(toml::Value::as_table) {
             if let Some(budget) = network
                 .get("max-size")
@@ -422,13 +431,14 @@ impl Hooks for Slimefun {
         event.configs.push(Config::new(
             "slimefun",
             ConfigKind::Server,
-            &format!("{}{}{}{}{}{}",
+            &format!("{}{}{}{}{}{}{}",
             "double-ores = true\ncrucible-allow-water-in-nether = false\nlegacy-ore-washer = false\nlegacy-dust-washer = false\nlegacy-ore-grinder = true\nelectric-gold-pan-override-output-limit = [false, false, false]\nfreezer-use-vanilla-ratios = [false, false, false]\nfire-breaking-chance = 34\noutput-chest-enabled = true\ndrop-from-golems = true\ngolem-drop-chance = 75\n\n[guide]\nreceive-on-first-join = true\n\n[researches]\nfree-in-creative-mode = true\nenable-fireworks = true\ndisable-learning-animation = false\n\n[URID]\ncustom-ticker-delay = 10\n\n[networks]\nmax-size = 200\nenable-visualizer = true\ncargo-ticker-delay = 0\n\n[wind-staff]\npower = 4\n\n[book-binder]\nbypass-vanilla-max-level = false\nhas-custom-max-level = false\ncustom-max-level = 15\n\n[portable-teleporter]\nteleportation-cost = 10\n\n[produce-collector]\nrange = 2\n\n[pickaxe-of-vein-mining]\nmax-blocks = 16\n\n[pickaxe-of-the-seeker]\nmax-range = 5\n\n[blade-of-vampires]\nchance = 45\n\n[reinforced-spawner]\nallow-spawn-eggs = true\n\n[ancient-altar]\nstep-delay = 8\n\n[miner-android]\nreduced-block-updates = true\n\n[industrial-miner]\ncan-mine-ancient-debris = false\ncan-mine-deepslate-ores = true\n\n[advanced-industrial-miner]\ncan-mine-ancient-debris = false\ncan-mine-deepslate-ores = true\n",
                 enchantment_machines::default_config(),
                 beheading::DEFAULT_CONFIG,
                 explosive_tools::DEFAULT_CONFIG,
                 climbing_pick::DEFAULT_CONFIG,
-                teleposition_scroll::DEFAULT_CONFIG),
+                teleposition_scroll::DEFAULT_CONFIG,
+                nether_goo::DEFAULT_CONFIG),
         ));
     }
 
@@ -552,12 +562,35 @@ impl Hooks for Slimefun {
         let HostSide::Server(host) = host else {
             return None;
         };
-        if let Some(result) = zombie_pills::interact(host, event) {
+        if let Some(result) =
+            nether_goo::interact(host, event).or_else(|| zombie_pills::interact(host, event))
+        {
             return Some(result);
         }
         (matches!(event.kind, "minecraft:cow" | "minecraft:mooshroom")
             && event.stack.is_some_and(|held| jet_boots::STEEL_THRUSTER.matches(host, held)))
             .then_some(InteractionResult::Consume)
+    }
+
+    fn piglin_pickup_pre(
+        &self,
+        _: &dyn mod_api::Host,
+        event: &mut mod_api::PiglinPickupPreEvent<'_>,
+    ) -> Flow {
+        if nether_goo::is_stock_item(event.stack) {
+            Flow::Cancel
+        } else {
+            Flow::Continue
+        }
+    }
+
+    fn piglin_throw_item(
+        &self,
+        host: &dyn mod_api::Host,
+        event: &mut mod_api::PiglinThrowItemEvent<'_>,
+    ) -> Option<mod_api::ItemStack> {
+        self.nether_goo
+            .replace_piglin_drop(host, event.piglin, &self.rolls)
     }
 
     fn entity_place(
@@ -905,6 +938,10 @@ impl Hooks for Slimefun {
         let Some(player) = host.player(event.click.player) else {
             return Flow::Continue;
         };
+        if nether_goo::stop_sign_use(host, player, event) {
+            *event.cancellation_result = InteractionResult::Fail;
+            return Flow::Cancel;
+        }
         let fertilizer = infernal_bonemeal::use_on(host, player, event);
         if fertilizer == Flow::Cancel || *event.use_block == TriState::False {
             return fertilizer;
