@@ -72,6 +72,14 @@ item!(
     Some(GPS_SKIN)
 );
 item!(
+    GPS_EMERGENCY_TRANSMITTER,
+    "player_head",
+    "GPS Emergency Transmitter",
+    "red",
+    None,
+    Some(GPS_SKIN)
+);
+item!(
     GPS_TRANSMITTER_2,
     "player_head",
     "Advanced GPS Transmitter",
@@ -117,6 +125,11 @@ pub(crate) const GPS_SETUP: Research = Research {
     name: "Basic GPS Setup",
     cost: 28,
 };
+pub(crate) const EMERGENCY_WAYPOINT: Research = Research {
+    id: "gps_emergency_transmitter",
+    name: "GPS Emergency Waypoint",
+    cost: 30,
+};
 pub(crate) const UPGRADED: Research = Research {
     id: "better_gps_transmitters",
     name: "Upgraded Transmitters",
@@ -144,7 +157,18 @@ pub(crate) const MINER: Research = Research {
     cost: 24,
 };
 
-pub(crate) const RESEARCHES: &[Research] = &[GPS_SETUP, UPGRADED, ENERGIZED, SCANNING, OIL, MINER];
+pub(crate) const RESEARCHES: &[Research] = &[
+    GPS_SETUP, UPGRADED, ENERGIZED, SCANNING, OIL, MINER, EMERGENCY_WAYPOINT,
+];
+
+pub(crate) fn emergency_lore() -> Tag {
+    Tag::List(vec![
+        Tag::String("".into()),
+        crate::items::text("Carrying this in your Inventory", "white", false),
+        crate::items::text("automatically sets a Waypoint", "white", false),
+        crate::items::text("at your Location when you die.", "white", false),
+    ])
+}
 
 pub(crate) const MINER_CAPACITY: u32 = 512;
 pub(crate) const MINER_COST: u32 = 24;
@@ -222,6 +246,7 @@ pub(crate) fn transmitter(id: &str) -> Option<&'static Transmitter> {
 pub(crate) fn network_item(id: &str) -> Option<Kind> {
     match id {
         "GPS_GEO_SCANNER" => Some(GPS_GEO_SCANNER),
+        "GPS_EMERGENCY_TRANSMITTER" => Some(GPS_EMERGENCY_TRANSMITTER),
         "GPS_CONTROL_PANEL" => Some(crate::gps_controls::GPS_CONTROL_PANEL),
         "OIL_PUMP" => Some(OIL_PUMP),
         "GEO_MINER" => Some(GEO_MINER),
@@ -257,6 +282,21 @@ pub(crate) const CRAFTING: &[CraftingRecipe] = &[
             Some(STEEL_INGOT),
             Some(ELECTRIC_MOTOR),
             Some(STEEL_INGOT),
+        ],
+    ),
+    craft(
+        GPS_EMERGENCY_TRANSMITTER,
+        &EMERGENCY_WAYPOINT,
+        [
+            None,
+            Some(ELECTRO_MAGNET),
+            None,
+            None,
+            Some(GPS_TRANSMITTER),
+            None,
+            None,
+            Some(crate::backpacks::ESSENCE_OF_AFTERLIFE),
+            None,
         ],
     ),
     craft(

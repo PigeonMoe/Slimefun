@@ -9,6 +9,7 @@ pub(crate) enum Component {
     },
     GeoScanner,
     GpsControlPanel,
+    GpsEmergencyTransmitter,
     GpsDevice(crate::items::Kind),
     Android,
     AndroidInterface,
@@ -111,6 +112,7 @@ impl Component {
             "TRASH_CAN_BLOCK" => Self::TrashCan,
             "GPS_GEO_SCANNER" => Self::GeoScanner,
             "GPS_CONTROL_PANEL" => Self::GpsControlPanel,
+            "GPS_EMERGENCY_TRANSMITTER" => Self::GpsEmergencyTransmitter,
             "CRUCIBLE" => Self::ManualCrucible,
             "COMPOSTER" => Self::ManualComposter,
             "IGNITION_CHAMBER" => Self::IgnitionChamber,
@@ -216,6 +218,7 @@ impl Component {
             }
             Self::GeoScanner => "GPS Geo-Scanner | Requires 600 GPS complexity".into(),
             Self::GpsControlPanel => "GPS Control Panel".into(),
+            Self::GpsEmergencyTransmitter => "GPS Emergency Transmitter".into(),
             Self::Android => "Programmable Android".into(),
             Self::AndroidInterface => "Android Interface".into(),
             Self::GpsDevice(kind) => {

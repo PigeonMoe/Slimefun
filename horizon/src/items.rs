@@ -143,6 +143,9 @@ impl SlimefunItem {
                 ]),
             );
         }
+        if self.id == crate::geology::GPS_EMERGENCY_TRANSMITTER.id() {
+            components.insert("minecraft:lore".into(), crate::geology::emergency_lore());
+        }
         if let Some(lore) = crate::factory::animal_machines::lore(self.id) {
             components.insert("minecraft:lore".into(), lore);
         }

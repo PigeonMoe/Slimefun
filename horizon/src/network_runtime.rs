@@ -239,6 +239,13 @@ impl ItemPart for NetworkPlacement {
             return Some(InteractionResult::Fail);
         }
         if let HostSide::Server(host) = host {
+            if geology::GPS_EMERGENCY_TRANSMITTER.matches(host, event.stack)
+                && !host.player(event.player).is_some_and(|player| {
+                    crate::research::can_use(host, player, &geology::EMERGENCY_WAYPOINT)
+                })
+            {
+                return Some(InteractionResult::Fail);
+            }
             if (event.face != [0, 1, 0]
                 && item_id(event.stack)
                     .is_some_and(|id| crate::android_program::mode(&id).is_some()))
@@ -393,6 +400,7 @@ impl Node {
             | Component::SolarGenerator { .. } => Network::Energy,
             Component::GeoScanner
             | Component::GpsControlPanel
+            | Component::GpsEmergencyTransmitter
             | Component::GpsDevice(_)
             | Component::Android
             | Component::AndroidInterface

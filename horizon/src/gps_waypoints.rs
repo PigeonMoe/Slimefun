@@ -2,7 +2,9 @@
 
 use std::{collections::BTreeMap, fmt::Write as _};
 
-use mod_api::{ConfigFileError, ConfigPath, Identifier, ServerHost};
+use mod_api::{ConfigFileError, ConfigPath, Identifier, ServerHost, SoundSource, Text};
+
+use crate::geology::GPS_EMERGENCY_TRANSMITTER;
 
 pub(crate) const MAX_PLAYER_WAYPOINTS: usize = 20;
 const MAX_FILE: usize = 512 * 1024;
@@ -91,6 +93,87 @@ pub(crate) fn save(host: &dyn ServerHost, owner: u128, points: &Waypoints) -> Re
     host.world_data_files()
         .write(&path(owner, false), text.as_bytes())
         .map_err(|error| format!("Could not save the GPS waypoints: {error}"))
+}
+
+pub(crate) fn add(
+    host: &dyn ServerHost,
+    owner: u128,
+    name: &str,
+    location: Location,
+) -> Result<(), String> {
+    let id = point_id(name).ok_or("Enter a valid GPS waypoint name.")?;
+    if !location.valid() {
+        return Err("Invalid GPS waypoint location.".to_owned());
+    }
+    let mut points = load(host, owner)?;
+    if points.entries.len() >= MAX_PLAYER_WAYPOINTS {
+        return Err("Your GPS network already has 20 waypoints.".to_owned());
+    }
+    if points.entries.contains_key(&id) {
+        return Err(format!("A waypoint called {name} already exists."));
+    }
+    points.entries.insert(
+        id,
+        Waypoint {
+            name: name.to_owned(),
+            location,
+        },
+    );
+    save(host, owner, &points)
+}
+
+fn deathpoint_name([year, month, day, hour, minute]: [i32; 5]) -> Option<String> {
+    let months = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    let month = months.get(usize::try_from(month.checked_sub(1)?).ok()?)?;
+    if !(1..=31).contains(&day) || !(0..=23).contains(&hour) || !(0..=59).contains(&minute) {
+        return None;
+    }
+    let hour = (hour + 11) % 12 + 1;
+    Some(format!(
+        "player:death &4Deathpoint &7({month} {day:02}, {year:04} @ {hour:02}:{minute:02})"
+    ))
+}
+
+pub(crate) fn deathpoint(host: &mut dyn ServerHost, uuid: u128) {
+    let Some(player) = host.player(uuid) else {
+        return;
+    };
+    let carries_transmitter = player.inventory_slots(host).is_some_and(|slots| {
+        slots
+            .iter()
+            .any(|(slot, item)| *slot < 36 && GPS_EMERGENCY_TRANSMITTER.matches(host, item))
+    });
+    if !carries_transmitter {
+        return;
+    }
+    let (Some(death), Some(name)) = (
+        player.last_death_location(host),
+        deathpoint_name(host.server_local_minute()),
+    ) else {
+        return;
+    };
+    let pos = death.pos();
+    let location = Location {
+        dimension: death.dimension().to_string(),
+        position: [pos.x, pos.y, pos.z].map(f64::from),
+        rotation: [0.0, 0.0],
+    };
+    let message = match add(host, uuid, &name, location) {
+        Ok(()) => {
+            let _ = player.play_sound(
+                host,
+                "minecraft:block.note_block.pling",
+                SoundSource::Master,
+                1.0,
+                1.0,
+            );
+            "Successfully added a new waypoint".to_owned()
+        }
+        Err(error) => error,
+    };
+    let _ = player.tell(host, Text::literal(message));
 }
 
 pub(crate) fn import(host: &dyn ServerHost, owner: u128) -> Result<(), String> {
@@ -207,6 +290,19 @@ pub(crate) fn quote(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn deathpoint_names_keep_the_original_paper_prefix_and_civil_minute() {
+        let name = deathpoint_name([2026, 11, 19, 13, 7]).unwrap();
+        assert_eq!(name, "player:death &4Deathpoint &7(Nov 19, 2026 @ 01:07)");
+        assert_eq!(
+            point_id(&name).as_deref(),
+            Some("PLAYER:DEATH_DEATHPOINT_(NOV_19,_2026_@_01:07)")
+        );
+        let midnight = deathpoint_name([2027, 1, 1, 0, 0]).unwrap();
+        assert!(midnight.ends_with("(Jan 01, 2027 @ 12:00)"));
+        assert_eq!(deathpoint_name([2026, 0, 24, 1, 0]), None);
+    }
 
     #[test]
     fn waypoint_ids_keep_paper_unicode_uppercase_and_color_stripping() {

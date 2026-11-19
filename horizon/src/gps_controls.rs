@@ -156,24 +156,7 @@ impl Controls {
         if !research::can_use(host, player, &GPS_SETUP) {
             return Some(Text::literal("Unlock Basic GPS Setup to create waypoints."));
         }
-        let result = (|| {
-            let id = gps_waypoints::point_id(name).ok_or("Enter a valid GPS waypoint name.")?;
-            let mut points = gps_waypoints::load(host, uuid)?;
-            if points.entries.len() >= MAX_PLAYER_WAYPOINTS {
-                return Err("Your GPS network already has 20 waypoints.".to_owned());
-            }
-            if points.entries.contains_key(&id) {
-                return Err(format!("A waypoint called {name} already exists."));
-            }
-            points.entries.insert(
-                id,
-                Waypoint {
-                    name: name.to_owned(),
-                    location,
-                },
-            );
-            gps_waypoints::save(host, uuid, &points)
-        })();
+        let result = gps_waypoints::add(host, uuid, name, location);
         match result {
             Ok(()) => {
                 let _ = player.play_sound(

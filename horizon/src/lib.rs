@@ -1299,6 +1299,10 @@ impl Hooks for Slimefun {
         }
     }
 
+    fn player_died(&self, host: &mut dyn ServerHost, event: &mut mod_api::PlayerDiedEvent<'_>) {
+        gps_waypoints::deathpoint(host, event.player);
+    }
+
     fn living_death_post(
         &self,
         host: &mut dyn ServerHost,
