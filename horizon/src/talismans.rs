@@ -3,11 +3,12 @@
 use std::{collections::BTreeSet, sync::Mutex};
 
 use mod_api::{
-    Host, HostSide, InteractionResult, ItemPart, ItemStack, LevelRef, PlayerRef, Registrar,
-    ServerHost, Tag, Text, UseOnEvent,
+    ActiveEffect, Host, HostSide, HostTransaction, InteractionResult, ItemPart, ItemStack,
+    LevelRef, PlayerRef, Registrar, ServerHost, Tag, Text, UseOnEvent,
 };
 
 use crate::{
+    elemental_staves::LAVA_CRYSTAL,
     factory::experience_collector::FILLED_FLASK_OF_KNOWLEDGE,
     items::{ENDER_LUMP_3, GOLD_8K, GOLD_DUST, Kind, MAGIC_LUMP_2, MAGIC_LUMP_3, item, text},
     magic_eye::MAGIC_EYE_OF_ENDER,
@@ -81,6 +82,28 @@ item!(
     None
 );
 
+item!(
+    FIRE_TALISMAN,
+    "emerald",
+    "Talisman of the Firefighter",
+    "green",
+    None,
+    None
+);
+item!(
+    ENDER_FIRE_TALISMAN,
+    "emerald",
+    "Ender Talisman of the Firefighter",
+    "dark_purple",
+    None,
+    None
+);
+
+const FIRE_RESEARCH: Research = Research {
+    id: "fire_talisman",
+    name: "Talisman of the Firefighter",
+    cost: 18,
+};
 const COMMON_RESEARCH: Research = Research {
     id: "common_talisman",
     name: "Common Talisman",
@@ -117,6 +140,7 @@ pub(crate) const RESEARCHES: &[&Research] = &[
     &MAGICIAN_RESEARCH,
     &WIZARD_RESEARCH,
     &WISE_RESEARCH,
+    &FIRE_RESEARCH,
     &ENDER_RESEARCH,
 ];
 
@@ -132,22 +156,24 @@ const TABLE: Option<Kind> = Some(Kind::Vanilla("minecraft:enchanting_table"));
 const fn recipe(
     output: Kind,
     research: &'static Research,
+    count: u32,
     inputs: [Option<Kind>; 9],
 ) -> CraftingRecipe {
     CraftingRecipe {
         inputs,
         output: Stack {
             kind: output,
-            count: 1,
+            count,
         },
         research,
     }
 }
 
-const fn infused(output: Kind, base: Kind) -> CraftingRecipe {
+const fn infused(output: Kind, base: Kind, count: u32) -> CraftingRecipe {
     recipe(
         output,
         &ENDER_RESEARCH,
+        count,
         [
             ENDER,
             None,
@@ -166,6 +192,7 @@ pub(crate) const CRAFTING: &[CraftingRecipe] = &[
     recipe(
         COMMON_TALISMAN,
         &COMMON_RESEARCH,
+        1,
         [
             LUMP_2,
             GOLD,
@@ -181,6 +208,7 @@ pub(crate) const CRAFTING: &[CraftingRecipe] = &[
     recipe(
         MAGICAL_GLASS,
         &GLASS_RESEARCH,
+        1,
         [
             LUMP_2,
             Some(GOLD_DUST),
@@ -196,6 +224,7 @@ pub(crate) const CRAFTING: &[CraftingRecipe] = &[
     recipe(
         MAGICIAN_TALISMAN,
         &MAGICIAN_RESEARCH,
+        1,
         [
             ENDER,
             None,
@@ -211,6 +240,7 @@ pub(crate) const CRAFTING: &[CraftingRecipe] = &[
     recipe(
         WIZARD_TALISMAN,
         &WIZARD_RESEARCH,
+        1,
         [
             ENDER,
             None,
@@ -226,6 +256,7 @@ pub(crate) const CRAFTING: &[CraftingRecipe] = &[
     recipe(
         WISE_TALISMAN,
         &WISE_RESEARCH,
+        1,
         [
             LUMP_3,
             GLASS,
@@ -238,9 +269,26 @@ pub(crate) const CRAFTING: &[CraftingRecipe] = &[
             LUMP_3,
         ],
     ),
-    infused(ENDER_MAGICIAN_TALISMAN, MAGICIAN_TALISMAN),
-    infused(ENDER_WIZARD_TALISMAN, WIZARD_TALISMAN),
-    infused(ENDER_WISE_TALISMAN, WISE_TALISMAN),
+    infused(ENDER_MAGICIAN_TALISMAN, MAGICIAN_TALISMAN, 1),
+    infused(ENDER_WIZARD_TALISMAN, WIZARD_TALISMAN, 1),
+    infused(ENDER_WISE_TALISMAN, WISE_TALISMAN, 1),
+    recipe(
+        FIRE_TALISMAN,
+        &FIRE_RESEARCH,
+        4,
+        [
+            LUMP_3,
+            None,
+            LUMP_3,
+            Some(LAVA_CRYSTAL),
+            Some(COMMON_TALISMAN),
+            Some(LAVA_CRYSTAL),
+            LUMP_3,
+            None,
+            LUMP_3,
+        ],
+    ),
+    infused(ENDER_FIRE_TALISMAN, FIRE_TALISMAN, 4),
 ];
 
 const MAGICIAN: Talisman = Talisman {
@@ -284,6 +332,21 @@ const WISE: Talisman = Talisman {
     ],
 };
 
+const FIRE: Talisman = Talisman {
+    normal: FIRE_TALISMAN,
+    ender: ENDER_FIRE_TALISMAN,
+    research: &FIRE_RESEARCH,
+    chance: 100,
+    message: "Your Talisman saved you from burning to death",
+    lore: &[
+        "While you have this Talisman",
+        "in your Inventory it will",
+        "give you Fire Resistance",
+        "as soon as you start burning",
+        "but will then be consumed",
+    ],
+};
+
 struct Talisman {
     normal: Kind,
     ender: Kind,
@@ -301,7 +364,7 @@ pub(crate) fn lore(id: &str) -> Option<Tag> {
             text("Used for various Magical Gadgets", "green", true),
         ]));
     }
-    let talisman = [&MAGICIAN, &WIZARD, &WISE]
+    let talisman = [&MAGICIAN, &WIZARD, &WISE, &FIRE]
         .into_iter()
         .find(|talisman| [talisman.normal.id(), talisman.ender.id()].contains(&id))?;
     let mut lines = Vec::new();
@@ -460,6 +523,44 @@ impl Talismans {
         }
     }
 
+    pub(crate) fn protect_from_fire(
+        &self,
+        host: &mut dyn ServerHost,
+        player: PlayerRef,
+        damage_type: &str,
+    ) -> bool {
+        if damage_type != "minecraft:in_fire" || !learned(host, player, &FIRE) {
+            return false;
+        }
+        let Some(living) = host.living(player.entity()) else {
+            return false;
+        };
+        let Some(effect) = host.effect_key("minecraft:fire_resistance") else {
+            return false;
+        };
+        if living.effect(host, effect).is_some() {
+            return false;
+        }
+        let activated = host.transaction(|host, _| {
+            let (slot, current) = carried_talisman(host, player, &FIRE).ok_or(())?;
+            let remainder = current.shrink(1);
+            match slot {
+                StorageSlot::Inventory(slot) => player.set_inventory_slot(host, slot, remainder),
+                StorageSlot::EnderChest(slot) => player.set_ender_chest_slot(host, slot, remainder),
+            }
+            .map_err(|_| ())?;
+            let resistance = ActiveEffect::new(effect, 3600, 4, false, true, true);
+            living.add_effect(host, &resistance).then_some(()).ok_or(())
+        });
+        if activated.is_ok() {
+            let actionbar = self.0.lock().unwrap().actionbar;
+            notify(host, player, &FIRE, actionbar);
+            true
+        } else {
+            false
+        }
+    }
+
     pub(crate) fn orb_xp(
         &self,
         host: &mut dyn ServerHost,
@@ -509,23 +610,46 @@ fn possible_magic_enchants(
 }
 
 fn present(host: &dyn Host, player: PlayerRef, spec: &Talisman) -> bool {
-    // Bukkit checks getStorageContents. Neither offhand nor armor nor nested
-    // containers can activate a normal talisman.
-    let main = player.inventory_slots(host).unwrap_or_default();
-    let carried = contains(host, &main, 36, spec.normal) || {
-        let ender = player.ender_chest(host).unwrap_or_default();
-        contains(host, &ender, 27, spec.ender)
-    };
-    carried
-        && player
-            .persistent_data(host)
-            .is_some_and(|data| research::unlocked(&data, spec.research))
+    carried_talisman(host, player, spec).is_some() && learned(host, player, spec)
 }
 
-fn contains(host: &dyn Host, slots: &[(u32, ItemStack)], size: u32, expected: Kind) -> bool {
+fn learned(host: &dyn Host, player: PlayerRef, spec: &Talisman) -> bool {
+    player
+        .persistent_data(host)
+        .is_some_and(|data| research::unlocked(&data, spec.research))
+}
+
+enum StorageSlot {
+    Inventory(u32),
+    EnderChest(u32),
+}
+
+fn carried_talisman(
+    host: &dyn Host,
+    player: PlayerRef,
+    spec: &Talisman,
+) -> Option<(StorageSlot, ItemStack)> {
+    // Bukkit's getStorageContents checks ordinary inventory first. A normal
+    // talisman in armor, offhand, or a nested container does not activate.
+    let main = player.inventory_slots(host).unwrap_or_default();
+    if let Some((slot, stack)) = first_matching(host, main, 36, spec.normal) {
+        return Some((StorageSlot::Inventory(slot), stack));
+    }
+    let ender = player.ender_chest(host).unwrap_or_default();
+    first_matching(host, ender, 27, spec.ender)
+        .map(|(slot, stack)| (StorageSlot::EnderChest(slot), stack))
+}
+
+fn first_matching(
+    host: &dyn Host,
+    slots: impl IntoIterator<Item = (u32, ItemStack)>,
+    size: u32,
+    expected: Kind,
+) -> Option<(u32, ItemStack)> {
     slots
-        .iter()
-        .any(|(slot, stack)| *slot < size && expected.matches(host, stack))
+        .into_iter()
+        .filter(|(slot, stack)| *slot < size && expected.matches(host, stack))
+        .min_by_key(|(slot, _)| *slot)
 }
 
 fn activated(
@@ -570,11 +694,11 @@ mod tests {
         let normal = WISE.normal.stack(&host, 1).unwrap();
         let ender = WISE.ender.stack(&host, 1).unwrap();
 
-        assert!(contains(&host, &[(35, normal.clone())], 36, WISE.normal));
-        assert!(!contains(&host, &[(36, normal.clone())], 36, WISE.normal));
-        assert!(!contains(&host, &[(4, normal)], 27, WISE.ender));
-        assert!(!contains(&host, &[(4, ender.clone())], 36, WISE.normal));
-        assert!(contains(&host, &[(26, ender)], 27, WISE.ender));
+        assert!(first_matching(&host, [(35, normal.clone())], 36, WISE.normal).is_some());
+        assert!(first_matching(&host, [(36, normal.clone())], 36, WISE.normal).is_none());
+        assert!(first_matching(&host, [(4, normal)], 27, WISE.ender).is_none());
+        assert!(first_matching(&host, [(4, ender.clone())], 36, WISE.normal).is_none());
+        assert!(first_matching(&host, [(26, ender)], 27, WISE.ender).is_some());
     }
 
     #[test]
@@ -649,6 +773,23 @@ mod tests {
                 "ENDER_LUMP_3",
             ]
         );
-        assert!(CRAFTING.iter().all(|recipe| recipe.output.count == 1));
+        assert!(CRAFTING[..8].iter().all(|recipe| recipe.output.count == 1));
+        assert_eq!(
+            inputs(8),
+            [
+                "MAGIC_LUMP_3",
+                "",
+                "MAGIC_LUMP_3",
+                "LAVA_CRYSTAL",
+                "COMMON_TALISMAN",
+                "LAVA_CRYSTAL",
+                "MAGIC_LUMP_3",
+                "",
+                "MAGIC_LUMP_3",
+            ]
+        );
+        assert_eq!(CRAFTING[8].output.count, 4);
+        assert_eq!(CRAFTING[9].output.count, 4);
+        assert_eq!(CRAFTING[9].inputs[4], Some(FIRE_TALISMAN));
     }
 }

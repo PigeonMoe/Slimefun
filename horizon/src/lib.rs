@@ -1410,6 +1410,22 @@ impl Hooks for Slimefun {
         );
     }
 
+    #[listener(priority = -100)]
+    fn player_environment_damage_pre(
+        &self,
+        host: &mut dyn ServerHost,
+        event: &mut mod_api::PlayerEnvironmentDamagePreEvent<'_>,
+    ) -> Flow {
+        if self
+            .talismans
+            .protect_from_fire(host, event.player, event.damage_type)
+        {
+            Flow::Cancel
+        } else {
+            Flow::Continue
+        }
+    }
+
     fn player_orb_xp_pre(
         &self,
         host: &mut dyn ServerHost,

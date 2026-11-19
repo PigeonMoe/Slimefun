@@ -68,9 +68,11 @@ Java 版源码和原有构建指令位于仓库根目录。
 
 ## 护符
 
-魔法工作台可制作普通护符、魔法玻璃以及 Magician、Wizard 和 Wise 护符。魔法玻璃用于配方，不能直接放置。三种护符均可用四枚 Ender Lump III 进行末影灌注。普通护符放在主物品栏，灌注版放在末影箱，两者均需完成相应的基础护符研究。三种护符触发后保留在原槽位。生存指南的二阶护符分类需先完成已移植的一阶护符研究。
+魔法工作台可制作普通护符、魔法玻璃以及 Magician、Wizard、Wise 和 Firefighter 护符。魔法玻璃用于配方，不能直接放置。四种护符均可用四枚 Ender Lump III 进行末影灌注。普通护符放在主物品栏，灌注版放在末影箱，两者均需完成相应的基础护符研究。Magician、Wizard 和 Wise 触发后保留在原槽位。生存指南的二阶护符分类需先完成已移植的一阶护符研究。
 
 Magician 可从当前注册表中选择相容附魔。默认仅对可接受该附魔的装备生效。服务器可在 `[magician-talisman]` 启用 `allow-enchantment-books`，或在 `[magician-talisman.allow-enchantments.minecraft.efficiency.level]` 将 `"2"` 设为 `false`，停用该附魔等级。Wizard 可在有资格的工具上给出三级至五级时运，精准采集出现在当次附魔列表时不会触发。Wise 只尝试翻倍经验球修补后剩余的经验。使用 `[talismans]` 的 `use-actionbar = false` 可改为聊天提示。
+
+Firefighter 原版与末影灌注版每次制作四枚。完成 `fire_talisman` 研究后，玩家直接接触火焰或灵魂火焰时会先使用主物品栏的 Firefighter，再查找末影箱的灌注版。每次成功触发消耗一枚，免除该次接触伤害并给予 180 秒抗火 V。已免疫的伤害和原版受伤冷却拦下的伤害不会消耗护符。服上有插件拒绝抗火效果时，保留护符并照常结算伤害。触发条件限于直接接触火焰。
 
 ## 附魔符文
 
