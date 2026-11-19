@@ -24,6 +24,7 @@ use crate::{
 mod catalog;
 mod learning;
 use catalog::{Entry, GROUPS, Group, group_entries, lookup, named_group_entries};
+use learning::Preference;
 
 const TITLE: &str = "Slimefun Guide";
 const GUIDE_KEY: &str = "slimefun:slimefun_guide_mode";
@@ -64,6 +65,10 @@ fn is_book(host: &dyn Host, item: &ItemStack) -> bool {
         )
 }
 
+pub(crate) fn prevent_research_firework_damage(item: &ItemStack) -> bool {
+    learning::research_rocket(item)
+}
+
 pub(crate) fn give(host: &mut dyn ServerHost, player: PlayerRef) {
     let Some(book) = book(host) else {
         return;
@@ -99,7 +104,7 @@ enum Action {
     Replace(Page),
     Back,
     Research(&'static Research),
-    ToggleLearning,
+    TogglePreference(Preference),
     SearchPrompt,
     Link(&'static str),
 }
@@ -222,39 +227,45 @@ impl Guide {
         };
         let research = player.persistent_data(host);
         let mut menu = render(host, research.as_ref(), page);
-        if matches!(page, Page::Info)
-            && let Some(enabled) = self.learning.option(host, player)
-        {
-            let (material, title, click) = if enabled {
-                (
-                    "minecraft:map",
-                    "&bLearning Animation: &aYes",
-                    "&eClick to disable your learning animation",
-                )
-            } else {
-                (
-                    "minecraft:paper",
-                    "&bLearning Animation: &4No",
-                    "&eClick to enable your learning animation",
-                )
-            };
-            menu.set(
-                19,
-                icon(
-                    host,
-                    material,
-                    title,
-                    &[
-                        "",
-                        "&7You can now toggle whether you",
-                        "&7will see information about your pondering in chat",
-                        "&7upon researching an item.",
-                        "",
-                        click,
-                    ],
-                ),
-                Some(Action::ToggleLearning),
-            );
+        if matches!(page, Page::Info) {
+            let options = [Preference::Fireworks, Preference::Animation]
+                .into_iter()
+                .filter_map(|option| Some((option, self.learning.option(host, player, option)?)));
+            for (slot, (option, enabled)) in (19..).zip(options) {
+                let (material, label, description, setting) = match option {
+                    Preference::Fireworks => (
+                        "minecraft:firework_rocket",
+                        "Fireworks",
+                        &["&7will see fireworks upon researching an item."][..],
+                        "fireworks",
+                    ),
+                    Preference::Animation => (
+                        if enabled {
+                            "minecraft:map"
+                        } else {
+                            "minecraft:paper"
+                        },
+                        "Learning Animation",
+                        &[
+                            "&7will see information about your pondering in chat",
+                            "&7upon researching an item.",
+                        ][..],
+                        "learning animation",
+                    ),
+                };
+                let text = if enabled { "&aYes" } else { "&4No" };
+                let verb = if enabled { "disable" } else { "enable" };
+                let title = format!("&b{label}: {text}");
+                let click = format!("&eClick to {verb} your {setting}");
+                let mut lore = vec!["", "&7You can now toggle whether you"];
+                lore.extend_from_slice(description);
+                lore.extend(["", click.as_str()]);
+                menu.set(
+                    slot,
+                    icon(host, material, &title, &lore),
+                    Some(Action::TogglePreference(option)),
+                );
+            }
         }
         if path.len() > 1 {
             let back = usize::from(!matches!(page, Page::Recipe(_) | Page::Info));
@@ -345,8 +356,8 @@ impl Guide {
                     return;
                 }
             }
-            Action::ToggleLearning => {
-                self.learning.toggle(host, player);
+            Action::TogglePreference(option) => {
+                self.learning.toggle(host, player, option);
             }
             Action::SearchPrompt => {
                 host.close_menu(event.uuid);
@@ -715,7 +726,9 @@ fn entry_name(entry: &Entry) -> String {
         Some(label) => label.to_owned(),
         None => match entry.item.kind {
             Kind::Slimefun(item) => item.name.to_owned(),
-            Kind::Vanilla(id) | Kind::Potion(id) => id.trim_start_matches("minecraft:").replace('_', " "),
+            Kind::Vanilla(id) | Kind::Potion(id) => {
+                id.trim_start_matches("minecraft:").replace('_', " ")
+            }
         },
     }
 }

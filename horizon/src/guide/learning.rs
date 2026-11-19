@@ -1,18 +1,43 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
+mod fireworks;
+
 use std::{collections::BTreeMap, sync::Mutex};
 
 use mod_api::{Compound, GameMode, Host, Identifier, PlayerRef, ServerHost, SoundSource, Tag};
 
 use super::{Page, catalog, colored_label};
-use crate::{recipes::Research, research};
+use crate::{random::Rolls, recipes::Research, research};
 
-const ANIMATION: &str = "slimefun:research_learning_animation";
+pub(super) use fireworks::research_rocket;
 const PERSISTED: &str = "PlayerPersisted";
 const PROGRESS: [(u32, u8); 6] = [(5, 0), (20, 23), (40, 44), (60, 57), (80, 92), (100, 100)];
 
 #[derive(Clone, Copy)]
+pub(super) enum Preference {
+    Fireworks,
+    Animation,
+}
+
+impl Preference {
+    fn key(self) -> &'static str {
+        match self {
+            Self::Fireworks => "slimefun:research_fireworks",
+            Self::Animation => "slimefun:research_learning_animation",
+        }
+    }
+
+    fn available(self, settings: Settings) -> bool {
+        match self {
+            Self::Fireworks => settings.enable_fireworks,
+            Self::Animation => !settings.disable_animation,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
 struct Settings {
+    enable_fireworks: bool,
     free_in_creative: bool,
     disable_animation: bool,
 }
@@ -20,6 +45,7 @@ struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            enable_fireworks: true,
             free_in_creative: true,
             disable_animation: false,
         }
@@ -37,6 +63,7 @@ struct Study {
 pub(super) struct Learning {
     settings: Mutex<Settings>,
     active: Mutex<BTreeMap<u128, Study>>,
+    rolls: Rolls,
 }
 
 impl Learning {
@@ -47,33 +74,39 @@ impl Learning {
                 .and_then(toml::Value::as_bool)
         };
         *self.settings.lock().unwrap() = Settings {
+            enable_fireworks: read("enable-fireworks").unwrap_or(true),
             free_in_creative: read("free-in-creative-mode").unwrap_or(true),
             disable_animation: read("disable-learning-animation").unwrap_or(false),
         };
     }
 
-    pub(super) fn option(&self, host: &dyn Host, player: PlayerRef) -> Option<bool> {
-        if self.settings.lock().unwrap().disable_animation {
+    pub(super) fn option(
+        &self,
+        host: &dyn Host,
+        player: PlayerRef,
+        option: Preference,
+    ) -> Option<bool> {
+        if !option.available(*self.settings.lock().unwrap()) {
             return None;
         }
         let local = player
             .persistent_data(host)
             .as_ref()
-            .and_then(local_preference);
+            .and_then(|data| local_preference(data, option));
         Some(local.unwrap_or_else(|| {
-            let key = Identifier::parse(ANIMATION).expect("a registered Paper preference key");
+            let key = Identifier::parse(option.key()).expect("a Paper preference key");
             paper_preference(player.paper_persistent_value(host, &key).as_ref())
         }))
     }
 
-    pub(super) fn toggle(&self, host: &mut dyn ServerHost, player: PlayerRef) {
-        let Some(enabled) = self.option(host, player) else {
+    pub(super) fn toggle(&self, host: &mut dyn ServerHost, player: PlayerRef, option: Preference) {
+        let Some(enabled) = self.option(host, player, option) else {
             return;
         };
         let Some(mut data) = player.persistent_data(host) else {
             return;
         };
-        if set_preference(&mut data, !enabled) {
+        if set_preference(&mut data, option, !enabled) {
             let _ = player.set_persistent_data(host, data);
         }
     }
@@ -90,13 +123,13 @@ impl Learning {
             free_in_creative, ..
         } = *self.settings.lock().unwrap();
         let free = free_in_creative && player.game_mode(host) == Some(GameMode::Creative);
-        let delayed = !free && self.option(host, player) == Some(true);
+        let delayed = !free && self.option(host, player, Preference::Animation) == Some(true);
         if let Err(message) = research::begin(host, player, topic, free, delayed) {
             let _ = player.tell(host, colored_label(&format!("&4{message}")));
             return false;
         }
         if !delayed {
-            Self::announce_completion(host, player, topic);
+            self.announce_completion(host, player, topic);
             return true;
         }
         self.active.lock().unwrap().insert(
@@ -182,13 +215,16 @@ impl Learning {
             }
             Ok(true) => {
                 let study = self.active.lock().unwrap().remove(&uuid);
-                Self::announce_completion(host, player, topic);
+                self.announce_completion(host, player, topic);
                 study?.return_path
             }
         }
     }
 
-    fn announce_completion(host: &mut dyn ServerHost, player: PlayerRef, topic: &Research) {
+    fn announce_completion(&self, host: &mut dyn ServerHost, player: PlayerRef, topic: &Research) {
+        if self.option(host, player, Preference::Fireworks) == Some(true) {
+            fireworks::launch(host, player, &self.rolls);
+        }
         let _ = player.tell(
             host,
             colored_label(&format!("&bYou have unlocked &7\"{}\"", topic.name)),
@@ -200,6 +236,7 @@ impl Learning {
     }
 
     pub(super) fn clear(&self) {
+        self.rolls.clear();
         self.active.lock().unwrap().clear();
     }
 }
@@ -215,8 +252,8 @@ fn completed_ticks(step: usize) -> Option<u32> {
     }
 }
 
-fn local_preference(data: &Compound) -> Option<bool> {
-    let value = data.get(&PERSISTED.into())?.get(ANIMATION)?;
+fn local_preference(data: &Compound, option: Preference) -> Option<bool> {
+    let value = data.get(&PERSISTED.into())?.get(option.key())?;
     match value {
         Tag::Byte(value) => Some(*value == 1),
         _ => None,
@@ -227,14 +264,14 @@ fn paper_preference(value: Option<&Tag>) -> bool {
     !matches!(value, Some(Tag::Byte(value)) if *value != 1)
 }
 
-fn set_preference(data: &mut Compound, enabled: bool) -> bool {
+fn set_preference(data: &mut Compound, option: Preference, enabled: bool) -> bool {
     let Tag::Compound(saved) = data
         .entry(PERSISTED.into())
         .or_insert_with(|| Tag::Compound(Compound::new()))
     else {
         return false;
     };
-    saved.insert(ANIMATION.into(), Tag::Byte(i8::from(enabled)));
+    saved.insert(option.key().into(), Tag::Byte(i8::from(enabled)));
     true
 }
 
@@ -387,6 +424,8 @@ mod tests {
         assert!(!research::unlocked(&host.state.0, topic));
 
         let reopened = Learning::default();
+        let config: toml::Table = "[researches]\nenable-fireworks = false".parse().unwrap();
+        reopened.configure(config.get("researches"));
         reopened.resume(&host, player);
         assert!(!reopened.start(&mut host, player, topic, &[Page::Main]));
         for _ in 0..79 {
@@ -412,11 +451,15 @@ mod tests {
             PERSISTED.into(),
             Tag::compound([("some-mod:setting", Tag::Byte(1))]),
         )]);
-        assert_eq!(local_preference(&data), None);
-        assert!(set_preference(&mut data, false));
-        assert_eq!(local_preference(&data), Some(false));
-        assert!(set_preference(&mut data, true));
-        assert_eq!(local_preference(&data), Some(true));
+        let animation = Preference::Animation;
+        assert_eq!(local_preference(&data, animation), None);
+        assert!(set_preference(&mut data, animation, false));
+        assert_eq!(local_preference(&data, animation), Some(false));
+        assert!(set_preference(&mut data, animation, true));
+        assert_eq!(local_preference(&data, animation), Some(true));
+        assert!(set_preference(&mut data, Preference::Fireworks, false));
+        assert_eq!(local_preference(&data, Preference::Fireworks), Some(false));
+        assert_eq!(local_preference(&data, animation), Some(true));
         assert_eq!(
             data.get(&PERSISTED.into()).unwrap().get("some-mod:setting"),
             Some(&Tag::Byte(1))

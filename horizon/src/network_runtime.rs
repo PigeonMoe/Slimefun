@@ -29,6 +29,7 @@ use crate::{
 mod cargo_menu;
 #[path = "cargo_topology.rs"]
 mod cargo_topology;
+pub(crate) use cargo_topology::paper_text;
 #[path = "network_discovery.rs"]
 mod network_discovery;
 #[path = "network_visuals.rs"]

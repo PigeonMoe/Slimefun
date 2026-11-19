@@ -218,7 +218,7 @@ fn paper_lore(stack: &ItemStack) -> Option<&[Tag]> {
     }
 }
 
-fn paper_text(tag: &Tag) -> Option<String> {
+pub(crate) fn paper_text(tag: &Tag) -> Option<String> {
     let mut output = String::new();
     let mut formatted = false;
     append_paper_text(tag, &mut output, &mut formatted, 0)?;

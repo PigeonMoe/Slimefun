@@ -58,7 +58,9 @@ Java 版源码和原有构建指令位于仓库根目录。
 
 潜行右击指南可查看版本信息及源码、Wiki 和附属插件链接，还可启用或关闭学习动画。Horizon 会读取 Paper 玩家档案保存的学习动画选项。开启时，点击锁定物品只扣一次经验等级，在第 5、20、40、60、80 刻显示学习进度，在第 100 刻解锁并重新显示分类。退出或重启后从最后保存的进度继续。
 
-`[researches]` 的 `free-in-creative-mode` 默认为 `true`，创造模式玩家可立即免费学习。`disable-learning-animation = true` 会为整个服务器关闭学习动画。季节分类、原版配方索引、其余个人设置和研究烟花仍待移植。
+`[researches]` 的 `free-in-creative-mode` 默认为 `true`，创造模式玩家可立即免费学习。`disable-learning-animation = true` 会为整个服务器关闭学习动画。解锁研究时默认发射 Paper 研究烟花。玩家可以在指南设置里关闭烟花，服主可以设置 `enable-fireworks = false`。旧 Paper 玩家档案里的烟花设置仍然可用。研究烟花保留爆裂效果并免除爆裂伤害。
+
+季节分类、原版配方索引和语言设置仍待移植。
 
 ## 本地开发增量
 
