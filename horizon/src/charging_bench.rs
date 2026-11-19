@@ -63,14 +63,6 @@ pub(crate) const CRAFTING: CraftingRecipe = CraftingRecipe {
 
 fn rechargeable(id: &str) -> Option<(&'static str, f32)> {
     Some(match id {
-        "DURALUMIN_JETPACK" => ("minecraft:leather_chestplate", 20.0),
-        "SOLDER_JETPACK" => ("minecraft:leather_chestplate", 30.0),
-        "BILLON_JETPACK" => ("minecraft:leather_chestplate", 45.0),
-        "STEEL_JETPACK" => ("minecraft:leather_chestplate", 60.0),
-        "DAMASCUS_STEEL_JETPACK" => ("minecraft:leather_chestplate", 75.0),
-        "REINFORCED_ALLOY_JETPACK" => ("minecraft:leather_chestplate", 100.0),
-        "CARBONADO_JETPACK" => ("minecraft:leather_chestplate", 150.0),
-        "ARMORED_JETPACK" => ("minecraft:iron_chestplate", 50.0),
         "DURALUMIN_MULTI_TOOL" => ("minecraft:shears", 20.0),
         "SOLDER_MULTI_TOOL" => ("minecraft:shears", 30.0),
         "BILLON_MULTI_TOOL" => ("minecraft:shears", 40.0),
@@ -79,7 +71,7 @@ fn rechargeable(id: &str) -> Option<(&'static str, f32)> {
         "REINFORCED_ALLOY_MULTI_TOOL" => ("minecraft:shears", 75.0),
         "CARBONADO_MULTI_TOOL" => ("minecraft:shears", 100.0),
         "PORTABLE_TELEPORTER" => ("minecraft:compass", 50.0),
-        _ => return crate::jet_boots::charge_spec(id),
+        _ => return crate::jet_boots::charge_spec(id).or_else(|| crate::jetpack::charge_spec(id)),
     })
 }
 

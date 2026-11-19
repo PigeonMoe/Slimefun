@@ -58,6 +58,7 @@ mod item_clicks;
 mod infused;
 mod items;
 mod jet_boots;
+mod jetpack;
 mod juice;
 mod machine;
 mod magic_eye;
@@ -74,6 +75,7 @@ mod recipes;
 mod research;
 mod smelters_pickaxe;
 mod snacks;
+mod sneak_equipment;
 mod soulbound_gear;
 mod soulbound_rune;
 mod stomper;
@@ -103,7 +105,8 @@ struct Slimefun {
     settings: Mutex<Settings>,
     item_clicks: item_clicks::ItemClicks,
     snacks: snacks::Snacks,
-    jet_boots: jet_boots::JetBoots,
+    jet_boots: sneak_equipment::Task<jet_boots::JetBoots>,
+    jetpacks: sneak_equipment::Task<jetpack::Flight>,
     smelters_pickaxes: smelters_pickaxe::SmeltersPickaxes,
     rolls: Rolls,
     chest: Mutex<Option<ItemKey>>,
@@ -134,7 +137,8 @@ impl Default for Slimefun {
             settings: Mutex::new(Settings::default()),
             item_clicks: item_clicks::ItemClicks::default(),
             snacks: snacks::Snacks::default(),
-            jet_boots: jet_boots::JetBoots::default(),
+            jet_boots: sneak_equipment::Task::default(),
+            jetpacks: sneak_equipment::Task::default(),
             smelters_pickaxes: smelters_pickaxe::SmeltersPickaxes::default(),
             rolls: Rolls::default(),
             chest: Mutex::new(None),
@@ -744,7 +748,7 @@ impl Hooks for Slimefun {
             return Flow::Continue;
         };
         if *event.use_item != TriState::False && let Some(held) = event.click.stack {
-            if jet_boots::STEEL_THRUSTER.matches(host, held) {
+            if jet_boots::STEEL_THRUSTER.matches(host, held) || jetpack::CHAIN.matches(host, held) {
                 *event.cancellation_result = InteractionResult::Fail;
                 return Flow::Cancel;
             }
@@ -954,6 +958,7 @@ impl Hooks for Slimefun {
             event.click.stack,
         )
             || jet_boots::STEEL_THRUSTER.matches(host, event.click.stack)
+            || jetpack::CHAIN.matches(host, event.click.stack)
             || medical::HEAVY_CREAM.matches(host, event.click.stack)
             || medical::use_supply(host, player, event.click.hand, event.click.stack)
             || magic_eye::use_held(host, player, event.click.stack)
@@ -1021,6 +1026,7 @@ impl Hooks for Slimefun {
     ) {
         self.item_clicks.logout(event.player);
         self.jet_boots.forget(host, event.player);
+        self.jetpacks.forget(host, event.player);
         self.bee_wings.stop(event.player);
         self.gps.logout(event.player);
         self.androids.logout(event.player);
@@ -1087,6 +1093,7 @@ impl Hooks for Slimefun {
     fn player_toggle_sneak(&self, host: &mut dyn ServerHost, event: &mut mod_api::PlayerToggleSneakEvent<'_>) {
         if let Some(player) = host.player(event.player) {
             self.magnets.toggle(host, player, event.sneaking, self.settings.lock().unwrap().infused);
+            self.jetpacks.toggle(host, player, event.sneaking);
             self.jet_boots.toggle(host, player, event.sneaking);
         }
     }
@@ -1223,6 +1230,7 @@ impl Hooks for Slimefun {
 
     fn player_tick_pre(&self, host: HostSide<'_>, event: &mut mod_api::PlayerTickPreEvent) {
         if let HostSide::Server(host) = host {
+            self.jetpacks.tick(host, event.player, &self.rolls);
             self.jet_boots.tick(host, event.player, &self.rolls);
         }
     }
@@ -1308,6 +1316,7 @@ impl Hooks for Slimefun {
     fn scheduled_task(&self, host: &mut dyn ServerHost, event: &mut ScheduledTaskEvent<'_>) {
         self.snacks.due(host, event);
         self.jet_boots.due(event);
+        self.jetpacks.due(event);
         self.smelters_pickaxes.due(host, event);
         self.soulbound_rituals.due(host, event);
         self.elevators.due(host, event);
@@ -1327,6 +1336,7 @@ impl Hooks for Slimefun {
         self.item_clicks.clear();
         self.snacks.clear();
         self.jet_boots.clear();
+        self.jetpacks.clear();
         self.smelters_pickaxes.clear();
         self.soulbound_rituals.clear();
         self.elevators.clear();

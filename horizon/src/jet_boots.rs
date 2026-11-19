@@ -1,14 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::{collections::BTreeMap, sync::Mutex};
-
-use mod_api::{
-    Compound, Host, HostTransaction, ItemPlace, ItemResource, ItemStack, LivingRef, PlayerRef,
-    ScheduledTaskEvent, ServerHost, SoundSource, Tag, TaskId, Text,
-};
+use mod_api::{Compound, Host, ItemPlace, ItemStack, PlayerRef, ServerHost, Tag};
 
 use crate::{
-    factory::charging_bench,
     items::{
         ALUMINUM_BRONZE_INGOT, BILLON_INGOT, CARBONADO, DAMASCUS_STEEL_INGOT, DURALUMIN_INGOT,
         Kind, REINFORCED_ALLOY_INGOT, SMALL_CAPACITOR, SOLDER_INGOT, STEEL_INGOT, STEEL_PLATE,
@@ -17,7 +11,7 @@ use crate::{
     network_recipes::{LARGE_CAPACITOR, MEDIUM_CAPACITOR, POWER_CRYSTAL},
     random::Rolls,
     recipes::{CraftingRecipe, Research, Stack},
-    research,
+    sneak_equipment::{Drive, charged_thrust, research_for},
 };
 
 item!(
@@ -103,7 +97,7 @@ const JET_BOOTS: Research = Research {
     name: "Jet Boots",
     cost: 25,
 };
-const CARBONADO_TOOLS: Research = Research {
+pub(crate) const CARBONADO_TOOLS: Research = Research {
     id: "carbonado_tools",
     name: "Top Tier Machines",
     cost: 24,
@@ -318,7 +312,7 @@ pub(crate) fn decorate(id: &str, data: &mut Compound) {
         data.insert(
             "minecraft:custom_name".into(),
             label([
-                text("Jet Boots", "dark_blue", false),
+                text("Jet Boots", "blue", false),
                 text(" - ", "gray", false),
                 text(tier, "yellow", false),
             ]),
@@ -326,7 +320,7 @@ pub(crate) fn decorate(id: &str, data: &mut Compound) {
     } else {
         data.insert(
             "minecraft:custom_name".into(),
-            text("Armored Jet Boots", "dark_blue", false),
+            text("Armored Jet Boots", "blue", false),
         );
     }
     if let Some(color) = spec.dye {
@@ -384,177 +378,48 @@ fn feet(player: PlayerRef) -> ItemPlace {
 }
 
 #[derive(Clone, Copy)]
-struct Active {
-    player: PlayerRef,
-    spec: &'static Spec,
-    task: Option<TaskId>,
-}
+pub(crate) struct JetBoots(&'static Spec);
 
-#[derive(Default)]
-pub(crate) struct JetBoots {
-    // A seen crouch remains here after its charge is exhausted, until the next release.
-    crouched: Mutex<BTreeMap<u128, Option<Active>>>,
-}
+impl Drive for JetBoots {
+    const PERIOD: u32 = PERIOD;
 
-impl JetBoots {
-    pub(crate) fn toggle(&self, host: &mut dyn ServerHost, player: PlayerRef, sneaking: bool) {
-        let uuid = player.uuid();
-        if !sneaking {
-            self.forget(host, uuid);
-            return;
-        }
-        if self.crouched.lock().unwrap().contains_key(&uuid) {
-            return;
-        }
-        let active = feet(player)
-            .stack(host)
-            .and_then(|stack| boots(host, &stack))
-            .and_then(|spec| {
-                if !research::can_use(host, player, spec.research) {
-                    let _ = player.tell(
-                        host,
-                        Text::literal(format!(
-                            "Unlock {} with /sf research {}.",
-                            spec.research.name, spec.research.id
-                        )),
-                    );
-                    return None;
-                }
-                let task = host.schedule_task(0, 0).ok()?;
-                Some(Active {
-                    player,
-                    spec,
-                    task: Some(task),
-                })
-            });
-        self.crouched.lock().unwrap().insert(uuid, active);
+    fn begin(host: &mut dyn ServerHost, player: PlayerRef) -> Option<Self> {
+        let stack = feet(player).stack(host)?;
+        let spec = boots(host, &stack)?;
+        research_for(host, player, spec.research).then_some(Self(spec))
     }
 
-    pub(crate) fn tick(&self, host: &mut dyn ServerHost, player: PlayerRef, rolls: &Rolls) {
-        let Some(sneaking) = player.is_secondary_use_active(host) else {
-            return;
+    fn pulse(self, host: &mut dyn ServerHost, player: PlayerRef, rolls: &Rolls) -> bool {
+        let entity = player.entity();
+        let feet = feet(player);
+        let Some(stack) = feet.stack(host) else {
+            // Paper leaves the sneak task running while the boot slot is briefly empty.
+            return true;
         };
-        // Integrated players do not send the guest-only PlayerToggleSneak packet.
-        self.toggle(host, player, sneaking);
-        if !sneaking {
-            return;
+        if boots(host, &stack).is_none() {
+            return false;
         }
-        let uuid = player.uuid();
-        let active = self
-            .crouched
-            .lock()
-            .unwrap()
-            .get(&uuid)
-            .copied()
-            .flatten()
-            .filter(|active| active.task.is_none() && active.player == player);
-        let Some(active) = active else {
-            return;
-        };
-        let living = LivingRef::new(player.entity());
-        let alive = living.health(host).is_some_and(|health| health > 0.0);
-        let next = if alive && pulse(host, active, rolls) {
-            host.schedule_task(PERIOD, 0).ok().map(|task| Active {
-                task: Some(task),
-                ..active
-            })
-        } else {
-            None
-        };
-        let mut riders = self.crouched.lock().unwrap();
-        if let Some(slot) = riders.get_mut(&uuid)
-            && slot.is_some_and(|slot| slot.task.is_none() && slot.player == player)
-        {
-            *slot = next;
-        }
+        charged_thrust(
+            host,
+            entity,
+            (feet, &stack, COST),
+            |host, level| {
+                let view = entity.view_vector(host)?;
+                Some(thrust(
+                    self.0.speed,
+                    view,
+                    rolls.next(host, level, 2) == Some(1),
+                ))
+            },
+            "minecraft:entity.tnt.primed",
+        )
     }
-
-    pub(crate) fn due(&self, event: &ScheduledTaskEvent<'_>) {
-        if event.owner != "slimefun" {
-            return;
-        }
-        // The next player tick runs in that player's actual level; a scheduled
-        // task itself may run while their dimension is parked.
-        if let Some(active) = self
-            .crouched
-            .lock()
-            .unwrap()
-            .values_mut()
-            .flatten()
-            .find(|active| active.task == Some(event.id))
-        {
-            active.task = None;
-        }
-    }
-
-    pub(crate) fn forget(&self, host: &mut dyn ServerHost, uuid: u128) {
-        let active = self.crouched.lock().unwrap().remove(&uuid).flatten();
-        if let Some(task) = active.and_then(|active| active.task) {
-            let _ = host.cancel_task(task);
-        }
-    }
-
-    pub(crate) fn clear(&self) {
-        self.crouched.lock().unwrap().clear();
-    }
-}
-
-fn pulse(host: &mut dyn ServerHost, active: Active, rolls: &Rolls) -> bool {
-    let player = active.player;
-    let entity = player.entity();
-    let feet = feet(player);
-    let Some(stack) = feet.stack(host) else {
-        // Paper leaves the sneak task running while the boot slot is briefly empty.
-        return true;
-    };
-    if boots(host, &stack).is_none() {
-        return false;
-    }
-    let Some(replacement) = charging_bench::discharge(host, &stack, COST) else {
-        return false;
-    };
-    let (Some(level), Some(pos), Some(view)) = (
-        entity.level(host),
-        entity.position(host),
-        entity.view_vector(host),
-    ) else {
-        return false;
-    };
-    let motion = thrust(
-        active.spec.speed,
-        view,
-        rolls.next(host, level, 2) == Some(1),
-    );
-    let paid = host.transaction(|host, tx| {
-        if feet.resource(host).as_ref() != Some(&ItemResource::of(&stack))
-            || feet.exchange(host, tx, &ItemResource::of(&replacement), 1) != 1
-            || !entity.set_velocity(host, motion)
-        {
-            return Err(());
-        }
-        Ok(())
-    });
-    if paid.is_err() {
-        return false;
-    }
-    let _ = level.play_sound(
-        host,
-        "minecraft:entity.tnt.primed",
-        pos,
-        SoundSource::Players,
-        0.25,
-        1.0,
-    );
-    if let Some(block) = entity.block_position(host) {
-        let _ = level.level_event(host, 2000, block, 1);
-    }
-    let _ = entity.reset_fall_distance(host);
-    true
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::factory::charging_bench;
     use mod_api::{Identifier, testing::FakeHost};
 
     #[test]
