@@ -237,6 +237,27 @@ impl SlimefunItem {
         crate::magic_eye::decorate(self.id, &mut components);
         crate::climbing_pick::decorate(self.id, &mut components);
         crate::knowledge_tome::decorate(self.id, &mut components);
+        if self.id == GOLD_24K_BLOCK.id() {
+            components.insert(
+                "minecraft:custom_name".into(),
+                crate::hologram_projector::colored_lore("&fGold Block &7(24-Carat)"),
+            );
+        }
+        if self.id == crate::ancient_altar::SYNTHETIC_SHULKER_SHELL.id() {
+            components.insert(
+                "minecraft:lore".into(),
+                Tag::List(
+                    [
+                        "",
+                        "&fThis item can be used in a",
+                        "&fworkbench like a normal Shulker Shell",
+                    ]
+                    .into_iter()
+                    .map(crate::hologram_projector::colored_lore)
+                    .collect(),
+                ),
+            );
+        }
         crate::zombie_pills::decorate(self.id, &mut components);
         crate::nether_goo::decorate(self.id, &mut components);
         if self.id == crate::infernal_bonemeal::INFERNAL_BONEMEAL.id() {
@@ -716,6 +737,15 @@ item!(
     None
 );
 
+item!(
+    GOLD_24K_BLOCK,
+    "gold_block",
+    "Gold Block (24-Carat)",
+    "white",
+    None,
+    None
+);
+
 item!(LEAD_INGOT, "iron_ingot", "Lead Ingot", "aqua", None, None);
 item!(
     OUTPUT_CHEST,
@@ -1047,6 +1077,7 @@ item!(
 
 pub(crate) fn network_item(id: &str) -> Option<Kind> {
     [
+        GOLD_24K_BLOCK,
         crate::block_placer::BLOCK_PLACER,
         crate::knowledge_tome::TOME_OF_KNOWLEDGE_SHARING,
         crate::infused::INFUSED_HOPPER,

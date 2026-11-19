@@ -207,6 +207,7 @@ pub(crate) fn researches() -> impl Iterator<Item = &'static Research> {
         ])
         .chain(crate::enchantment_machines::RESEARCHES)
         .chain(crate::elemental_staves::RESEARCHES.iter().copied())
+        .chain([&crate::ancient_altar::SYNTHETIC_SHULKERS])
         .chain([&crate::magic_eye::RESEARCH, &crate::nether_goo::RESEARCH])
         .chain([&crate::infernal_bonemeal::RESEARCH, &crate::zombie_pills::RESEARCH])
         .chain(crate::snacks::RESEARCHES.iter().copied())
@@ -267,6 +268,7 @@ pub(crate) const TASTY_KELP: Research = Research {
 };
 
 pub(crate) const RESEARCHES: &[Research] = &[
+    GOLDEN_CITY,
     WALKING_STICKS,
     SPEEDY_PICKAXE,
     LUMPS,
@@ -352,7 +354,39 @@ const SPEEDY_PICKAXE: Research = Research {
     cost: 14,
 };
 
+pub(crate) const GOLDEN_CITY: Research = Research {
+    id: "24k_gold_block",
+    name: "Golden City",
+    cost: 19,
+};
+const NO_RESEARCH: Research = Research {
+    id: "",
+    name: "",
+    cost: 0,
+};
+const GOLD_BLOCK: Option<Kind> = Some(crate::items::GOLD_24K_BLOCK);
+
 pub(crate) const CRAFTING: &[CraftingRecipe] = &[
+    CraftingRecipe {
+        inputs: [Some(GOLD_24K); 9],
+        output: stack(crate::items::GOLD_24K_BLOCK, 1),
+        research: &GOLDEN_CITY,
+    },
+    CraftingRecipe {
+        inputs: [
+            GOLD_BLOCK,
+            GOLD_BLOCK,
+            GOLD_BLOCK,
+            GOLD_BLOCK,
+            Some(vanilla!("apple")),
+            GOLD_BLOCK,
+            GOLD_BLOCK,
+            GOLD_BLOCK,
+            GOLD_BLOCK,
+        ],
+        output: stack(vanilla!("enchanted_golden_apple"), 1),
+        research: &NO_RESEARCH,
+    },
     CraftingRecipe {
         inputs: [
             None, Some(vanilla!("oak_log")), None,
@@ -1444,3 +1478,57 @@ pub(crate) const BLISTERING_INGOTS_RESEARCH: Research = Research {
     name: "Blistering Radioactivity",
     cost: 38,
 };
+
+#[cfg(test)]
+mod resource_recipe_tests {
+    use super::*;
+    use mod_api::testing::FakeHost;
+
+    #[test]
+    fn paper_gold_block_and_apple_form_the_exact_enhanced_crafting_chain() {
+        let block = crafting()
+            .find(|recipe| recipe.output.kind.id() == "GOLD_24K_BLOCK")
+            .unwrap();
+        assert_eq!(block.inputs, [Some(GOLD_24K); 9]);
+        assert_eq!(block.research.id, "24k_gold_block");
+        assert_eq!(block.research.cost, 19);
+
+        let apple = crafting()
+            .find(|recipe| recipe.output.kind.id() == "minecraft:enchanted_golden_apple")
+            .unwrap();
+        for (slot, ingredient) in apple.inputs.iter().enumerate() {
+            assert_eq!(*ingredient, if slot == 4 { Some(vanilla!("apple")) } else { GOLD_BLOCK });
+        }
+        assert!(apple.research.id.is_empty());
+        let mut host = FakeHost::new();
+        host.registries
+            .resolve_items(["minecraft:gold_block", "minecraft:enchanted_golden_apple"].map(|id|
+                mod_api::Identifier::parse(id).unwrap()
+            ))
+            .unwrap();
+        let vanilla_block = vanilla!("gold_block").stack(&host, 1).unwrap();
+        assert!(!block.output.kind.matches(&host, &vanilla_block));
+        let result = apple.output.kind.stack(&host, apple.output.count).unwrap();
+        assert!(crate::items::item_id(&result).is_none());
+    }
+
+    #[test]
+    fn synthetic_shell_uses_the_paper_altar_and_keeps_its_item_id() {
+        let altar = crate::ancient_altar::CRAFTING
+            .iter()
+            .find(|recipe| recipe.output.kind.id() == "SYNTHETIC_SHULKER_SHELL")
+            .unwrap();
+        assert_eq!(altar.research.id, "shulker_shell");
+        assert_eq!(altar.research.cost, 30);
+        assert_eq!(altar.inputs[4], Some(vanilla!("turtle_helmet")));
+        assert_eq!(altar.inputs[3], Some(REINFORCED_PLATE));
+        assert_eq!(altar.inputs[5], Some(REINFORCED_PLATE));
+
+        let mut host = FakeHost::new();
+        host.registries
+            .resolve_items([mod_api::Identifier::parse("minecraft:shulker_shell").unwrap()])
+            .unwrap();
+        let shell = altar.output.kind.stack(&host, altar.output.count).unwrap();
+        assert!(crate::items::item_id(&shell).as_deref() == Some("SYNTHETIC_SHULKER_SHELL"));
+    }
+}

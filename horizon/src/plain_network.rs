@@ -25,6 +25,7 @@ pub(crate) const CARRIERS: &[&str] = &[
     "minecraft:blue_terracotta",
     "minecraft:cyan_terracotta",
     "minecraft:obsidian",
+    "minecraft:gold_block",
     "minecraft:iron_block",
     "minecraft:bookshelf",
     "minecraft:hay_block",

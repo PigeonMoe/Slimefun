@@ -38,6 +38,7 @@ pub(crate) enum Component {
     TrashCan,
     ReactorPort,
     BlastResistant(crate::items::Kind),
+    DecorativeGold,
     DuctTape,
     CargoInput,
     CargoOutput {
@@ -107,6 +108,7 @@ impl Component {
                 Self::BlastResistant(crate::enchantment_machines::WITHER_PROOF_GLASS)
             }
             "HARDENED_GLASS" => Self::BlastResistant(crate::network_recipes::HARDENED_GLASS),
+            "GOLD_24K_BLOCK" => Self::DecorativeGold,
             "DUCT_TAPE" => Self::DuctTape,
             "INFUSED_HOPPER" => Self::InfusedHopper,
             "TRASH_CAN_BLOCK" => Self::TrashCan,
@@ -258,6 +260,7 @@ impl Component {
             Self::BlastResistant(crate::items::Kind::Slimefun(item)) => item.name.into(),
             Self::BlastResistant(kind) => kind.id().into(),
             Self::IngredientHead => "Slimefun cooking ingredient".into(),
+            Self::DecorativeGold => "Gold Block (24-Carat)".into(),
             Self::DuctTape => "Duct Tape".into(),
             Self::CargoInput => cargo_terminal("Cargo input", metadata),
             Self::CargoOutput { advanced: false } => cargo_terminal("Cargo output", metadata),

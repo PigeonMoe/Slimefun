@@ -87,6 +87,19 @@ item!(
     None,
     None
 );
+pub(crate) const SYNTHETIC_SHULKERS: Research = Research {
+    id: "shulker_shell",
+    name: "Synthetic Shulkers",
+    cost: 30,
+};
+item!(
+    SYNTHETIC_SHULKER_SHELL,
+    "shulker_shell",
+    "Synthetic Shulker Shell",
+    "light_purple",
+    None,
+    None
+);
 item!(
     ANCIENT_RUNE_WATER,
     "firework_star",
@@ -237,6 +250,22 @@ pub(crate) const CRAFTING: &[CraftingRecipe] = &[
         ESSENCE_OF_AFTERLIFE,
         1,
         &NECROMANCY,
+    ),
+    altar_recipe(
+        [
+            ENDER_LUMP_3,
+            crate::armor_forge::ANCIENT_RUNE_ENDER,
+            ENDER_LUMP_3,
+            crate::items::REINFORCED_PLATE,
+            vanilla!("turtle_helmet"),
+            crate::items::REINFORCED_PLATE,
+            ENDER_LUMP_3,
+            crate::armor_forge::ANCIENT_RUNE_ENDER,
+            ENDER_LUMP_3,
+        ],
+        SYNTHETIC_SHULKER_SHELL,
+        1,
+        &SYNTHETIC_SHULKERS,
     ),
     crate::infused::ALTAR,
     crate::spawner_repair::ALTAR,

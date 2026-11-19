@@ -241,6 +241,13 @@ impl ItemPart for NetworkPlacement {
             return Some(InteractionResult::Fail);
         }
         if let HostSide::Server(host) = host {
+            if crate::items::GOLD_24K_BLOCK.matches(host, event.stack)
+                && !host.player(event.player).is_some_and(|player| {
+                    crate::research::can_use(host, player, &crate::recipes::GOLDEN_CITY)
+                })
+            {
+                return Some(InteractionResult::Fail);
+            }
             if geology::GPS_EMERGENCY_TRANSMITTER.matches(host, event.stack)
                 && !host.player(event.player).is_some_and(|player| {
                     crate::research::can_use(host, player, &geology::EMERGENCY_WAYPOINT)
@@ -414,6 +421,7 @@ impl Node {
             | Component::EnhancedFurnace
             | Component::InfusedHopper
             | Component::DuctTape
+            | Component::DecorativeGold
             | Component::BlastResistant(_)
             | Component::ReactorPort => Network::Independent,
             _ => Network::Cargo,
@@ -455,6 +463,7 @@ fn accepts_carrier(component: Component, actual: &str) -> bool {
         Component::EnhancedFurnace => return actual == "minecraft:furnace",
         Component::InfusedHopper => return actual == "minecraft:hopper",
         Component::ReactorPort => return actual == reactors::REACTOR_ACCESS_PORT.material(),
+        Component::DecorativeGold => return actual == "minecraft:gold_block",
         Component::BlastResistant(kind) => return actual == kind.material(),
         Component::SolarGenerator { .. } => ["minecraft:daylight_detector"; 2],
         Component::ElectricMachine { carrier, .. } | Component::FuelGenerator { carrier, .. } => {
@@ -1186,6 +1195,7 @@ fn is_plain_node(component: Component) -> bool {
         Component::ManualCrucible
             | Component::ManualComposter
             | Component::ReactorPort
+            | Component::DecorativeGold
             | Component::BlastResistant(_)
             | Component::GpsDevice(_)
     ) {
@@ -1723,6 +1733,21 @@ mod tests {
 
     fn node(id: &str) -> Node {
         imported(id, &toml::Table::new()).unwrap().0
+    }
+
+    #[test]
+    fn decorative_gold_restores_as_a_plain_block_and_cannot_join_energy_or_cargo() {
+        let (gold, marker) = imported("GOLD_24K_BLOCK", &toml::Table::new()).unwrap();
+        assert!(is_plain_node(gold.component));
+        assert!(is_plain_carrier("minecraft:gold_block"));
+        assert!(accepts_carrier(gold.component, "minecraft:gold_block"));
+        assert!(!accepts_carrier(gold.component, "minecraft:raw_gold_block"));
+        assert!(matches!(gold.family(), Network::Independent));
+        assert!(!gold.relays());
+        let codec = NETWORK_STATE.codec.as_ref().unwrap();
+        let attachment = (codec.encode)(&marker).unwrap();
+        assert_eq!(saved_id(&attachment).as_deref(), Some("GOLD_24K_BLOCK"));
+        assert_eq!((codec.decode)(&attachment).unwrap().id, "GOLD_24K_BLOCK");
     }
 
     #[test]
