@@ -126,15 +126,25 @@ pub(super) fn read(host: &mut dyn ServerHost, level: LevelRef, pos: Position) ->
 }
 
 pub(super) fn read_persisted(host: &mut dyn ServerHost, pos: Position) -> Option<BlockData> {
-    let saved = NODES
-        .get_existing(host, Holder::Chunk(chunk(pos)))
-        .ok()
-        .flatten()?;
-    let Tag::Compound(data) = saved.get(&key(pos).as_str().into())? else {
-        return None;
-    };
-    let codec = NETWORK_STATE.codec.as_ref()?;
-    (codec.decode)(data).ok()
+    read_persisted_checked(host, pos).ok().flatten()
+}
+
+pub(super) fn read_persisted_checked(
+    host: &mut dyn ServerHost,
+    pos: Position,
+) -> Result<Option<BlockData>, AttachmentError> {
+    let saved = NODES.get_existing(host, Holder::Chunk(chunk(pos)))?;
+    match saved
+        .as_ref()
+        .and_then(|saved| saved.get(&key(pos).as_str().into()))
+    {
+        None => Ok(None),
+        Some(Tag::Compound(data)) => {
+            let codec = NETWORK_STATE.codec.as_ref().ok_or(AttachmentError::Decode)?;
+            (codec.decode)(data).map(Some)
+        }
+        Some(_) => Err(AttachmentError::Decode),
+    }
 }
 
 pub(super) fn write(

@@ -275,6 +275,11 @@ impl ItemPart for NetworkPlacement {
         {
             data.gps_owner = Some(player.uuid());
         }
+        if let Some(cargo) = &mut data.cargo {
+            cargo.owner = Some(player.uuid());
+            cargo.blacklist = !node.filters_items();
+            cargo.lore = node.filters_items();
+        }
         let android = node.component == Component::Android;
         let _ = host.transaction(|host, _| {
             if android && !crate::android_machine::init(host, level, event.pos, player) {
@@ -602,55 +607,82 @@ impl Networks {
             .dimension()
             .id(host)
             .ok_or("Unknown Horizon dimension.")?;
-        let current = self.nodes(host, &dimension)?;
-        let old = block_data(host, level, pos);
+        let old = read_registration_marker(host, pos, component)?;
         if old.as_ref().is_some_and(|old| old.id != data.id) {
             return Err("A different Slimefun network node is registered there.".into());
         }
-        if import
-            && data
-                .cargo
-                .as_ref()
-                .is_some_and(|cargo| cargo.imported_paper)
-            && old
-                .as_ref()
-                .and_then(|old| old.cargo.as_ref())
-                .is_some_and(|cargo| !cargo.imported_paper && !cargo.filters.is_empty())
-        {
-            return Err("Cargo inventory already contains filter items.".into());
-        }
-        match current.get(&pos) {
-            Some(existing) if existing == &node => {}
-            _ => {
-                let mut next = (*current).clone();
-                next.insert(pos, node);
-                save(host, &dimension, &next)?;
-                self.levels.insert(dimension, Arc::new(next));
+        let current = self.nodes(host, &dimension)?;
+        let saved_node = current.get(&pos);
+        let node = saved_node
+            .filter(|saved| old.is_some() && saved.id == node.id)
+            .cloned()
+            .unwrap_or(node);
+        let marker = merge_import(old, data, &node, import)?;
+        let next = (saved_node != Some(&node)).then(|| {
+            let mut next = (*current).clone();
+            next.insert(pos, node);
+            next
+        });
+        host.transaction(|host, _| {
+            if let Some(marker) = marker {
+                if let Component::Capacitor(capacity) = component {
+                    set_capacitor_profile(host, level, pos, marker.charge, capacity);
+                }
+                write_data(host, pos, marker)
+                    .map_err(|_| "The block entity could not store its Slimefun network marker.")?;
             }
-        }
-        let restore_inventory = import
-            && data
-                .cargo
-                .as_ref()
-                .is_some_and(|cargo| cargo.imported_paper)
-            && old.as_ref().is_some_and(|previous| {
-                previous
-                    .cargo
-                    .as_ref()
-                    .is_none_or(|cargo| !cargo.imported_paper && cargo.filters.is_empty())
-            });
-        let restore_owner = import
-            && crate::gps_transport::needs_owner(&data.id)
-            && old.as_ref().is_some_and(|old| old.gps_owner.is_none());
-        if old.is_none() || restore_inventory || restore_owner {
-            if let Component::Capacitor(capacity) = component {
-                set_capacitor_profile(host, level, pos, data.charge, capacity);
+            if let Some(next) = &next {
+                save(host, &dimension, next)?;
             }
-            write_data(host, pos, data)
-                .map_err(|_| "The block entity could not store its Slimefun network marker.")?;
+            Ok::<_, String>(())
+        })?;
+        if let Some(next) = next {
+            self.levels.insert(dimension, Arc::new(next));
         }
         Ok(())
     }
+}
+
+fn read_registration_marker(
+    host: &mut dyn ServerHost,
+    pos: Position,
+    component: Component,
+) -> Result<Option<BlockData>, &'static str> {
+    if is_plain_node(component) {
+        plain_network::read_persisted_checked(host, pos)
+    } else {
+        NETWORK_STATE.get_existing(host, Holder::BlockEntity(pos))
+    }
+    .map_err(|_| "The existing Slimefun network marker could not be read.")
+}
+
+fn merge_import(
+    old: Option<BlockData>,
+    paper: BlockData,
+    node: &Node,
+    import: bool,
+) -> Result<Option<BlockData>, &'static str> {
+    let Some(mut old) = old else {
+        return Ok(Some(paper));
+    };
+    if !import {
+        return Ok(None);
+    }
+    let restore_owner = old.gps_owner.is_none() && paper.gps_owner.is_some();
+    if restore_owner {
+        old.gps_owner = paper.gps_owner;
+        if old.elevator_floor.is_none() {
+            old.elevator_floor = paper.elevator_floor;
+        }
+    }
+    let restore_cargo = if let Some(paper) = paper.cargo {
+        old.cargo
+            .get_or_insert_with(|| CargoSettings::legacy(node.channel, node.passes_unfiltered))
+            .merge_paper(paper)?
+    } else {
+        false
+    };
+    Ok((restore_owner || restore_cargo).then_some(old))
 }
 
 fn imported(id: &str, metadata: &toml::Table) -> Result<(Node, BlockData), &'static str> {
@@ -753,7 +785,7 @@ fn load(host: &dyn ServerHost, dimension: &str) -> Result<Nodes, String> {
         let channel = row
             .get("channel")
             .and_then(toml::Value::as_integer)
-            .filter(|channel| (0..16).contains(channel))
+            .filter(|channel| (0..=16).contains(channel))
             .ok_or("Invalid Slimefun network channel.")? as u8;
         let passes_unfiltered = row
             .get("passes_unfiltered")
@@ -1660,6 +1692,97 @@ mod tests {
 
     fn node(id: &str) -> Node {
         imported(id, &toml::Table::new()).unwrap().0
+    }
+
+    #[test]
+    fn cargo_restore_only_fills_missing_state_and_does_not_regenerate_used_filters() {
+        let source: toml::Table = "
+            owner = '2728cc32-8191-44e7-86c9-2120aa3896c4'
+            frequency = '16'
+            filter-type = 'whitelist'
+            filter-lore = 'true'
+            round-robin = 'true'
+        "
+        .parse()
+        .unwrap();
+        let (node, mut archived) = imported("CARGO_NODE_INPUT", &source).unwrap();
+        let empty = imported(&node.id, &toml::Table::new()).unwrap().1;
+        let absent_fields = empty.cargo.as_ref().unwrap();
+        assert!(absent_fields.blacklist);
+        assert!(!absent_fields.lore);
+        let source_options = archived.cargo.as_mut().unwrap();
+        assert_eq!(source_options.channel, 16);
+        assert!(!source_options.blacklist);
+        assert!(source_options.lore);
+        assert!(source_options.round_robin);
+        source_options.imported_paper = true;
+        let filter = Compound::from([("id".into(), Tag::String("minecraft:stone".into()))]);
+        source_options.filters.insert(19, filter.clone());
+
+        let mut edited = empty.clone();
+        let local = edited.cargo.as_mut().unwrap();
+        local.channel = 5;
+        local.smart_fill = true;
+        local.filters.insert(20, filter);
+        assert!(merge_import(Some(edited.clone()), archived.clone(), &node, true).is_err());
+        assert_eq!(edited.cargo.as_ref().unwrap().owner, None);
+        edited.cargo.as_mut().unwrap().filters.clear();
+
+        let mut restored = merge_import(Some(edited), archived.clone(), &node, true)
+            .unwrap()
+            .unwrap();
+        let settings = restored.cargo.as_ref().unwrap();
+        assert_eq!(settings.channel, 5);
+        assert!(settings.blacklist && settings.smart_fill);
+        assert!(!settings.lore && !settings.round_robin);
+        assert_eq!(settings.owner, archived.cargo.as_ref().unwrap().owner);
+        assert_eq!(settings.filters.keys().copied().collect::<Vec<_>>(), [19]);
+        assert_eq!(CargoSettings::load(&settings.save()).unwrap(), *settings);
+        restored.cargo.as_mut().unwrap().filters.clear();
+        assert!(merge_import(Some(restored), archived, &node, true).unwrap().is_none());
+        assert!(imported(&node.id, &"owner = 'broken'".parse::<toml::Table>().unwrap()).is_err());
+    }
+
+    #[test]
+    fn restore_reports_a_damaged_network_attachment_before_touching_the_registration() {
+        let mut host = FakeHost::new();
+        let pos = [12, 66, -7];
+        let damaged = Compound::from([(
+            "slimefun".into(),
+            Tag::compound([(
+                "network_state",
+                Tag::compound([(
+                    "value",
+                    Tag::compound([
+                        ("id", Tag::String("CARGO_NODE_INPUT".into())),
+                        ("charge", Tag::Int(0)),
+                        ("cargo", Tag::compound([
+                            ("channel", Tag::Int(5)),
+                            ("filters", Tag::String("invalid layout".into())),
+                        ])),
+                    ]),
+                )]),
+            )]),
+        )]);
+        host.attachments = mod_api::Attachments::from_nbt(damaged.clone());
+        let marker = read_registration_marker(&mut host, pos, Component::CargoInput);
+        assert!(matches!(marker, Err("The existing Slimefun network marker could not be read.")));
+        assert_eq!(host.attachments.to_nbt(), damaged);
+
+        let damaged = Compound::from([(
+            "slimefun".into(),
+            Tag::compound([(
+                "plain_energy_nodes",
+                Tag::compound([(
+                    "value",
+                    Tag::compound([("12,66,-7", Tag::Int(17))]),
+                )]),
+            )]),
+        )]);
+        host.attachments = mod_api::Attachments::from_nbt(damaged.clone());
+        let marker = read_registration_marker(&mut host, pos, Component::ManualComposter);
+        assert!(marker.is_err());
+        assert_eq!(host.attachments.to_nbt(), damaged);
     }
 
     #[test]

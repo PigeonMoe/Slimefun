@@ -7,12 +7,13 @@ use mod_api::{
     LevelRef, ServerHost, Tag, UseOnEvent,
 };
 
-use super::{Component, Networks, Node, Position, factory_identity, item_id, read_stack};
+use super::{Component, Networks, Node, Position, factory_identity, item_id, parse_uuid, read_stack};
 
 pub(super) const FILTER_SLOTS: [usize; 9] = [19, 20, 21, 28, 29, 30, 37, 38, 39];
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct CargoSettings {
+    pub owner: Option<u128>,
     pub channel: u8,
     pub blacklist: bool,
     pub lore: bool,
@@ -25,6 +26,7 @@ pub(super) struct CargoSettings {
 impl CargoSettings {
     pub(super) fn legacy(channel: u8, passes_unfiltered: bool) -> Self {
         Self {
+            owner: None,
             channel,
             blacklist: passes_unfiltered,
             lore: false,
@@ -45,12 +47,37 @@ impl CargoSettings {
             .ok_or("Invalid Paper cargo frequency.")?;
         let mut result = Self::legacy(
             channel,
-            !filter || field("filter-type") == Some("blacklist"),
+            !filter || field("filter-type") != Some("whitelist"),
         );
-        result.lore = filter && field("filter-lore") != Some("false");
+        result.lore = filter && field("filter-lore") == Some("true");
         result.round_robin = field("round-robin") == Some("true");
         result.smart_fill = field("smart-fill") == Some("true");
+        result.owner = match metadata.get("owner") {
+            None => None,
+            Some(owner) => Some(
+                owner
+                    .as_str()
+                    .and_then(parse_uuid)
+                    .ok_or("Invalid Paper cargo owner UUID.")?,
+            ),
+        };
         Ok(result)
+    }
+
+    pub(super) fn merge_paper(&mut self, paper: Self) -> Result<bool, &'static str> {
+        let restore_items = paper.imported_paper && !self.imported_paper;
+        if restore_items && !self.filters.is_empty() {
+            return Err("Cargo inventory already contains filter items.");
+        }
+        let restore_owner = self.owner.is_none() && paper.owner.is_some();
+        if restore_owner {
+            self.owner = paper.owner;
+        }
+        if restore_items {
+            self.filters = paper.filters;
+            self.imported_paper = true;
+        }
+        Ok(restore_owner || restore_items)
     }
 
     pub(super) fn save(&self) -> Compound {
@@ -80,6 +107,12 @@ impl CargoSettings {
         ] {
             data.insert(name.into(), Tag::Byte(i8::from(value)));
         }
+        if let Some(owner) = self.owner {
+            data.insert(
+                "owner".into(),
+                Tag::String(format!("{owner:032x}").as_str().into()),
+            );
+        }
         data
     }
 
@@ -90,9 +123,16 @@ impl CargoSettings {
         if !(0..=16).contains(channel) {
             return Err(AttachmentError::Decode);
         }
-        let flag = |key: &str| matches!(data.get(&key.into()), Some(Tag::Byte(1)));
+        let flag = |key: &str| match data.get(&key.into()) {
+            None | Some(Tag::Byte(0)) => Ok(false),
+            Some(Tag::Byte(1)) => Ok(true),
+            _ => Err(AttachmentError::Decode),
+        };
         let mut filters = BTreeMap::new();
-        if let Some(Tag::Compound(items)) = data.get(&"filters".into()) {
+        if let Some(items) = data.get(&"filters".into()) {
+            let Tag::Compound(items) = items else {
+                return Err(AttachmentError::Decode);
+            };
             for (slot, item) in items {
                 let slot = slot
                     .to_string()
@@ -109,12 +149,20 @@ impl CargoSettings {
             }
         }
         Ok(Self {
+            owner: match data.get(&"owner".into()) {
+                None => None,
+                Some(Tag::String(owner)) => Some(
+                    parse_uuid(&owner.to_string().map_err(|_| AttachmentError::Decode)?)
+                        .ok_or(AttachmentError::Decode)?,
+                ),
+                _ => return Err(AttachmentError::Decode),
+            },
             channel: *channel as u8,
-            blacklist: flag("blacklist"),
-            lore: flag("lore"),
-            round_robin: flag("round_robin"),
-            smart_fill: flag("smart_fill"),
-            imported_paper: flag("paper"),
+            blacklist: flag("blacklist")?,
+            lore: flag("lore")?,
+            round_robin: flag("round_robin")?,
+            smart_fill: flag("smart_fill")?,
+            imported_paper: flag("paper")?,
             filters,
         })
     }
