@@ -987,6 +987,7 @@ pub(crate) fn has_block_marker(host: &mut dyn ServerHost, level: LevelRef, pos: 
                 || crate::output_chest::live_marker(host, entity)
                 || crate::ancient_altar::marked(host, entity)
         })
+        || crate::hologram_projector::marked(host, level, pos)
 }
 
 fn block_data(host: &mut dyn ServerHost, level: LevelRef, pos: Position) -> Option<BlockData> {

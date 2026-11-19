@@ -106,6 +106,11 @@ impl SlimefunItem {
                 )]),
             ),
         ]);
+        if self.id == "HOLOGRAM_PROJECTOR" {
+            components.insert("minecraft:lore".into(), Tag::List(vec![
+                text("", "white", false), text("Projects an Editable Hologram", "white", false),
+            ]));
+        }
         if let Some(lore) = crate::android_items::lore(self.id) {
             components.insert("minecraft:lore".into(), lore);
         }

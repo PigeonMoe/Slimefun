@@ -47,6 +47,7 @@ mod gps_transport;
 mod gps_waypoints;
 mod hand_machine;
 mod heated_pressure;
+mod hologram_projector;
 mod ignition_chamber;
 mod industrial_miner;
 mod items;
@@ -85,6 +86,7 @@ struct Slimefun {
     networks: Arc<Mutex<network_runtime::Networks>>,
     gps: gps_controls::Controls,
     androids: android_ui::Menus,
+    holograms: hologram_projector::Editors,
     transport: gps_transport::Transport,
     backpacks: backpacks::BackpackMenus,
     bee_wings: bee_wings::BeeWings,
@@ -106,6 +108,7 @@ impl Default for Slimefun {
             networks: Arc::default(),
             gps: gps_controls::Controls::default(),
             androids: android_ui::Menus::default(),
+            holograms: hologram_projector::Editors::default(),
             transport: gps_transport::Transport::default(),
             backpacks: backpacks::BackpackMenus::default(),
             bee_wings: bee_wings::BeeWings::default(),
@@ -294,6 +297,7 @@ impl Hooks for Slimefun {
         factory::register(registrar);
         backpacks::register(registrar);
         ancient_altar::register(registrar);
+        hologram_projector::register(registrar);
         auto_crafter::register(registrar);
         self.universal.register(registrar);
     }
@@ -346,12 +350,14 @@ impl Hooks for Slimefun {
         android_machine::drop_items(level, event);
         food_machines::restore_drop(level, event);
         ancient_altar::restore_drops(level, event);
+        hologram_projector::restore_drop(level, event);
         Flow::Continue
     }
 
     fn block_changed(&self, level: &dyn LevelHost, event: &mut mod_api::BlockChangedEvent) {
         network_runtime::observe_plain_change(level, event);
         self.crucibles.anchor_changed(level, event);
+        hologram_projector::observe_change(level, event);
         network_runtime::observe_gps_change(&self.networks, level, event);
     }
 
@@ -423,7 +429,7 @@ impl Hooks for Slimefun {
     }
 
     fn piston_pre(&self, level: &dyn LevelHost, event: &mut mod_api::PistonPreEvent<'_>) -> Flow {
-        if network_runtime::protect_piston(level, event) {
+        if network_runtime::protect_piston(level, event) || hologram_projector::piston_protected(level, event) {
             Flow::Cancel
         } else {
             Flow::Continue
@@ -747,6 +753,10 @@ impl Hooks for Slimefun {
             *event.cancellation_result = InteractionResult::Consume;
             return Flow::Cancel;
         }
+        if self.holograms.use_at(host, player, level, event.click.pos) {
+            *event.cancellation_result = InteractionResult::Consume;
+            return Flow::Cancel;
+        }
         if self.androids.use_at(host, player, level, event.click.pos) {
             *event.cancellation_result = InteractionResult::Consume;
             return Flow::Cancel;
@@ -858,6 +868,7 @@ impl Hooks for Slimefun {
         self.bee_wings.stop(event.player);
         self.gps.logout(event.player);
         self.androids.logout(event.player);
+        self.holograms.logout(event.player);
         self.transport.logout(event.player);
     }
 
@@ -871,6 +882,7 @@ impl Hooks for Slimefun {
             .gps
             .take_chat(host, event.player, event.raw_text)
             .or_else(|| self.androids.take_chat(host, event.player, event.raw_text))
+            .or_else(|| self.holograms.take_chat(host, event.player, event.raw_text))
         {
             event.replies.push(reply);
             return Flow::Cancel;
@@ -926,6 +938,7 @@ impl Hooks for Slimefun {
         auto_crafter::clicked(host, event);
         factory::VIEWERS.clicked(host, event);
         self.gps.click(&self.networks, host, event);
+        self.holograms.clicked(host, event);
         self.androids.clicked(host, event);
         self.transport.clicked(host, event);
         network_runtime::menu_click(&self.networks, host, event);
@@ -938,6 +951,7 @@ impl Hooks for Slimefun {
         factory::VIEWERS.closed(event);
         self.gps.close(event);
         self.androids.closed(event);
+        self.holograms.closed(event);
         self.transport.close(event);
         network_runtime::menu_closed(&self.networks, event);
     }
@@ -1025,6 +1039,7 @@ impl Hooks for Slimefun {
             self.industrial_miners.tick(host, event.level, &self.rolls);
             self.composters.tick(host, event.level, &self.rolls);
             ancient_altar::tick(host, event.level);
+            hologram_projector::tick(host, event.level);
             auto_crafter::refresh(host, event.level);
             armor_forge::tick_equipment(host, event.level);
             self.bee_wings.tick(host, event.level);
@@ -1073,6 +1088,7 @@ impl Hooks for Slimefun {
         self.universal.clear();
         self.gps.clear();
         self.androids.clear();
+        self.holograms.clear();
         self.transport.clear();
         factory::VIEWERS.clear();
         self.networks.lock().unwrap().clear();
