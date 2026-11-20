@@ -8,7 +8,7 @@ use mod_api::{
 };
 
 use crate::{
-    elemental_staves::LAVA_CRYSTAL,
+    elemental_staves::{LAVA_CRYSTAL, STAFF_ELEMENTAL_WIND},
     factory::experience_collector::FILLED_FLASK_OF_KNOWLEDGE,
     items::{ENDER_LUMP_3, GOLD_8K, GOLD_DUST, Kind, MAGIC_LUMP_2, MAGIC_LUMP_3, item, text},
     magic_eye::MAGIC_EYE_OF_ENDER,
@@ -98,11 +98,53 @@ item!(
     None,
     None
 );
+item!(
+    ANGEL_TALISMAN,
+    "emerald",
+    "Talisman of the Angel",
+    "green",
+    None,
+    None
+);
+item!(
+    ENDER_ANGEL_TALISMAN,
+    "emerald",
+    "Ender Talisman of the Angel",
+    "dark_purple",
+    None,
+    None
+);
+item!(
+    TRAVELLER_TALISMAN,
+    "emerald",
+    "Talisman of the Traveller",
+    "green",
+    None,
+    None
+);
+item!(
+    ENDER_TRAVELLER_TALISMAN,
+    "emerald",
+    "Ender Talisman of the Traveller",
+    "dark_purple",
+    None,
+    None
+);
 
 const FIRE_RESEARCH: Research = Research {
     id: "fire_talisman",
     name: "Talisman of the Firefighter",
     cost: 18,
+};
+const ANGEL_RESEARCH: Research = Research {
+    id: "angel_talisman",
+    name: "Talisman of the Angel",
+    cost: 18,
+};
+const TRAVELLER_RESEARCH: Research = Research {
+    id: "traveller_talisman",
+    name: "Talisman of the Traveller",
+    cost: 20,
 };
 const COMMON_RESEARCH: Research = Research {
     id: "common_talisman",
@@ -141,6 +183,8 @@ pub(crate) const RESEARCHES: &[&Research] = &[
     &WIZARD_RESEARCH,
     &WISE_RESEARCH,
     &FIRE_RESEARCH,
+    &ANGEL_RESEARCH,
+    &TRAVELLER_RESEARCH,
     &ENDER_RESEARCH,
 ];
 
@@ -289,6 +333,40 @@ pub(crate) const CRAFTING: &[CraftingRecipe] = &[
         ],
     ),
     infused(ENDER_FIRE_TALISMAN, FIRE_TALISMAN, 4),
+    recipe(
+        ANGEL_TALISMAN,
+        &ANGEL_RESEARCH,
+        1,
+        [
+            LUMP_3,
+            None,
+            LUMP_3,
+            Some(Kind::Vanilla("minecraft:feather")),
+            Some(COMMON_TALISMAN),
+            Some(Kind::Vanilla("minecraft:feather")),
+            LUMP_3,
+            None,
+            LUMP_3,
+        ],
+    ),
+    recipe(
+        TRAVELLER_TALISMAN,
+        &TRAVELLER_RESEARCH,
+        1,
+        [
+            LUMP_3,
+            None,
+            LUMP_3,
+            Some(STAFF_ELEMENTAL_WIND),
+            Some(ANGEL_TALISMAN),
+            Some(STAFF_ELEMENTAL_WIND),
+            LUMP_3,
+            None,
+            LUMP_3,
+        ],
+    ),
+    infused(ENDER_ANGEL_TALISMAN, ANGEL_TALISMAN, 1),
+    infused(ENDER_TRAVELLER_TALISMAN, TRAVELLER_TALISMAN, 1),
 ];
 
 const MAGICIAN: Talisman = Talisman {
@@ -347,6 +425,34 @@ const FIRE: Talisman = Talisman {
     ],
 };
 
+const ANGEL: Talisman = Talisman {
+    normal: ANGEL_TALISMAN,
+    ender: ENDER_ANGEL_TALISMAN,
+    research: &ANGEL_RESEARCH,
+    chance: 75,
+    message: "Your Talisman saved you from taking fall damage",
+    lore: &[
+        "While you have this Talisman",
+        "in your Inventory it has a",
+        "75% chance to prevent you",
+        "from taking Fall Damage",
+    ],
+};
+
+const TRAVELLER: Talisman = Talisman {
+    normal: TRAVELLER_TALISMAN,
+    ender: ENDER_TRAVELLER_TALISMAN,
+    research: &TRAVELLER_RESEARCH,
+    chance: 60,
+    message: "Your Talisman gave you a Speed Boost",
+    lore: &[
+        "While you have this Talisman",
+        "in your Inventory it gives",
+        "you a 60% Chance for a decent",
+        "Speed Buff when you start sprinting",
+    ],
+};
+
 struct Talisman {
     normal: Kind,
     ender: Kind,
@@ -364,7 +470,7 @@ pub(crate) fn lore(id: &str) -> Option<Tag> {
             text("Used for various Magical Gadgets", "green", true),
         ]));
     }
-    let talisman = [&MAGICIAN, &WIZARD, &WISE, &FIRE]
+    let talisman = [&MAGICIAN, &WIZARD, &WISE, &FIRE, &ANGEL, &TRAVELLER]
         .into_iter()
         .find(|talisman| [talisman.normal.id(), talisman.ender.id()].contains(&id))?;
     let mut lines = Vec::new();
@@ -561,6 +667,48 @@ impl Talismans {
         }
     }
 
+    pub(crate) fn protect_from_fall(
+        &self,
+        host: &mut dyn ServerHost,
+        player: PlayerRef,
+        rolls: &Rolls,
+    ) -> bool {
+        let Some(level) = player.level(host) else {
+            return false;
+        };
+        if !chance(host, level, &ANGEL, rolls) || !present(host, player, &ANGEL) {
+            return false;
+        }
+        let actionbar = self.0.lock().unwrap().actionbar;
+        notify(host, player, &ANGEL, actionbar);
+        true
+    }
+
+    pub(crate) fn start_sprinting(
+        &self,
+        host: &mut dyn ServerHost,
+        player: PlayerRef,
+        rolls: &Rolls,
+    ) {
+        let (Some(level), Some(living), Some(speed)) = (
+            player.level(host),
+            host.living(player.entity()),
+            host.effect_key("minecraft:speed"),
+        ) else {
+            return;
+        };
+        if !chance(host, level, &TRAVELLER, rolls)
+            || living.effect(host, speed).is_some()
+            || !present(host, player, &TRAVELLER)
+        {
+            return;
+        }
+        let speed = ActiveEffect::new(speed, 3600, 2, true, true, true);
+        let _ = living.add_effect(host, &speed);
+        let actionbar = self.0.lock().unwrap().actionbar;
+        notify(host, player, &TRAVELLER, actionbar);
+    }
+
     pub(crate) fn orb_xp(
         &self,
         host: &mut dyn ServerHost,
@@ -663,10 +811,14 @@ fn activated(
 }
 
 fn chance(host: &dyn Host, level: LevelRef, spec: &Talisman, rolls: &Rolls) -> bool {
-    // Paper rejects when nextInt(100) > chance, so the boundary succeeds.
     rolls
         .next(host, level, 100)
-        .is_some_and(|value| value <= spec.chance)
+        .is_some_and(|value| roll_succeeds(spec, value))
+}
+
+fn roll_succeeds(spec: &Talisman, value: u32) -> bool {
+    // Paper rejects when nextInt(100) > chance, so the boundary succeeds.
+    value <= spec.chance
 }
 
 fn notify(host: &mut dyn ServerHost, player: PlayerRef, spec: &Talisman, actionbar: bool) {
@@ -791,5 +943,72 @@ mod tests {
         assert_eq!(CRAFTING[8].output.count, 4);
         assert_eq!(CRAFTING[9].output.count, 4);
         assert_eq!(CRAFTING[9].inputs[4], Some(FIRE_TALISMAN));
+    }
+
+    #[test]
+    fn angel_and_traveller_share_the_paper_crafting_chain_and_exact_roll_boundaries() {
+        for (spec, side, center, research, cost, successful_rolls) in [
+            (
+                &ANGEL,
+                Kind::Vanilla("minecraft:feather"),
+                COMMON_TALISMAN,
+                "angel_talisman",
+                18,
+                76,
+            ),
+            (
+                &TRAVELLER,
+                STAFF_ELEMENTAL_WIND,
+                ANGEL_TALISMAN,
+                "traveller_talisman",
+                20,
+                61,
+            ),
+        ] {
+            let recipe = CRAFTING
+                .iter()
+                .find(|r| r.output.kind == spec.normal)
+                .unwrap();
+            let infused = CRAFTING
+                .iter()
+                .find(|r| r.output.kind == spec.ender)
+                .unwrap();
+            assert_eq!((spec.research.id, spec.research.cost), (research, cost));
+            assert_eq!(
+                recipe.inputs,
+                [
+                    LUMP_3,
+                    None,
+                    LUMP_3,
+                    Some(side),
+                    Some(center),
+                    Some(side),
+                    LUMP_3,
+                    None,
+                    LUMP_3
+                ]
+            );
+            assert_eq!(
+                infused.inputs,
+                [
+                    ENDER,
+                    None,
+                    ENDER,
+                    None,
+                    Some(spec.normal),
+                    None,
+                    ENDER,
+                    None,
+                    ENDER
+                ]
+            );
+            assert_eq!((recipe.output.count, infused.output.count), (1, 1));
+            assert!(roll_succeeds(spec, successful_rolls - 1));
+            assert!(!roll_succeeds(spec, successful_rolls));
+            assert_eq!(
+                (0..100).filter(|&value| roll_succeeds(spec, value)).count(),
+                successful_rolls as usize
+            );
+        }
     }
 }

@@ -1482,14 +1482,32 @@ impl Hooks for Slimefun {
         host: &mut dyn ServerHost,
         event: &mut mod_api::PlayerEnvironmentDamagePreEvent<'_>,
     ) -> Flow {
-        if self
-            .talismans
-            .protect_from_fire(host, event.player, event.damage_type)
-        {
+        let protected = match event.damage_type {
+            "minecraft:fall" => self
+                .talismans
+                .protect_from_fall(host, event.player, &self.rolls),
+            "minecraft:in_fire" => self
+                .talismans
+                .protect_from_fire(host, event.player, event.damage_type),
+            _ => false,
+        };
+        if protected {
             Flow::Cancel
         } else {
             Flow::Continue
         }
+    }
+
+    #[listener(receive_cancelled)]
+    fn player_sprint_pre(
+        &self,
+        host: &mut dyn ServerHost,
+        event: &mut mod_api::PlayerSprintPreEvent,
+    ) -> Flow {
+        if event.sprinting {
+            self.talismans.start_sprinting(host, event.player, &self.rolls);
+        }
+        Flow::Continue
     }
 
     fn player_orb_xp_pre(
