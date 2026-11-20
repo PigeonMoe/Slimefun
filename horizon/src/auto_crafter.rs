@@ -431,7 +431,9 @@ pub(crate) fn restore_paper(
 }
 
 fn recipe(selected: &str) -> Option<&'static CraftingRecipe> {
-    crate::recipes::crafting().find(|recipe| recipe.output.kind.id() == selected)
+    let tickers = crate::ticker_policy::Tickers::current();
+    crate::recipes::crafting()
+        .find(|recipe| recipe.output.kind.id() == selected && tickers.allows_recipe(recipe))
 }
 
 fn storage_block(id: &str) -> bool {

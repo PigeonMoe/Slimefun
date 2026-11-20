@@ -100,6 +100,7 @@ mod talismans;
 mod tape_measure;
 mod teleposition_scroll;
 mod thermal_machines;
+mod ticker_policy;
 mod universal_storage;
 mod zombie_pills;
 
@@ -248,6 +249,7 @@ impl Slimefun {
         }
         let mut settings = self.settings.lock().unwrap();
         if fresh {
+            ticker_policy::load(true, None);
             *settings = Settings::default();
             enchantment_machines::configure(&toml::Table::new());
             self.talismans.configure(&toml::Table::new());
@@ -408,6 +410,7 @@ impl Slimefun {
         {
             settings.golem_drop_chance = value;
         }
+        ticker_policy::load(fresh, table.get("URID"));
         if let Some(delay) = table
             .get("URID")
             .and_then(|section| section.get("custom-ticker-delay"))
@@ -484,7 +487,7 @@ impl Hooks for Slimefun {
             "slimefun",
             ConfigKind::Server,
             &format!("{}{}{}{}{}{}{}{}{}{}",
-            "double-ores = true\ncrucible-allow-water-in-nether = false\nlegacy-ore-washer = false\nlegacy-dust-washer = false\nlegacy-ore-grinder = true\nelectric-gold-pan-override-output-limit = [false, false, false]\nfreezer-use-vanilla-ratios = [false, false, false]\nfire-breaking-chance = 34\noutput-chest-enabled = true\ndrop-from-golems = true\ngolem-drop-chance = 75\n\n[guide]\nreceive-on-first-join = true\nshow-hidden-item-groups-in-search = false\n\n[researches]\nfree-in-creative-mode = true\nenable-fireworks = true\ndisable-learning-animation = false\n\n[URID]\ncustom-ticker-delay = 10\n\n[networks]\nmax-size = 200\nenable-visualizer = true\ncargo-ticker-delay = 0\n\n[wind-staff]\npower = 4\n\n[book-binder]\nbypass-vanilla-max-level = false\nhas-custom-max-level = false\ncustom-max-level = 15\n\n[solar-generator-4]\nother-dimensions-use-night-energy = false\n\n[portable-teleporter]\nteleportation-cost = 10\n\n[produce-collector]\nrange = 2\n\n[pickaxe-of-vein-mining]\nmax-blocks = 16\n\n[pickaxe-of-the-seeker]\nmax-range = 5\n\n[blade-of-vampires]\nchance = 45\n\n[reinforced-spawner]\nallow-spawn-eggs = true\n\n[ancient-altar]\nstep-delay = 8\n\n[miner-android]\nreduced-block-updates = true\n\n[industrial-miner]\ncan-mine-ancient-debris = false\ncan-mine-deepslate-ores = true\n\n[advanced-industrial-miner]\ncan-mine-ancient-debris = false\ncan-mine-deepslate-ores = true\n",
+            "double-ores = true\ncrucible-allow-water-in-nether = false\nlegacy-ore-washer = false\nlegacy-dust-washer = false\nlegacy-ore-grinder = true\nelectric-gold-pan-override-output-limit = [false, false, false]\nfreezer-use-vanilla-ratios = [false, false, false]\nfire-breaking-chance = 34\noutput-chest-enabled = true\ndrop-from-golems = true\ngolem-drop-chance = 75\n\n[guide]\nreceive-on-first-join = true\nshow-hidden-item-groups-in-search = false\n\n[researches]\nfree-in-creative-mode = true\nenable-fireworks = true\ndisable-learning-animation = false\n\n[URID]\nenable-tickers = true\ncustom-ticker-delay = 10\n\n[networks]\nmax-size = 200\nenable-visualizer = true\ncargo-ticker-delay = 0\n\n[wind-staff]\npower = 4\n\n[book-binder]\nbypass-vanilla-max-level = false\nhas-custom-max-level = false\ncustom-max-level = 15\n\n[solar-generator-4]\nother-dimensions-use-night-energy = false\n\n[portable-teleporter]\nteleportation-cost = 10\n\n[produce-collector]\nrange = 2\n\n[pickaxe-of-vein-mining]\nmax-blocks = 16\n\n[pickaxe-of-the-seeker]\nmax-range = 5\n\n[blade-of-vampires]\nchance = 45\n\n[reinforced-spawner]\nallow-spawn-eggs = true\n\n[ancient-altar]\nstep-delay = 8\n\n[miner-android]\nreduced-block-updates = true\n\n[industrial-miner]\ncan-mine-ancient-debris = false\ncan-mine-deepslate-ores = true\n\n[advanced-industrial-miner]\ncan-mine-ancient-debris = false\ncan-mine-deepslate-ores = true\n",
                 enchantment_machines::default_config(),
                 beheading::DEFAULT_CONFIG,
                 explosive_tools::DEFAULT_CONFIG,
@@ -1008,19 +1011,22 @@ impl Hooks for Slimefun {
                 };
                 vec![message]
             }
-            Some("status") => vec![format!(
-                "Slimefun Horizon development | Grind Stone {} | Enhanced Crafting Table {} | Ore Crusher {} | Compressor {} | Pressure Chamber {} | Juicer {} | Ore Washer {} dusts and {} recipes | Smeltery {} recipes | Research {}",
-                GRINDING.len(),
-                crafting().count(),
-                CRUSHING.len() + DOUBLING.len(),
-                COMPRESSING.len(),
-                PRESSING.len(),
-                JUICING.len(),
-                WASHER_DUSTS.len(),
-                WASHING.len(),
-                smelting().count() + ALLOY_RECIPES.len(),
-                researches().count()
-            )],
+            Some("status") => {
+                let tickers = ticker_policy::Tickers::current();
+                vec![format!(
+                    "Slimefun Horizon development | Grind Stone {} | Enhanced Crafting Table {} | Ore Crusher {} | Compressor {} | Pressure Chamber {} | Juicer {} | Ore Washer {} dusts and {} recipes | Smeltery {} recipes | Research {}",
+                    GRINDING.len(),
+                    crafting().filter(|recipe| tickers.allows_recipe(recipe)).count(),
+                    CRUSHING.len() + DOUBLING.len(),
+                    COMPRESSING.len(),
+                    PRESSING.len(),
+                    JUICING.len(),
+                    WASHER_DUSTS.len(),
+                    WASHING.len(),
+                    smelting().count() + ALLOY_RECIPES.len(),
+                    researches().filter(|topic| guide::research_available(topic.id, tickers)).count()
+                )]
+            },
             Some("recipe") => match event.command.argument("item") {
                 Some(CommandArgumentValue::String(item)) => describe_recipe(item, *self.settings.lock().unwrap()),
                 _ => return Flow::Continue,
@@ -1029,8 +1035,12 @@ impl Hooks for Slimefun {
                 let Some(CommandArgumentValue::String(id)) = event.command.argument("key") else {
                     return Flow::Continue;
                 };
-                let Some(research) = researches().find(|research| research.id.eq_ignore_ascii_case(id)) else {
-                    let ids = researches().map(|research| research.id).collect::<Vec<_>>().join(", ");
+                let tickers = ticker_policy::Tickers::current();
+                let available = || {
+                    researches().filter(|topic| guide::research_available(topic.id, tickers))
+                };
+                let Some(research) = available().find(|research| research.id.eq_ignore_ascii_case(id)) else {
+                    let ids = available().map(|research| research.id).collect::<Vec<_>>().join(", ");
                     let _ = host.commands().feedback(Text::literal(format!("Available research includes {ids}.")));
                     return Flow::Cancel;
                 };
@@ -1097,6 +1107,15 @@ impl Hooks for Slimefun {
         let Some(player) = host.player(event.click.player) else {
             return Flow::Continue;
         };
+        let tickers = ticker_policy::Tickers::current();
+        if *event.use_item != TriState::False
+            && let Some(held) = event.click.stack
+            && tickers.blocks_stack(held)
+        {
+            *event.use_item = TriState::False;
+            self.item_clicks.record_block_use(host, event.click.player, event.click.hand, held);
+            ticker_policy::tell_unavailable(host, player);
+        }
         // Paper lets an unlocked Seismic Axe also perform the normal axe use.
         if *event.use_item != TriState::False
             && let Some(held) = event.click.stack
@@ -1188,6 +1207,15 @@ impl Hooks for Slimefun {
                 || tape_measure::use_at(host, player, level, event.click.hand, event.click.pos))
         {
             *event.cancellation_result = InteractionResult::Consume;
+            return Flow::Cancel;
+        }
+        if !tickers.enabled()
+            && event.click.hand == Hand::Main
+            && let Some(level) = player.entity().level(host)
+            && network_runtime::clicks_disabled_ticker(host, level, event.click.pos, tickers)
+        {
+            ticker_policy::tell_unavailable(host, player);
+            *event.cancellation_result = InteractionResult::Fail;
             return Flow::Cancel;
         }
         if event.click.hand == Hand::Main
@@ -1368,6 +1396,18 @@ impl Hooks for Slimefun {
         let Some(player) = host.player(event.click.player) else {
             return Flow::Continue;
         };
+        if ticker_policy::Tickers::current().blocks_stack(event.click.stack) {
+            if !self.item_clicks.consume_fallthrough(
+                host,
+                event.click.player,
+                event.click.hand,
+                event.click.stack,
+            ) {
+                ticker_policy::tell_unavailable(host, player);
+            }
+            *event.cancellation_result = InteractionResult::Fail;
+            return Flow::Cancel;
+        }
         if self.guide.right_click(host, player, event.click.stack)
             || self.item_clicks.consume_fallthrough(
                 host,
@@ -1969,6 +2009,17 @@ fn vanilla_station_blocks(host: &dyn mod_api::Host, item: &mod_api::ItemStack) -
 }
 
 fn describe_recipe(id: &str, settings: Settings) -> Vec<String> {
+    describe_available_recipe(id, settings, ticker_policy::Tickers::current())
+}
+
+fn describe_available_recipe(
+    id: &str,
+    settings: Settings,
+    tickers: ticker_policy::Tickers,
+) -> Vec<String> {
+    if !tickers.enabled() && !tickers.allows(&id.to_ascii_uppercase()) {
+        return vec!["This item has been disabled.".into()];
+    }
     let outputs = |output: &str| {
         output.eq_ignore_ascii_case(id)
             || output
@@ -2200,8 +2251,9 @@ fn describe_recipe(id: &str, settings: Settings) -> Vec<String> {
                 .map(|recipe| ("Ancient Altar", recipe)),
         );
     for (workbench, recipe) in workbenches.filter(|(bench, recipe)| {
-        outputs(recipe.output.kind.id())
-            || (*bench == "Armor Forge" && outputs(armor_forge::paper_id(recipe.output.kind)))
+        tickers.allows_recipe(recipe)
+            && (outputs(recipe.output.kind.id())
+                || (*bench == "Armor Forge" && outputs(armor_forge::paper_id(recipe.output.kind))))
     }) {
         let mut header = format!(
             "{workbench} | {} × {}",
@@ -2270,6 +2322,20 @@ mod tests {
             !describe_recipe("flint", settings)
                 .iter()
                 .any(|line| line.starts_with("Electric Gold Pan |"))
+        );
+    }
+
+    #[test]
+    fn disabled_cargo_manager_has_no_recipe_but_ordinary_cargo_nodes_do() {
+        let tickers = ticker_policy::Tickers::disabled();
+        assert_eq!(
+            describe_available_recipe("cargo_manager", Settings::default(), tickers),
+            ["This item has been disabled."]
+        );
+        assert!(
+            describe_available_recipe("CARGO_NODE_INPUT", Settings::default(), tickers)
+                .iter()
+                .any(|line| line.contains("Enhanced Crafting Table | 2 × CARGO_NODE_INPUT"))
         );
     }
 

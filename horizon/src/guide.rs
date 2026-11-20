@@ -19,6 +19,7 @@ use crate::{
     items::Kind,
     recipes::Research,
     research,
+    ticker_policy::Tickers,
 };
 
 mod catalog;
@@ -81,7 +82,17 @@ pub(crate) fn is_guide_book(host: &dyn Host, item: &ItemStack) -> bool {
 }
 
 pub(crate) fn blocks_vanilla_station(item: &ItemStack) -> bool {
-    crate::items::item_id(item).is_some_and(|id| catalog::blocks_vanilla_station(&id))
+    let tickers = Tickers::current();
+    crate::items::item_id(item)
+        .is_some_and(|id| tickers.allows(&id) && catalog::blocks_vanilla_station(&id))
+}
+
+pub(crate) fn research_available(id: &str, tickers: Tickers) -> bool {
+    if tickers.enabled() {
+        return true;
+    }
+    let mut items = catalog::items_for_research(id).peekable();
+    items.peek().is_none() || items.any(|kind| tickers.allows(kind.id()))
 }
 
 pub(crate) fn research_topics() -> impl Iterator<Item = &'static Research> {
@@ -263,9 +274,9 @@ impl Guide {
 
     fn show(&self, host: &mut dyn ServerHost, player: PlayerRef, mut path: Vec<Page>) {
         let month = host.server_local_minute()[1];
-        let allow_output_chest = crate::output_chest::enabled(host.dimension());
+        let availability = Availability::for_dimension(host.dimension());
         if matches!(path.last(), Some(Page::Group(group, _)) if !group.in_season(month))
-            || matches!(path.last(), Some(Page::Recipe(entry)) if !visible(entry, allow_output_chest))
+            || matches!(path.last(), Some(Page::Recipe(entry)) if !availability.allows(entry))
         {
             path = vec![Page::Main];
         }
@@ -280,7 +291,7 @@ impl Guide {
             page,
             month,
             show_hidden,
-            allow_output_chest,
+            availability,
         );
         if matches!(page, Page::Info) {
             let options = [Preference::Fireworks, Preference::Animation]
@@ -406,8 +417,9 @@ impl Guide {
                 path.pop();
             }
             Action::Research(topic) => {
-                if topic.id == crate::recipes::CHEST_RESEARCH.id
-                    && !crate::output_chest::enabled(host.dimension())
+                let availability = Availability::for_dimension(host.dimension());
+                if (topic.id == crate::recipes::CHEST_RESEARCH.id && !availability.output_chest)
+                    || !research_available(topic.id, availability.tickers)
                 {
                     self.show(host, player, path);
                     return;
@@ -492,8 +504,24 @@ fn learned(host: &dyn Host, player: PlayerRef, topic: &Research) -> bool {
         .is_some_and(|data| research::unlocked(data, topic))
 }
 
-fn visible(entry: &Entry, allow_output_chest: bool) -> bool {
-    allow_output_chest || entry.item.kind != crate::items::OUTPUT_CHEST
+#[derive(Clone, Copy)]
+struct Availability {
+    output_chest: bool,
+    tickers: Tickers,
+}
+
+impl Availability {
+    fn for_dimension(dimension: &str) -> Self {
+        Self {
+            output_chest: crate::output_chest::enabled(dimension),
+            tickers: Tickers::current(),
+        }
+    }
+
+    fn allows(self, entry: &Entry) -> bool {
+        (self.output_chest || entry.item.kind != crate::items::OUTPUT_CHEST)
+            && self.tickers.allows(entry.item.kind.id())
+    }
 }
 
 fn render(
@@ -502,9 +530,9 @@ fn render(
     screen: &Page,
     month: i32,
     show_hidden: bool,
-    allow_output_chest: bool,
+    availability: Availability,
 ) -> Menu {
-    let visible_entry = |entry: &&Entry| visible(entry, allow_output_chest);
+    let visible_entry = |entry: &&Entry| availability.allows(entry);
     let mut menu = Menu {
         slots: vec![None; 54],
         actions: std::array::from_fn(|_| None),
@@ -697,7 +725,7 @@ fn render(
         }
         Page::Search(query) => {
             for (slot, (group, entry)) in
-                search_matches(query, month, show_hidden, allow_output_chest).enumerate()
+                search_matches(query, month, show_hidden, availability).enumerate()
             {
                 let mut item = entry_icon(host, entry);
                 let group = colored_lore(&format!("&8⇨ &f{}", group.name));
@@ -753,14 +781,14 @@ fn search_matches(
     query: &str,
     month: i32,
     show_hidden: bool,
-    allow_output_chest: bool,
+    availability: Availability,
 ) -> impl Iterator<Item = (&'static Group, &'static Entry)> {
     let query = strip_colors(query).to_lowercase();
     GROUPS
         .iter()
         .filter(move |group| show_hidden || group.in_season(month))
         .flat_map(|group| named_group_entries(group).map(move |(id, entry)| (group, id, entry)))
-        .filter(move |(_, _, entry)| visible(entry, allow_output_chest))
+        .filter(move |(_, _, entry)| availability.allows(entry))
         .filter_map(move |(group, id, entry)| {
             (id.to_ascii_lowercase().contains(&query)
                 || strip_colors(&entry_name(entry))
@@ -1026,7 +1054,7 @@ mod tests {
             .iter()
             .find(|group| group.key == "basicMachines")
             .unwrap();
-        let menu = render(&host, None, &Page::Group(basic, 1), 1, false, true);
+        let menu = render(&host, None, &Page::Group(basic, 1), 1, false, available());
         assert_eq!(menu.slots.len(), 54);
         let craft = lookup("ENHANCED_CRAFTING_TABLE").unwrap();
         assert!(menu.actions.iter().any(|action| matches!(
@@ -1039,12 +1067,19 @@ mod tests {
             "PlayerPersisted".into(),
             Tag::compound([("slimefun:grind_stone", Tag::Byte(1))]),
         )]);
-        let menu = render(&host, Some(&learned), &Page::Group(basic, 1), 1, false, true);
+        let menu = render(
+            &host,
+            Some(&learned),
+            &Page::Group(basic, 1),
+            1,
+            false,
+            available(),
+        );
         let grind = lookup("GRIND_STONE").unwrap();
         assert!(menu.actions.iter().any(|action| matches!(
             action, Some(Action::Push(Page::Recipe(entry))) if std::ptr::eq(*entry, grind)
         )));
-        let recipe = render(&host, None, &Page::Recipe(craft), 1, false, true);
+        let recipe = render(&host, None, &Page::Recipe(craft), 1, false, available());
         let shown = |slot: usize| {
             recipe.slots[slot]
                 .as_ref()
@@ -1088,7 +1123,7 @@ mod tests {
             .resolve_items(MATERIALS.iter().map(|id| Identifier::parse(id).unwrap()))
             .unwrap();
         let table = lookup("TABLE_SAW").unwrap();
-        let menu = render(&host, None, &Page::Recipe(table), 1, false, true);
+        let menu = render(&host, None, &Page::Recipe(table), 1, false, available());
         for (slot, material) in [
             (12, "smooth_stone_slab"),
             (13, "stonecutter"),
@@ -1116,7 +1151,7 @@ mod tests {
         ] {
             let miner = lookup(id).unwrap();
             assert_eq!(miner.research.unwrap().cost, cost);
-            let shown = render(&host, None, &Page::Recipe(miner), 1, false, true);
+            let shown = render(&host, None, &Page::Recipe(miner), 1, false, available());
             assert_eq!(
                 shown.slots[13].as_ref().unwrap().item().id(&host),
                 "minecraft:chest"
@@ -1159,7 +1194,7 @@ mod tests {
         );
         assert_eq!(sifted.research.unwrap().id, "ore_washer");
         let circuit = lookup("BASIC_CIRCUIT_BOARD").unwrap();
-        let shown = render(&host, None, &Page::Recipe(circuit), 1, false, true);
+        let shown = render(&host, None, &Page::Recipe(circuit), 1, false, available());
         let head = shown.slots[13].as_ref().unwrap();
         assert_eq!(head.item().id(&host), "minecraft:player_head");
         assert!(
@@ -1179,18 +1214,69 @@ mod tests {
         let craft = lookup("ENHANCED_CRAFTING_TABLE").unwrap();
         for query in ["§aENHANCED_crafting_TABLE", "enhanced crafting table"] {
             assert!(
-                search_matches(query, 1, false, true).any(|(_, entry)| std::ptr::eq(entry, craft))
+                search_matches(query, 1, false, available())
+                    .any(|(_, entry)| std::ptr::eq(entry, craft))
             );
         }
-        assert_eq!(search_matches("", 1, false, true).count(), 35);
-        assert_eq!(search_matches("does not exist", 1, false, true).count(), 0);
-        assert!(search_matches("output_chest", 1, false, true).count() > 0);
-        assert_eq!(search_matches("output_chest", 1, false, false).count(), 0);
+        assert_eq!(search_matches("", 1, false, available()).count(), 35);
+        assert_eq!(
+            search_matches("does not exist", 1, false, available()).count(),
+            0
+        );
+        assert!(search_matches("output_chest", 1, false, available()).count() > 0);
+        assert_eq!(
+            search_matches(
+                "output_chest",
+                1,
+                false,
+                Availability {
+                    output_chest: false,
+                    ..available()
+                }
+            )
+            .count(),
+            0
+        );
         assert_eq!(search_title("§bCoal"), "Searching for: Coal");
         assert_eq!(
             search_title("012345678901234567890"),
             "Searching for: 0123456789012345..."
         );
+    }
+
+    fn available() -> Availability {
+        Availability {
+            output_chest: true,
+            tickers: Tickers::default(),
+        }
+    }
+
+    #[test]
+    fn disabled_tickers_disappear_from_search_without_hiding_cargo_nodes() {
+        let unavailable = Availability {
+            tickers: Tickers::disabled(),
+            ..available()
+        };
+        assert!(
+            search_matches("cargo_manager", 1, false, available())
+                .next()
+                .is_some()
+        );
+        assert!(
+            search_matches("cargo_manager", 1, true, unavailable)
+                .next()
+                .is_none()
+        );
+        assert!(
+            search_matches("cargo_node_input", 1, false, unavailable)
+                .next()
+                .is_some()
+        );
+        assert!(!unavailable.allows(lookup("ELECTRIC_FURNACE_3").unwrap()));
+        assert!(unavailable.allows(lookup("SOLAR_GENERATOR_4").unwrap()));
+        let hidden_topic = lookup("ELECTRIC_FURNACE").unwrap().research.unwrap();
+        assert!(!research_available(hidden_topic.id, unavailable.tickers));
+        assert!(research_available("cargo_nodes", unavailable.tickers));
     }
 
     #[test]
@@ -1203,7 +1289,7 @@ mod tests {
             )
             .unwrap();
         let groups = |month, show_hidden| {
-            render(&host, None, &Page::Main, month, show_hidden, true)
+            render(&host, None, &Page::Main, month, show_hidden, available())
                 .actions
                 .into_iter()
                 .filter_map(|action| match action {
@@ -1219,9 +1305,15 @@ mod tests {
         ] {
             assert!(!groups(11, true).contains(&key));
             assert!(groups(month, false).contains(&key));
-            assert!(!search_matches(query, 11, false, true).any(|(group, _)| group.key == key));
-            assert!(search_matches(query, month, false, true).any(|(group, _)| group.key == key));
-            assert!(search_matches(query, 11, true, true).any(|(group, _)| group.key == key));
+            assert!(
+                !search_matches(query, 11, false, available()).any(|(group, _)| group.key == key)
+            );
+            assert!(
+                search_matches(query, month, false, available()).any(|(group, _)| group.key == key)
+            );
+            assert!(
+                search_matches(query, 11, true, available()).any(|(group, _)| group.key == key)
+            );
         }
         let guide = Guide::default();
         let config: toml::Table = "[guide]\nshow-hidden-item-groups-in-search = true"

@@ -242,6 +242,9 @@ impl ItemPart for NetworkPlacement {
             return Some(InteractionResult::Fail);
         }
         if let HostSide::Server(host) = host {
+            if crate::ticker_policy::Tickers::current().blocks_stack(event.stack) {
+                return Some(InteractionResult::Fail);
+            }
             if crate::items::GOLD_24K_BLOCK.matches(host, event.stack)
                 && !host.player(event.player).is_some_and(|player| {
                     crate::research::can_use(host, player, &crate::recipes::GOLDEN_CITY)
@@ -278,7 +281,9 @@ impl ItemPart for NetworkPlacement {
         let Some(id) = item_id(event.stack) else {
             return;
         };
-        if !network_item(&id).is_some_and(|item| item.matches(host, event.stack)) {
+        if !crate::ticker_policy::Tickers::current().allows(&id)
+            || !network_item(&id).is_some_and(|item| item.matches(host, event.stack))
+        {
             return;
         }
         let Some(level) = host.level(host.dimension()) else {
@@ -1167,6 +1172,16 @@ pub(crate) fn has_block_marker(host: &mut dyn ServerHost, level: LevelRef, pos: 
                 || crate::ancient_altar::marked(host, entity)
         })
         || crate::hologram_projector::marked(host, level, pos)
+}
+
+pub(crate) fn clicks_disabled_ticker(
+    host: &mut dyn ServerHost,
+    level: LevelRef,
+    pos: Position,
+    tickers: crate::ticker_policy::Tickers,
+) -> bool {
+    block_data(host, level, pos).is_some_and(|data| !tickers.allows(&data.id))
+        || crate::rainbow::placed::marked(host, level, pos)
 }
 
 fn block_data(host: &mut dyn ServerHost, level: LevelRef, pos: Position) -> Option<BlockData> {

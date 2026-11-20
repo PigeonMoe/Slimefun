@@ -260,6 +260,15 @@ pub(super) fn blocks_vanilla_station(id: &str) -> bool {
         })
 }
 
+pub(super) fn items_for_research(id: &str) -> impl Iterator<Item = Kind> {
+    CATALOG.values().filter_map(move |entry| {
+        entry
+            .research
+            .filter(|topic| topic.id == id)
+            .map(|_| entry.item.kind)
+    })
+}
+
 pub(super) fn research_topics() -> impl Iterator<Item = &'static Research> {
     CATALOG.values().filter_map(|item| item.research)
 }

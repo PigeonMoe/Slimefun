@@ -292,6 +292,9 @@ fn placeable_custom(id: &str) -> Option<CustomBlock> {
     if let Some(kind) = crate::ancient_altar::paper_device(id) {
         return Some(CustomBlock::Altar(kind));
     }
+    if !crate::ticker_policy::Tickers::current().allows(id) {
+        return None;
+    }
     let component = Component::for_item(id)?;
     if matches!(
         component,

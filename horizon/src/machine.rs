@@ -476,14 +476,16 @@ impl Machine {
                     Ok(())
                 }
                 Self::Crafting | Self::MagicCrafting { .. } | Self::ArmorCrafting => {
+                    let tickers = crate::ticker_policy::Tickers::current();
                     let matches_inputs = |recipe: &&crate::recipes::CraftingRecipe| {
-                        recipe.inputs.iter().zip(&slots).all(|(input, actual)| {
-                            match (input, actual) {
-                                (None, None) => true,
-                                (Some(input), Some(actual)) => input.matches(host, actual),
-                                _ => false,
-                            }
-                        })
+                        tickers.allows_recipe(recipe)
+                            && recipe.inputs.iter().zip(&slots).all(|(input, actual)| {
+                                match (input, actual) {
+                                    (None, None) => true,
+                                    (Some(input), Some(actual)) => input.matches(host, actual),
+                                    _ => false,
+                                }
+                            })
                     };
                     let recipe = match self {
                         Self::MagicCrafting { .. } => {

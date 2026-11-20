@@ -138,11 +138,24 @@ pub(crate) struct Placement;
 
 #[mod_api::horizon_part]
 impl ItemPart for Placement {
+    fn use_on(
+        &self,
+        host: mod_api::HostSide<'_>,
+        event: &mut mod_api::UseOnEvent<'_>,
+    ) -> Option<mod_api::InteractionResult> {
+        (matches!(host, mod_api::HostSide::Server(_))
+            && crate::ticker_policy::Tickers::current().blocks_stack(event.stack))
+        .then_some(mod_api::InteractionResult::Fail)
+    }
+
     fn on_block_placed_by(&self, host: &mut dyn ServerHost, event: &mut OnBlockPlacedByEvent<'_>) {
         let Some((_, rainbow)) = item_id(event.stack).and_then(|id| block(&id)) else {
             return;
         };
-        if event.placer.is_none() || !rainbow.kind.matches(host, event.stack) {
+        if event.placer.is_none()
+            || !crate::ticker_policy::Tickers::current().allows(rainbow.kind.id())
+            || !rainbow.kind.matches(host, event.stack)
+        {
             return;
         }
         let Some(level) = host.level(host.dimension()) else {
