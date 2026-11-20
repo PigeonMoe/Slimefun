@@ -286,6 +286,20 @@
       "name": "&e&l蜂翅"
     },
     "BIG_CAPACITOR": {
+      "lore": [
+        {
+          "source": "&7Range: &c6 blocks",
+          "target": "&7范围: &c6 格"
+        },
+        {
+          "source": "&aMedium Capacitor",
+          "target": "&a中级电容"
+        },
+        {
+          "source": "&8⇨ &e⚡ &71024 J Capacity",
+          "target": "&8⇨ &e⚡ &71024 J 可储存"
+        }
+      ],
       "name": "&a大型储能电容"
     },
     "BILLON_INGOT": {
@@ -440,6 +454,20 @@
       "name": "&b&l黑金刚石"
     },
     "CARBONADO_EDGED_CAPACITOR": {
+      "lore": [
+        {
+          "source": "&7Range: &c6 blocks",
+          "target": "&7范围: &c6 格"
+        },
+        {
+          "source": "&4End-Game Capacitor",
+          "target": "&4终局电容"
+        },
+        {
+          "source": "&8⇨ &e⚡ &765536 J Capacity",
+          "target": "&8⇨ &e⚡ &765536 J 可储存"
+        }
+      ],
       "name": "&a黑金刚石镶边储能电容"
     },
     "CARBONADO_EDGED_FURNACE": {
@@ -1169,6 +1197,20 @@
       "name": "&5末影巫师护身符"
     },
     "ENERGIZED_CAPACITOR": {
+      "lore": [
+        {
+          "source": "&7Range: &c6 blocks",
+          "target": "&7范围: &c6 格"
+        },
+        {
+          "source": "&4End-Game Capacitor",
+          "target": "&4终局电容"
+        },
+        {
+          "source": "&8⇨ &e⚡ &7524288 J Capacity",
+          "target": "&8⇨ &e⚡ &7524288 J 可储存"
+        }
+      ],
       "name": "&a终极储能电容"
     },
     "ENERGY_CONNECTOR": {
@@ -2021,6 +2063,20 @@
       "name": "&e中型背包"
     },
     "LARGE_CAPACITOR": {
+      "lore": [
+        {
+          "source": "&7Range: &c6 blocks",
+          "target": "&7范围: &c6 格"
+        },
+        {
+          "source": "&2Good Capacitor",
+          "target": "&2优质电容"
+        },
+        {
+          "source": "&8⇨ &e⚡ &78192 J Capacity",
+          "target": "&8⇨ &e⚡ &78192 J 可储存"
+        }
+      ],
       "name": "&a巨型储能电容"
     },
     "LAVA_CRYSTAL": {
@@ -2163,6 +2219,20 @@
       "name": "&e普通背包"
     },
     "MEDIUM_CAPACITOR": {
+      "lore": [
+        {
+          "source": "&7Range: &c6 blocks",
+          "target": "&7范围: &c6 格"
+        },
+        {
+          "source": "&6Average Capacitor",
+          "target": "&6普通电容"
+        },
+        {
+          "source": "&8⇨ &e⚡ &7512 J Capacity",
+          "target": "&8⇨ &e⚡ &7512 J 可储存"
+        }
+      ],
       "name": "&a中型储能电容"
     },
     "MELON_JUICE": {
@@ -2181,6 +2251,16 @@
       "name": "&6怪物肉干"
     },
     "MULTIMETER": {
+      "lore": [
+        {
+          "source": "&fMeasures the Amount of stored",
+          "target": "&f测量方块内"
+        },
+        {
+          "source": "&fEnergy in a Block",
+          "target": "&f已储存的能量"
+        }
+      ],
       "name": "&e万用表"
     },
     "MUTTON_JERKY": {
@@ -3087,6 +3167,14 @@
     },
     "SMALL_CAPACITOR": {
       "lore": [
+        {
+          "source": "&7Range: &c6 blocks",
+          "target": "&7范围: &c6 格"
+        },
+        {
+          "source": "&eBasic Capacitor",
+          "target": "&e基础电容"
+        },
         {
           "source": "&8⇨ &e⚡ &7128 J Capacity",
           "target": "&8⇨ &e⚡ &7128 J 可储存"

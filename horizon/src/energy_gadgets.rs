@@ -9,10 +9,11 @@ use crate::{
     hologram_projector::colored_lore,
     items::{
         COPPER_INGOT, ENERGY_CONNECTOR, ENERGY_REGULATOR, GOLD_6K, REDSTONE_ALLOY,
-        REINFORCED_ALLOY_INGOT, SOLAR_PANEL, item, text,
+        REINFORCED_ALLOY_INGOT, SOLAR_PANEL, item,
     },
     network_recipes::MEDIUM_CAPACITOR,
     network_runtime,
+    networks::Component,
     recipes::{CraftingRecipe, Research, SOLAR_PANEL_AND_HELMET_RESEARCH, Stack},
     research,
 };
@@ -73,6 +74,8 @@ pub(crate) const CRAFTING: &[CraftingRecipe] = &[
 ];
 
 pub(crate) fn lore(id: &str) -> Option<Tag> {
+    const RANGE: &str = "&7Range: &c6 blocks";
+
     if id == ENERGY_REGULATOR.id() {
         return Some(Tag::List(vec![
             colored_lore(""),
@@ -82,7 +85,7 @@ pub(crate) fn lore(id: &str) -> Option<Tag> {
     if id == ENERGY_CONNECTOR.id() {
         return Some(Tag::List(
             [
-                "&7Range: &c6 blocks",
+                RANGE,
                 "",
                 "&fPlace this between machines",
                 "&fand generators to connect them",
@@ -94,19 +97,37 @@ pub(crate) fn lore(id: &str) -> Option<Tag> {
         ));
     }
 
-    let detail = if id == MULTIMETER.id() {
-        vec![
-            text("Measures the Amount of stored", "white", false),
-            text("Energy in a Block", "white", false),
-        ]
+    let capacitor_grade = match id {
+        "SMALL_CAPACITOR" => Some("&eBasic Capacitor"),
+        "MEDIUM_CAPACITOR" => Some("&6Average Capacitor"),
+        "BIG_CAPACITOR" => Some("&aMedium Capacitor"),
+        "LARGE_CAPACITOR" => Some("&2Good Capacitor"),
+        "CARBONADO_EDGED_CAPACITOR" | "ENERGIZED_CAPACITOR" => Some("&4End-Game Capacitor"),
+        _ => None,
+    };
+    if let Some(grade) = capacitor_grade {
+        let Component::Capacitor(capacity) = Component::for_item(id)? else {
+            return None;
+        };
+        return Some(Tag::List(vec![
+            colored_lore(RANGE),
+            colored_lore(""),
+            colored_lore(grade),
+            colored_lore(&format!("&8⇨ &e⚡ &7{capacity} J Capacity")),
+        ]));
+    }
+
+    let detail: &[&str] = if id == MULTIMETER.id() {
+        &["&fMeasures the Amount of stored", "&fEnergy in a Block"]
     } else if id == SOLAR_HELMET.id() {
-        vec![text("Charges held Items and Armor", "green", true)]
+        &["&a&oCharges held Items and Armor"]
     } else {
         return None;
     };
     Some(Tag::List(
-        std::iter::once(text("", "white", false))
-            .chain(detail)
+        std::iter::once("")
+            .chain(detail.iter().copied())
+            .map(colored_lore)
             .collect(),
     ))
 }

@@ -1482,6 +1482,45 @@ mod tests {
     }
 
     #[test]
+    fn capacitor_lore_keeps_the_paper_range_tier_and_capacity_on_each_stack() {
+        use crate::network_runtime::paper_text;
+
+        mod_api::__private::initialize().unwrap();
+        let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
+        let mut host = FakeHost::new();
+        host.registries
+            .resolve_items([Identifier::parse("minecraft:player_head").unwrap()])
+            .unwrap();
+        for (id, tier, capacity) in [
+            ("SMALL_CAPACITOR", "&e基础电容", 128),
+            ("MEDIUM_CAPACITOR", "&6普通电容", 512),
+            ("BIG_CAPACITOR", "&a中级电容", 1_024),
+            ("LARGE_CAPACITOR", "&2优质电容", 8_192),
+            ("CARBONADO_EDGED_CAPACITOR", "&4终局电容", 65_536),
+            ("ENERGIZED_CAPACITOR", "&4终局电容", 524_288),
+        ] {
+            let entry = lookup(id).unwrap();
+            let actual = entry.item.kind.stack(&host, 1).unwrap();
+            let guide = entry_icon(&host, entry, 1).unwrap();
+            let expected = [
+                "&7范围: &c6 格",
+                "",
+                tier,
+                &format!("&8⇨ &e⚡ &7{capacity} J 可储存"),
+            ]
+            .map(|line| paper_text(&colored_lore(line)).unwrap());
+            for stack in [actual, guide] {
+                let parts = stack.components().unwrap();
+                let Some(Tag::List(lore)) = parts.as_nbt().get(&"minecraft:lore".into()) else {
+                    panic!("missing lore on {id}");
+                };
+                let observed: Vec<_> = lore.iter().map(|line| paper_text(line).unwrap()).collect();
+                assert_eq!(observed, expected, "{id}");
+            }
+        }
+    }
+
+    #[test]
     fn exact_paper_machine_matrices_and_item_sources_are_visible_in_the_guide() {
         const MATERIALS: &[&str] = &[
             "minecraft:gray_stained_glass_pane",

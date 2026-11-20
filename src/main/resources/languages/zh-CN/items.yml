@@ -1380,21 +1380,65 @@ BIO_REACTOR:
   name: '&2生物发电机'
 MULTIMETER:
   name: '&e万用表'
+  lore:
+  - source: '&fMeasures the Amount of stored'
+    target: '&f测量方块内'
+  - source: '&fEnergy in a Block'
+    target: '&f已储存的能量'
 SMALL_CAPACITOR:
   name: '&a小型储能电容'
   lore:
+  - source: '&7Range: &c6 blocks'
+    target: '&7范围: &c6 格'
+  - source: '&eBasic Capacitor'
+    target: '&e基础电容'
   - source: '&8⇨ &e⚡ &7128 J Capacity'
     target: '&8⇨ &e⚡ &7128 J 可储存'
 MEDIUM_CAPACITOR:
   name: '&a中型储能电容'
+  lore:
+  - source: '&7Range: &c6 blocks'
+    target: '&7范围: &c6 格'
+  - source: '&6Average Capacitor'
+    target: '&6普通电容'
+  - source: '&8⇨ &e⚡ &7512 J Capacity'
+    target: '&8⇨ &e⚡ &7512 J 可储存'
 BIG_CAPACITOR:
   name: '&a大型储能电容'
+  lore:
+  - source: '&7Range: &c6 blocks'
+    target: '&7范围: &c6 格'
+  - source: '&aMedium Capacitor'
+    target: '&a中级电容'
+  - source: '&8⇨ &e⚡ &71024 J Capacity'
+    target: '&8⇨ &e⚡ &71024 J 可储存'
 LARGE_CAPACITOR:
   name: '&a巨型储能电容'
+  lore:
+  - source: '&7Range: &c6 blocks'
+    target: '&7范围: &c6 格'
+  - source: '&2Good Capacitor'
+    target: '&2优质电容'
+  - source: '&8⇨ &e⚡ &78192 J Capacity'
+    target: '&8⇨ &e⚡ &78192 J 可储存'
 CARBONADO_EDGED_CAPACITOR:
   name: '&a黑金刚石镶边储能电容'
+  lore:
+  - source: '&7Range: &c6 blocks'
+    target: '&7范围: &c6 格'
+  - source: '&4End-Game Capacitor'
+    target: '&4终局电容'
+  - source: '&8⇨ &e⚡ &765536 J Capacity'
+    target: '&8⇨ &e⚡ &765536 J 可储存'
 ENERGIZED_CAPACITOR:
   name: '&a终极储能电容'
+  lore:
+  - source: '&7Range: &c6 blocks'
+    target: '&7范围: &c6 格'
+  - source: '&4End-Game Capacitor'
+    target: '&4终局电容'
+  - source: '&8⇨ &e⚡ &7524288 J Capacity'
+    target: '&8⇨ &e⚡ &7524288 J 可储存'
 PROGRAMMABLE_ANDROID:
   name: '&c可编程式机器人 &7(普通)'
   lore:
