@@ -79,6 +79,10 @@ pub(crate) fn is_guide_book(host: &dyn Host, item: &ItemStack) -> bool {
     book_mode(host, item).is_some()
 }
 
+pub(crate) fn blocks_vanilla_station(item: &ItemStack) -> bool {
+    crate::items::item_id(item).is_some_and(|id| catalog::blocks_vanilla_station(&id))
+}
+
 pub(crate) fn research_topics() -> impl Iterator<Item = &'static Research> {
     catalog::research_topics()
 }
@@ -871,6 +875,37 @@ fn icon(host: &dyn Host, material: &'static str, name: &str, lore: &[&str]) -> O
 mod tests {
     use super::*;
     use mod_api::{Identifier, prelude::PlayersHost, testing::FakeHost};
+
+    #[test]
+    fn vanilla_stations_keep_plain_unknown_and_vanilla_wrapped_items() {
+        let mut host = FakeHost::new();
+        host.registries
+            .resolve_items([Identifier::parse("minecraft:glass_bottle").unwrap()])
+            .unwrap();
+        let normal = Kind::Vanilla("minecraft:glass_bottle")
+            .stack(&host, 1)
+            .unwrap();
+        assert!(!blocks_vanilla_station(&normal));
+        for (id, blocks) in [
+            ("FLASK_OF_KNOWLEDGE", true),
+            ("ENHANCED_CRAFTING_TABLE", true),
+            ("QA_UNREGISTERED_FLASK", false),
+            ("CHAIN_HELMET", false),
+            ("flask_of_knowledge", false),
+        ] {
+            let mut marked = normal.clone();
+            marked
+                .set_components(Compound::from([(
+                    "minecraft:custom_data".into(),
+                    Tag::compound([(
+                        "PublicBukkitValues",
+                        Tag::compound([(crate::items::ID_KEY, Tag::String(id.into()))]),
+                    )]),
+                )]))
+                .unwrap();
+            assert_eq!(blocks_vanilla_station(&marked), blocks, "{id}");
+        }
+    }
 
     #[test]
     fn the_paper_book_has_the_original_mode_and_only_a_supported_book_opens() {

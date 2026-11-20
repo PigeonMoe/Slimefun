@@ -246,6 +246,20 @@ pub(super) fn lookup(id: &str) -> Option<&'static Entry> {
     CATALOG.get(&canonical(id))
 }
 
+pub(super) fn blocks_vanilla_station(id: &str) -> bool {
+    if !id.bytes().all(|ch| ch.is_ascii_uppercase() || ch.is_ascii_digit() || ch == b'_') {
+        return false;
+    }
+    if let Some(entry) = CATALOG.get(id) {
+        return entry.label.is_some() || matches!(entry.item.kind, Kind::Slimefun(_));
+    }
+    crate::rainbow::item(id).is_some()
+        || include_str!("stock.tsv").lines().any(|line| {
+            line.split_once('\t')
+                .is_some_and(|(_, items)| items.split_ascii_whitespace().any(|item| item == id))
+        })
+}
+
 pub(super) fn research_topics() -> impl Iterator<Item = &'static Research> {
     CATALOG.values().filter_map(|item| item.research)
 }

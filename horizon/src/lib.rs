@@ -655,6 +655,47 @@ impl Hooks for Slimefun {
         }
     }
 
+    fn inventory_stack_move(
+        &self,
+        host: &dyn mod_api::Host,
+        event: &mut mod_api::InventoryStackMoveEvent<'_>,
+    ) -> Flow {
+        if guide::blocks_vanilla_station(event.stack)
+            && host.level(event.dimension).is_some_and(|level| {
+                level
+                    .block(host, event.destination)
+                    .is_some_and(|block| block.id(host) == "minecraft:brewing_stand")
+            })
+        {
+            Flow::Cancel
+        } else {
+            Flow::Continue
+        }
+    }
+
+    fn brewing_stand_click(
+        &self,
+        _: &dyn mod_api::Host,
+        event: &mut mod_api::BrewingStandClickEvent<'_>,
+    ) -> Flow {
+        if event.hotbar_swap {
+            return Flow::Cancel;
+        }
+        let offered = if event.player_slot {
+            event.clicked
+        } else {
+            event.carried
+        };
+        if offered.is_some_and(guide::blocks_vanilla_station) {
+            let mut notice = Text::literal("You cannot use Slimefun items in a brewing stand!");
+            notice.style.color = Some("dark_red".into());
+            *event.notice = Some(notice);
+            Flow::Cancel
+        } else {
+            Flow::Continue
+        }
+    }
+
     fn piston_pre(&self, level: &dyn LevelHost, event: &mut mod_api::PistonPreEvent<'_>) -> Flow {
         if network_runtime::protect_piston(level, event) || hologram_projector::piston_protected(level, event) {
             Flow::Cancel
@@ -1703,7 +1744,7 @@ impl Hooks for Slimefun {
 }
 
 fn vanilla_station_blocks(host: &dyn mod_api::Host, item: &mod_api::ItemStack) -> bool {
-    items::item_id(item).is_some() || guide::is_guide_book(host, item)
+    guide::blocks_vanilla_station(item) || guide::is_guide_book(host, item)
 }
 
 fn describe_recipe(id: &str, double_ores: bool) -> Vec<String> {
