@@ -321,6 +321,13 @@ impl Slimefun {
         {
             self.magic_weapons.configure(chance as u8);
         }
+        self.magic_weapons.configure_blast(
+            table
+                .get("explosive-bow")
+                .and_then(|section| section.get("explosion-range"))
+                .and_then(toml::Value::as_integer)
+                .and_then(|range| i32::try_from(range).ok()),
+        );
         ancient_altar::configure(
             table
                 .get("ancient-altar")
@@ -590,6 +597,7 @@ impl Hooks for Slimefun {
         event: &mut mod_api::ArrowContactPostEvent<'_>,
     ) {
         self.grapple.contact(host, event);
+        self.magic_weapons.contact(host, event);
     }
 
     fn entity_join_level(

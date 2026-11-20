@@ -4,19 +4,19 @@ use std::{
     collections::BTreeMap,
     sync::{
         Mutex, OnceLock,
-        atomic::{AtomicU8, Ordering},
+        atomic::{AtomicI32, AtomicU8, Ordering},
     },
 };
 
 use mod_api::{
-    ActiveEffect, Compound, EntityShootBowEvent, Hand, Host, HurtSource, ItemKey, ItemPlace,
-    ItemStack, LevelRef, LivingDamagePostEvent, LivingIncomingDamageEvent, ProjectileImpactEvent,
-    Registrar, ServerHost, SoundSource, Tag,
+    ActiveEffect, ArrowContactPostEvent, Compound, EntityShootBowEvent, Hand, Host, HurtSource,
+    ItemKey, ItemPlace, ItemStack, LevelRef, LivingDamagePostEvent, LivingIncomingDamageEvent,
+    ParticleKey, ProjectileImpactEvent, Registrar, ServerHost, SoundSource, Tag,
 };
 
 use crate::{
-    elemental_staves::STAFF_ELEMENTAL_WATER,
-    items::{Kind, item, item_id, text},
+    elemental_staves::{STAFF_ELEMENTAL_FIRE, STAFF_ELEMENTAL_WATER},
+    items::{Kind, SULFATE, item, item_id, text},
     random::Rolls,
     recipes::{CraftingRecipe, Research, Stack},
     research,
@@ -31,6 +31,11 @@ item!(
     None
 );
 item!(ICY_BOW, "bow", "Icy Bow", "aqua", None, None);
+item!(EXPLOSIVE_BOW, "bow", "Explosive Bow", "red", None, None);
+
+#[path = "explosive_bow.rs"]
+mod explosive_bow;
+use explosive_bow::Blast;
 
 pub(crate) const VAMPIRES: Research = Research {
     id: "blade_of_vampires",
@@ -46,6 +51,7 @@ pub(crate) const BOWS: Research = Research {
 const STICK: Option<Kind> = Some(Kind::Vanilla("minecraft:stick"));
 const ICE: Option<Kind> = Some(Kind::Vanilla("minecraft:ice"));
 const SKULL: Option<Kind> = Some(Kind::Vanilla("minecraft:wither_skeleton_skull"));
+const GUNPOWDER: Option<Kind> = Some(Kind::Vanilla("minecraft:gunpowder"));
 
 pub(crate) const CRAFTING: &[CraftingRecipe] = &[
     CraftingRecipe {
@@ -84,6 +90,24 @@ pub(crate) const CRAFTING: &[CraftingRecipe] = &[
         },
         research: &BOWS,
     },
+    CraftingRecipe {
+        inputs: [
+            None,
+            STICK,
+            GUNPOWDER,
+            Some(STAFF_ELEMENTAL_FIRE),
+            None,
+            Some(SULFATE),
+            None,
+            STICK,
+            GUNPOWDER,
+        ],
+        output: Stack {
+            kind: EXPLOSIVE_BOW,
+            count: 1,
+        },
+        research: &BOWS,
+    },
 ];
 
 pub(crate) fn decorate(id: &str, components: &mut Compound) {
@@ -113,6 +137,13 @@ pub(crate) fn decorate(id: &str, components: &mut Compound) {
         .into_iter()
         .map(|line| text(line, "white", false))
         .collect(),
+        "EXPLOSIVE_BOW" => [
+            "Any Arrows fired using this Bow",
+            "will launch hit enemys into the air",
+        ]
+        .into_iter()
+        .map(|line| text(line, "white", false))
+        .collect(),
         _ => return,
     };
     components.insert("minecraft:lore".into(), Tag::List(lore));
@@ -122,6 +153,7 @@ pub(crate) fn decorate(id: &str, components: &mut Compound) {
 enum Reaction {
     Heal(u32),
     Freeze { level: LevelRef, victim: u32 },
+    Explode(Blast),
 }
 
 type Hit = (i32, i32, i32);
@@ -146,7 +178,9 @@ pub(crate) struct Weapons {
     state: Mutex<State>,
     sword: OnceLock<ItemKey>,
     bow: OnceLock<ItemKey>,
+    blast_particle: OnceLock<ParticleKey>,
     chance: AtomicU8,
+    blast_range: AtomicI32,
 }
 
 impl Default for Weapons {
@@ -155,7 +189,9 @@ impl Default for Weapons {
             state: Mutex::new(State::default()),
             sword: OnceLock::new(),
             bow: OnceLock::new(),
+            blast_particle: OnceLock::new(),
             chance: AtomicU8::new(45),
+            blast_range: AtomicI32::new(3),
         }
     }
 }
@@ -170,25 +206,37 @@ impl Weapons {
             .sword
             .set(registrar.item_key(BLADE_OF_VAMPIRES.material()));
         let _ = self.bow.set(registrar.item_key(ICY_BOW.material()));
+        let _ = self
+            .blast_particle
+            .set(registrar.particle_key("minecraft:explosion"));
     }
 
     pub(crate) fn configure(&self, chance: u8) {
         self.chance.store(chance, Ordering::Relaxed);
     }
 
+    pub(crate) fn configure_blast(&self, range: Option<i32>) {
+        self.blast_range.store(
+            range.filter(|&range| range > 0).unwrap_or(3),
+            Ordering::Relaxed,
+        );
+    }
+
     pub(crate) fn shot(&self, host: &mut dyn ServerHost, event: &EntityShootBowEvent<'_>) {
         let Some(player) = host.player(event.player) else {
             return;
         };
-        let shot_icy = [Hand::Main, Hand::Off].into_iter().any(|hand| {
+        let shot_special_bow = [Hand::Main, Hand::Off].into_iter().any(|hand| {
             ItemPlace::PlayerHand {
                 player: player.uuid(),
                 hand,
             }
             .stack(host)
-            .is_some_and(|stack| ICY_BOW.matches(host, &stack))
+            .is_some_and(|stack| {
+                ICY_BOW.matches(host, &stack) || EXPLOSIVE_BOW.matches(host, &stack)
+            })
         });
-        if !shot_icy
+        if !shot_special_bow
             || !host
                 .entity(event.projectile)
                 .and_then(|entity| entity.kind(host))
@@ -246,11 +294,23 @@ impl Weapons {
                 let level = projectile
                     .and_then(|projectile| state.shots.remove(&projectile))
                     .map(|shot| shot.level);
-                match (level, victim) {
-                    (Some(level), Some(victim))
+                match (level, victim, projectile) {
+                    (Some(level), Some(victim), _)
                         if tagged(event.weapon, self.bow.get(), ICY_BOW.id()) =>
                     {
                         Some(Reaction::Freeze { level, victim })
+                    }
+                    (Some(level), Some(victim), Some(projectile))
+                        if tagged(event.weapon, self.bow.get(), EXPLOSIVE_BOW.id()) =>
+                    {
+                        Some(Reaction::Explode(Blast {
+                            level,
+                            victim,
+                            projectile,
+                            owner: u32::try_from(source.causing).unwrap_or(0),
+                            origin: event.victim.position,
+                            damage: event.container.original(),
+                        }))
                     }
                     _ => None,
                 }
@@ -285,6 +345,37 @@ impl Weapons {
         }
     }
 
+    pub(crate) fn contact(&self, host: &mut dyn ServerHost, event: &ArrowContactPostEvent<'_>) {
+        if let Some(blast) = self.take_blast(event.contact, event.projectile) {
+            self.explode(host, blast);
+        }
+    }
+
+    fn take_blast(&self, contact: &str, projectile: u32) -> Option<Blast> {
+        if contact != "damage" {
+            return None;
+        }
+        let mut state = self.state.lock().unwrap();
+        let (index, blast) = state
+            .ready
+            .iter()
+            .enumerate()
+            .find_map(|(index, reaction)| match *reaction {
+                Reaction::Explode(blast) if blast.projectile == projectile => Some((index, blast)),
+                _ => None,
+            })?;
+        state.ready.remove(index);
+        Some(blast)
+    }
+
+    fn explode(&self, host: &mut dyn ServerHost, blast: Blast) {
+        blast.apply(
+            host,
+            self.blast_range.load(Ordering::Relaxed),
+            self.blast_particle.get().copied(),
+        );
+    }
+
     pub(crate) fn tick(&self, host: &mut dyn ServerHost, current: LevelRef, rolls: &Rolls) {
         let mut reactions = {
             let mut state = self.state.lock().unwrap();
@@ -313,6 +404,14 @@ impl Weapons {
                 freeze(host, level, victim);
                 false
             }
+            Reaction::Explode(blast) => {
+                if blast.level != current {
+                    return true;
+                }
+                // A shield can keep a valid zero-health-damage event from completing arrow contact.
+                self.explode(host, blast);
+                false
+            }
         });
         self.state.lock().unwrap().ready.extend(reactions);
     }
@@ -322,8 +421,11 @@ impl Weapons {
             |level: LevelRef| level.dimension().id(host).as_deref() == Some(dimension);
         let mut state = self.state.lock().unwrap();
         state.shots.retain(|_, shot| !same_dimension(shot.level));
-        state.ready.retain(|reaction| {
-            !matches!(reaction, Reaction::Freeze { level, .. } if same_dimension(*level))
+        state.ready.retain(|reaction| match reaction {
+            Reaction::Heal(_) => true,
+            Reaction::Freeze { level, .. } | Reaction::Explode(Blast { level, .. }) => {
+                !same_dimension(*level)
+            }
         });
     }
 
@@ -454,6 +556,103 @@ mod tests {
                 "minecraft:ice"
             ],
         );
+    }
+
+    #[test]
+    fn explosive_bow_uses_papers_recipe_and_only_spends_an_admitted_normal_arrow() {
+        use mod_api::{DamageContainer, Victim, WorldEpoch};
+
+        let recipe = CRAFTING
+            .iter()
+            .find(|recipe| recipe.output.kind == EXPLOSIVE_BOW)
+            .unwrap();
+        assert_eq!(recipe.research.id, "special_bows");
+        assert_eq!(
+            recipe.inputs.map(|item| item.map_or("", Kind::id)),
+            [
+                "",
+                "minecraft:stick",
+                "minecraft:gunpowder",
+                "STAFF_ELEMENTAL_FIRE",
+                "",
+                "SULFATE",
+                "",
+                "minecraft:stick",
+                "minecraft:gunpowder",
+            ]
+        );
+        let mut host = FakeHost::new();
+        host.registries
+            .resolve_items([Identifier::parse(EXPLOSIVE_BOW.material()).unwrap()])
+            .unwrap();
+        let explosive = EXPLOSIVE_BOW.stack(&host, 1).unwrap();
+        let plain = ItemStack::new(explosive.item(), 1).unwrap();
+        let weapons = Weapons::default();
+        weapons.bow.set(explosive.item()).unwrap();
+        let level = LevelRef::new(
+            WorldEpoch::new(1),
+            mod_api::__private::dimension_key("minecraft:overworld"),
+        );
+        let victim = Victim {
+            position: [10.0, 64.0, 15.0],
+            view: [0.0, 0.0, 1.0],
+        };
+        let source = |projectile| HurtSource {
+            damage_type: "minecraft:arrow",
+            causing: 7,
+            direct: projectile,
+            position: None,
+        };
+        let incoming = |projectile: i32, weapon| {
+            weapons.state.lock().unwrap().shots.insert(
+                projectile as u32,
+                Shot {
+                    level,
+                    expires: None,
+                },
+            );
+            weapons.incoming(&LivingIncomingDamageEvent {
+                entity: 15,
+                kind: "minecraft:pig",
+                source: &source(projectile),
+                victim: &victim,
+                weapon: Some(weapon),
+                container: &mut DamageContainer::new(9.0),
+                cancelled: false,
+            });
+        };
+        let admitted = |projectile| {
+            weapons.post(&LivingDamagePostEvent {
+                entity: 15,
+                kind: "minecraft:pig",
+                source: &source(projectile),
+                container: &DamageContainer::new(9.0),
+            })
+        };
+        incoming(40, &explosive);
+        // Another listener vetoed the damage; no damage-post followed.
+        assert!(weapons.take_blast("damage", 40).is_none());
+        assert!(weapons.state.lock().unwrap().ready.is_empty());
+        incoming(41, &plain);
+        admitted(41);
+        assert!(weapons.state.lock().unwrap().ready.is_empty());
+
+        incoming(42, &explosive);
+        admitted(42);
+        admitted(42);
+        assert!(weapons.take_blast("portal", 42).is_none());
+        {
+            let state = weapons.state.lock().unwrap();
+            let [Reaction::Explode(blast)] = state.ready.as_slice() else {
+                panic!("one admitted blast")
+            };
+            assert_eq!((blast.owner, blast.victim), (7, 15));
+            assert_eq!(blast.origin, victim.position);
+            assert_eq!(blast.damage, 9.0);
+        }
+        assert!(weapons.take_blast("damage", 42).is_some());
+        assert!(weapons.take_blast("damage", 42).is_none());
+        assert!(weapons.state.lock().unwrap().ready.is_empty());
     }
 
     #[test]
