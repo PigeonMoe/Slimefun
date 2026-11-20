@@ -9,9 +9,10 @@ use std::{
 };
 
 use mod_api::{
-    ActiveEffect, ArrowContactPostEvent, Compound, EntityShootBowEvent, Hand, Host, HurtSource,
-    ItemKey, ItemPlace, ItemStack, LevelRef, LivingDamagePostEvent, LivingIncomingDamageEvent,
-    ParticleKey, ProjectileImpactEvent, Registrar, ServerHost, SoundSource, Tag,
+    ActiveEffect, ArrowContactPostEvent, ArrowHitArmorStandPostEvent, Compound,
+    EntityShootBowEvent, Hand, Host, HurtSource, ItemKey, ItemPlace, ItemStack, LevelRef,
+    LivingDamagePostEvent, LivingIncomingDamageEvent, ParticleKey, ProjectileImpactEvent,
+    Registrar, ServerHost, SoundSource, Tag,
 };
 
 use crate::{
@@ -351,6 +352,28 @@ impl Weapons {
         }
     }
 
+    pub(crate) fn armor_stand_hit(
+        &self,
+        host: &mut dyn ServerHost,
+        event: &ArrowHitArmorStandPostEvent<'_>,
+    ) {
+        if let Some(blast) = self.take_stand_blast(event) {
+            self.explode(host, blast);
+        }
+    }
+
+    fn take_stand_blast(&self, event: &ArrowHitArmorStandPostEvent<'_>) -> Option<Blast> {
+        let shot = self.state.lock().unwrap().shots.remove(&event.projectile)?;
+        tagged(event.weapon, self.bow.get(), EXPLOSIVE_BOW.id()).then_some(Blast {
+            level: shot.level,
+            projectile: event.projectile,
+            owner: event.owner,
+            victim: event.stand,
+            origin: event.position,
+            damage: event.damage,
+        })
+    }
+
     fn take_blast(&self, contact: &str, projectile: u32) -> Option<Blast> {
         if contact != "damage" {
             return None;
@@ -653,6 +676,50 @@ mod tests {
         assert!(weapons.take_blast("damage", 42).is_some());
         assert!(weapons.take_blast("damage", 42).is_none());
         assert!(weapons.state.lock().unwrap().ready.is_empty());
+    }
+
+    #[test]
+    fn the_admitted_armor_stand_event_spends_one_tracked_explosive_arrow() {
+        use mod_api::WorldEpoch;
+
+        let mut host = FakeHost::new();
+        host.registries
+            .resolve_items([Identifier::parse(EXPLOSIVE_BOW.material()).unwrap()])
+            .unwrap();
+        let bow = EXPLOSIVE_BOW.stack(&host, 1).unwrap();
+        let plain = ItemStack::new(bow.item(), 1).unwrap();
+        let weapons = Weapons::default();
+        weapons.bow.set(bow.item()).unwrap();
+        let level = LevelRef::new(
+            WorldEpoch::new(1),
+            mod_api::__private::dimension_key("minecraft:overworld"),
+        );
+        let mut event = ArrowHitArmorStandPostEvent {
+            dimension: "minecraft:overworld",
+            projectile: 42,
+            owner: 7,
+            stand: 99,
+            position: [10.0, 69.0, 15.0],
+            damage: 13.0,
+            weapon: Some(&plain),
+        };
+        let track = || {
+            weapons.state.lock().unwrap().shots.insert(
+                42,
+                Shot {
+                    level,
+                    expires: None,
+                },
+            )
+        };
+        track();
+        assert!(weapons.take_stand_blast(&event).is_none());
+        track();
+        event.weapon = Some(&bow);
+        let blast = weapons.take_stand_blast(&event).unwrap();
+        assert_eq!((blast.victim, blast.owner), (99, 7));
+        assert_eq!((blast.origin, blast.damage), ([10.0, 69.0, 15.0], 13.0));
+        assert!(weapons.take_stand_blast(&event).is_none());
     }
 
     #[test]

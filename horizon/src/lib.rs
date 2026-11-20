@@ -596,6 +596,14 @@ impl Hooks for Slimefun {
         self.magic_weapons.contact(host, event);
     }
 
+    fn arrow_hit_armor_stand_post(
+        &self,
+        host: &mut dyn ServerHost,
+        event: &mut mod_api::ArrowHitArmorStandPostEvent<'_>,
+    ) {
+        self.magic_weapons.armor_stand_hit(host, event);
+    }
+
     fn entity_join_level(
         &self,
         host: &mut dyn ServerHost,

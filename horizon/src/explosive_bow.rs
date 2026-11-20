@@ -44,7 +44,7 @@ impl Blast {
         let Some(player) = owner
             .uuid(host)
             .and_then(|uuid| host.player(uuid))
-            .filter(|player| player.entity() == owner && owner.level(host) == Some(self.level))
+            .filter(|player| player.entity() == owner)
         else {
             return;
         };
