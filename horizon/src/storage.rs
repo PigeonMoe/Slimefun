@@ -128,11 +128,27 @@ pub(crate) fn decode_archived_slots(
 }
 
 pub(crate) fn validate_inventory_preset(row: &toml::Table, id: &str) -> Result<(), String> {
-    match row.get("inventory_preset").and_then(toml::Value::as_str) {
-        Some(preset) if preset == id => Ok(()),
-        Some(_) => Err("The Paper menu preset disagrees with the saved block ID.".into()),
+    match row.get("inventory_preset") {
+        Some(toml::Value::String(preset)) if preset == id => Ok(()),
+        Some(toml::Value::String(_)) => {
+            Err("The Paper menu preset disagrees with the saved block ID.".into())
+        }
+        Some(_) => Err("The Paper menu preset is invalid.".into()),
         None => Err("The archive does not identify the Paper menu preset.".into()),
     }
+}
+
+pub(crate) fn validate_block_inventory_preset(row: &toml::Table, id: &str) -> Result<(), String> {
+    // Paper BlockStorage falls back to the block ID when the file has no preset.
+    if !row.contains_key("inventory_preset")
+        && record_id(row) == Some(id)
+        && row.get("paper_inventory").is_some_and(toml::Value::is_str)
+        && has_restorable_menu(Component::for_item(id))
+        && !crate::auto_crafter::is_machine(id)
+    {
+        return Ok(());
+    }
+    validate_inventory_preset(row, id)
 }
 
 fn records<'a>(
@@ -491,7 +507,7 @@ fn restore_network(
     let inventory = decode_inventory(host, row)?;
     let has_archive = inventory.is_some();
     if has_archive {
-        validate_inventory_preset(row, id)?;
+        validate_block_inventory_preset(row, id)?;
     }
     let prepared = crate::factory::prepare_paper_inventory(
         host,
@@ -678,6 +694,51 @@ mod tests {
         old.insert("paper_items".into(), toml::Value::Array(vec![]));
         old.insert("inventory_slots".into(), 1.into());
         assert!(decode_inventory(&host, &old).is_err());
+    }
+
+    #[test]
+    fn a_presetless_paper_inventory_can_use_its_matching_stock_block_metadata() {
+        let archived = |id: &str| {
+            format!(
+                "paper_inventory = 'original Paper file'\n\
+                 inventory_slots = 1\n\
+                 paper_items = [{{slot = 19, id = 'minecraft:stone', count = 1, data_version = 4903, components = {{}}}}]\n\
+                 [metadata]\nid = '{id}'"
+            )
+            .parse::<toml::Table>()
+            .unwrap()
+        };
+        for id in [
+            "ELECTRIC_FURNACE",
+            "CARGO_NODE_INPUT",
+            "CARGO_NODE_OUTPUT_ADVANCED",
+        ] {
+            assert!(
+                validate_block_inventory_preset(&archived(id), id).is_ok(),
+                "{id}"
+            );
+        }
+
+        let mut row = archived("ELECTRIC_FURNACE");
+        assert!(validate_inventory_preset(&row, "ELECTRIC_FURNACE").is_err());
+        assert!(validate_block_inventory_preset(&row, "CARGO_NODE_INPUT").is_err());
+        row.insert("inventory_preset".into(), "ELECTRIC_FURNACE_2".into());
+        assert!(validate_block_inventory_preset(&row, "ELECTRIC_FURNACE").is_err());
+        row.insert("inventory_preset".into(), false.into());
+        assert!(validate_block_inventory_preset(&row, "ELECTRIC_FURNACE").is_err());
+        row.remove("inventory_preset");
+        row.remove("metadata");
+        assert!(validate_block_inventory_preset(&row, "ELECTRIC_FURNACE").is_err());
+        for id in [
+            "EXTENSION_MENU",
+            "CARGO_NODE_OUTPUT",
+            "ENHANCED_AUTO_CRAFTER",
+        ] {
+            assert!(
+                validate_block_inventory_preset(&archived(id), id).is_err(),
+                "{id}"
+            );
+        }
     }
 
     #[test]

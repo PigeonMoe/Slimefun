@@ -236,7 +236,7 @@ pub(crate) fn restore_paper(
         return Err("That Android already has a native owner and script.".into());
     }
     let items = if row.contains_key("paper_inventory") {
-        crate::storage::validate_inventory_preset(row, id)?;
+        crate::storage::validate_block_inventory_preset(row, id)?;
         crate::storage::decode_archived_slots(host, row, 54)?
     } else {
         BTreeMap::new()

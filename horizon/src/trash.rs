@@ -253,7 +253,7 @@ pub(super) fn restore(
     if matches!(existing.get(&RESTORED.into()), Some(Tag::Byte(1))) {
         return Ok(());
     }
-    crate::storage::validate_inventory_preset(row, TRASH_CAN_BLOCK.id())?;
+    crate::storage::validate_block_inventory_preset(row, TRASH_CAN_BLOCK.id())?;
     let items = crate::storage::decode_inventory(host, row)?.unwrap_or_default();
     let data = import_slots(host, existing, items)?;
     CONTENTS

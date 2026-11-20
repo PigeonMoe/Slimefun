@@ -577,7 +577,7 @@ impl Networks {
             && node.filters_items()
             && row.contains_key("paper_inventory")
         {
-            crate::storage::validate_inventory_preset(row, id)?;
+            crate::storage::validate_block_inventory_preset(row, id)?;
             if let Some(items) = crate::storage::decode_inventory(host, row)? {
                 for (slot, item) in items {
                     if !FILTER_SLOTS.contains(&(slot as usize)) {
