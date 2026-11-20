@@ -3,8 +3,8 @@
 use std::{collections::BTreeMap, ops::Range, sync::Mutex};
 
 use mod_api::{
-    AttachmentError, Compound, HostSide, HostTransaction, ITEMS, ItemKey, ItemResource, ItemStack,
-    LevelRef, ServerHost, Tag, Text, UseOnEvent,
+    AttachmentError, BlockEntityItemError, Compound, HostSide, HostTransaction, ITEMS, ItemKey,
+    ItemResource, ItemStack, LevelRef, ServerHost, StackWriteError, Tag, Text, UseOnEvent,
 };
 
 use super::{
@@ -195,9 +195,7 @@ pub(super) fn block_invalid_placement(host: HostSide<'_>, event: &UseOnEvent<'_>
         Component::CargoInput | Component::CargoOutput { advanced: false } => {
             &crate::network_recipes::CARGO_NODES
         }
-        Component::CargoOutput { advanced: true } => {
-            &crate::network_recipes::ADVANCED_OUTPUT_NODE
-        }
+        Component::CargoOutput { advanced: true } => &crate::network_recipes::ADVANCED_OUTPUT_NODE,
         _ => return false,
     };
     let Some(player) = host.player(event.player) else {
@@ -213,7 +211,10 @@ pub(super) fn block_invalid_placement(host: HostSide<'_>, event: &UseOnEvent<'_>
         );
         return true;
     }
-    if !matches!(component, Component::CargoInput | Component::CargoOutput { .. }) {
+    if !matches!(
+        component,
+        Component::CargoInput | Component::CargoOutput { .. }
+    ) {
         return false;
     }
     let Some(level) = player.entity().level(host) else {
@@ -869,6 +870,9 @@ fn move_to_first(
             .into_iter()
             .chain(output.kind.insert(host, size, stack))
         {
+            let direct_ingredient = matches!(output.kind, InventoryKind::Brewer)
+                && slot == 3
+                && destination.owner() == "the game";
             let current = destination
                 .resource(host, slot)
                 .and_then(|item| item.to_stack(destination.amount(host, slot)));
@@ -876,7 +880,8 @@ fn move_to_first(
                 if !similar(host, current, stack, true) {
                     continue;
                 }
-                if input.options.smart_fill
+                if !direct_ingredient
+                    && input.options.smart_fill
                     && current.count() >= destination.capacity(host, slot, &resource)
                 {
                     return Ok(0);
@@ -892,8 +897,24 @@ fn move_to_first(
             {
                 continue;
             }
-            let moved = destination.insert(host, tx, slot, &resource, stack.count());
+            let moved = if direct_ingredient {
+                // Paper writes the brewer's inventory directly. ITEMS follows hopper rules
+                // and rejects non-reagents even though Paper cargo sends them to this slot.
+                let brewer = host.block_entity(level, to).ok_or(())?;
+                let held = brewer.item_slot(host, 3).map_err(|_| ())?;
+                insert_brewing_ingredient(stack, &resource, held, |replacement| {
+                    brewer.set_item_slot(host, tx, 3, Some(replacement))
+                })
+                .map_err(|_| ())?
+            } else {
+                destination.insert(host, tx, slot, &resource, stack.count())
+            };
             if moved == 0 {
+                // A brewer has no other ingredient slot. A full matching stack
+                // leaves the delivery available to the next destination.
+                if direct_ingredient {
+                    return Ok(0);
+                }
                 continue;
             }
             return if source.extract(host, tx, source_slot, &resource, moved) == moved {
@@ -905,6 +926,36 @@ fn move_to_first(
         Ok(0)
     })
     .unwrap_or(0)
+}
+
+fn insert_brewing_ingredient(
+    incoming: &ItemStack,
+    resource: &ItemResource,
+    held: Option<ItemStack>,
+    mut write: impl FnMut(ItemStack) -> Result<bool, BlockEntityItemError>,
+) -> Result<u32, BlockEntityItemError> {
+    if held.as_ref().is_some_and(|held| !resource.matches(held)) {
+        return Ok(0);
+    }
+    let existing = held.as_ref().map_or(0, ItemStack::count);
+    let mut replacement = held.unwrap_or_else(|| incoming.clone());
+    let mut proposed = existing.saturating_add(incoming.count());
+    while proposed > existing {
+        replacement
+            .set_count(proposed)
+            .expect("room above the existing count");
+        // The API validates item components and their limit before checking the holder.
+        proposed = match write(replacement.clone()) {
+            Ok(true) => return Ok(proposed - existing),
+            Ok(false) => return Ok(0),
+            Err(BlockEntityItemError::StackRejected(StackWriteError::CountExceeded {
+                maximum,
+            })) if maximum < proposed => maximum,
+            Err(BlockEntityItemError::StackTooLarge { limit, .. }) if limit < proposed => limit,
+            Err(error) => return Err(error),
+        };
+    }
+    Ok(0)
 }
 
 #[cfg(test)]
@@ -942,6 +993,66 @@ mod tests {
         assert_eq!(furnace_input_slots(3, true, || true), 0..2);
         assert_eq!(furnace_input_slots(3, true, || false), 1..2);
         assert_eq!(furnace_input_slots(3, false, || unreachable!()), 0..1);
+    }
+
+    #[test]
+    fn cargo_brewing_ingredient_preserves_components_and_retries_both_stack_limits() {
+        let mut host = FakeHost::new();
+        let material = Identifier::parse("minecraft:dirt").unwrap();
+        host.registries.resolve_items([material.clone()]).unwrap();
+        let dirt = host.item_key(&material).unwrap();
+        let mut incoming = ItemStack::new(dirt, 3).unwrap();
+        incoming
+            .set_components(Compound::from([(
+                "minecraft:custom_data".into(),
+                Tag::compound([("cargo", Tag::Int(7))]),
+            )]))
+            .unwrap();
+        let resource = ItemResource::of(&incoming);
+        let brewer = InventoryKind::from_block("minecraft:brewing_stand").unwrap();
+        assert_eq!(brewer.insert(&host, 5, &incoming), 3..4);
+        assert_eq!(brewer.extract(5), 0..3);
+
+        assert_eq!(
+            insert_brewing_ingredient(&incoming, &resource, None, |replacement| {
+                assert_eq!(replacement, incoming);
+                Ok(true)
+            }),
+            Ok(3)
+        );
+
+        let held = resource.to_stack(63);
+        let mut proposals = Vec::new();
+        assert_eq!(
+            insert_brewing_ingredient(&incoming, &resource, held, |replacement| {
+                assert!(resource.matches(&replacement));
+                let count = replacement.count();
+                proposals.push(count);
+                match count {
+                    66 => Err(StackWriteError::CountExceeded { maximum: 65 }.into()),
+                    65 => Err(BlockEntityItemError::StackTooLarge { count, limit: 64 }),
+                    64 => Ok(true),
+                    _ => panic!("unexpected write count {count}"),
+                }
+            }),
+            Ok(1)
+        );
+        assert_eq!(proposals, [66, 65, 64]);
+        assert_eq!(
+            insert_brewing_ingredient(&incoming, &resource, ItemStack::new(dirt, 1), |_| {
+                panic!("a different component patch must never be overwritten")
+            }),
+            Ok(0)
+        );
+        assert_eq!(
+            insert_brewing_ingredient(&incoming, &resource, resource.to_stack(64), |stack| {
+                Err(BlockEntityItemError::StackTooLarge {
+                    count: stack.count(),
+                    limit: 64,
+                })
+            }),
+            Ok(0)
+        );
     }
 
     #[test]
