@@ -25,6 +25,54 @@ RESEARCH_SPEC.loader.exec_module(RESEARCH)
 
 
 class BlockStorageTest(unittest.TestCase):
+    def test_imports_paper_item_and_world_switches_under_distinct_settings(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            items = directory / "Items.yml"
+            items.write_text("""\
+CARGO_MANAGER:
+  enabled: false
+ENERGY_REGULATOR:
+  enabled: true
+  capacity: 256
+""", encoding="utf-8")
+            world = directory / "world-settings"
+            world.mkdir()
+            (world / "migrated.yml").write_text("""\
+enabled: true
+slimefun:
+  enabled: false
+  CARGO_NODE_OUTPUT: true
+  CARGO_NODE_INPUT: false
+another-addon:
+  enabled: false
+""", encoding="utf-8")
+            (world / "world_the_end.yml").write_text("enabled: false\n", encoding="utf-8")
+            mappings = {**IMPORT.WORLDS, "migrated": "test:creative"}
+            fragment = IMPORT.availability_fragment(items, world, mappings)
+            output = directory / "storage-import"
+            IMPORT.publish(output, {}, availability=fragment)
+            IMPORT.publish(output, {}, availability=fragment)
+            self.assertEqual(tomllib.loads((output / "settings-item-availability.toml").read_text()), {
+                "item-settings": {
+                    "CARGO_MANAGER": {"enabled": False},
+                    "ENERGY_REGULATOR": {"enabled": True},
+                },
+                "worlds": {
+                    "test:creative": {
+                        "enabled": True,
+                        "slimefun-enabled": False,
+                        "items": {"CARGO_NODE_INPUT": False, "CARGO_NODE_OUTPUT": True},
+                    },
+                    "minecraft:the_end": {"enabled": False},
+                },
+            })
+            with self.assertRaisesRegex(ValueError, "Add --map-world migrated"):
+                IMPORT.availability_fragment(items, world, IMPORT.WORLDS)
+            (world / "migrated.yml").write_text('slimefun: {ENERGY_REGULATOR: "off"}', encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "slimefun.ENERGY_REGULATOR must be a boolean"):
+                IMPORT.availability_fragment(items, world, mappings)
+
     def test_imports_only_stock_geo_switches_without_removing_saved_reserves(self):
         with tempfile.TemporaryDirectory() as tmp:
             directory = Path(tmp)

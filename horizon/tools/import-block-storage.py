@@ -211,6 +211,7 @@ def collect_universal(source):
 
 
 GEO_KEYS = ("slimefun-oil", "slimefun-nether_ice", "slimefun-uranium", "slimefun-salt")
+PAPER_ITEM_ID = re.compile(r"[A-Z][A-Z0-9_]*\Z")
 
 
 def collect_geo_settings(config):
@@ -226,6 +227,56 @@ def collect_geo_settings(config):
         if "enabled" in resource:
             settings[key] = resource["enabled"]
     return settings
+
+
+def boolean_setting(value, path):
+    if type(value) is not bool:
+        raise ValueError(f"{path} must be a boolean.")
+    return str(value).lower()
+
+
+def availability_fragment(item_config, world_settings, mappings):
+    sections = []
+    if item_config is not None:
+        items = mapping(item_config.read_text(encoding="utf-8"), item_config)
+        for item, data in sorted(items.items(), key=lambda row: str(row[0])):
+            if (isinstance(item, str) and PAPER_ITEM_ID.fullmatch(item)
+                    and isinstance(data, dict) and "enabled" in data):
+                enabled = boolean_setting(data["enabled"], f"{item_config}: {item}.enabled")
+                sections.append(f"[item-settings.{item}]\nenabled = {enabled}")
+    if world_settings is not None:
+        if not world_settings.is_dir():
+            raise ValueError(f"{world_settings} must be the Paper world-settings directory.")
+        dimensions = set()
+        for file in sorted(world_settings.glob("*.yml")):
+            dimension = mappings.get(file.stem)
+            if dimension is None:
+                raise ValueError(f"Add --map-world {file.stem}=NAMESPACE:DIMENSION for {file}.")
+            if dimension in dimensions:
+                raise ValueError(f"Multiple Paper world settings map to {dimension}.")
+            dimensions.add(dimension)
+            world = mapping(file.read_text(encoding="utf-8"), file)
+            stock = world.get("slimefun", {})
+            if not isinstance(stock, dict):
+                raise ValueError(f"{file}: expected a mapping for the slimefun namespace.")
+            header = f"worlds.{json.dumps(dimension)}"
+            flags = []
+            if "enabled" in world:
+                enabled = boolean_setting(world["enabled"], f"{file}: enabled")
+                flags.append(f"enabled = {enabled}")
+            if "enabled" in stock:
+                enabled = boolean_setting(stock["enabled"], f"{file}: slimefun.enabled")
+                flags.append(f"slimefun-enabled = {enabled}")
+            if flags:
+                sections.append("\n".join((f"[{header}]", *flags)))
+            overrides = []
+            for item, enabled in sorted(stock.items(), key=lambda row: str(row[0])):
+                if isinstance(item, str) and PAPER_ITEM_ID.fullmatch(item):
+                    value = boolean_setting(enabled, f"{file}: slimefun.{item}")
+                    overrides.append(f"{item} = {value}")
+            if overrides:
+                sections.append("\n".join((f"[{header}.items]", *overrides)))
+    return "\n\n".join(sections) + "\n" if sections else ""
 
 
 def collect_geo(source, mappings):
@@ -326,7 +377,7 @@ def backpack_record(key, bag):
     return {"size": size, **converted}
 
 
-def render(records, universal=None, players=None, geo=None, geo_settings=None):
+def render(records, universal=None, players=None, geo=None, geo_settings=None, availability=None):
     chunks = defaultdict(list)
     for (dimension, position), record in sorted(records.items()):
         x, _, z = position
@@ -411,14 +462,17 @@ def render(records, universal=None, players=None, geo=None, geo_settings=None):
             *(f"{key} = {str(enabled).lower()}" for key, enabled in geo_settings.items()),
             "",
         ))
+    if availability is not None:
+        yield "settings-item-availability.toml", availability
 
 
-def publish(output, records, universal=None, players=None, geo=None, geo_settings=None):
+def publish(output, records, universal=None, players=None, geo=None, geo_settings=None,
+            availability=None):
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix=".storage-import-", dir=output.parent) as temp:
         stage = Path(temp) / "snapshot"
         stage.mkdir()
-        for name, text in render(records, universal, players, geo, geo_settings):
+        for name, text in render(records, universal, players, geo, geo_settings, availability):
             data = text.encode("utf-8")
             if len(data) > DATA_FILE_MAX:
                 raise ValueError(f"Import chunk {name} exceeds Horizon's 64 MiB data file limit.")
@@ -487,6 +541,10 @@ def main():
                         help="explicitly replace the source Players directory with an exported snapshot")
     parser.add_argument("--resources-config", type=Path, metavar="RESOURCES_YML",
                         help="export the stock Paper GEO resource toggles as a TOML section")
+    parser.add_argument("--item-config", type=Path, metavar="ITEMS_YML",
+                        help="export the Paper Items.yml global availability flags")
+    parser.add_argument("--world-settings", type=Path, metavar="WORLD_SETTINGS_DIRECTORY",
+                        help="export the Paper stock Slimefun world and item availability flags")
     args = parser.parse_args()
     source = args.paper_storage.resolve()
     output = args.horizon_import_dir.resolve()
@@ -500,17 +558,22 @@ def main():
         worlds[paper] = dimension
     if profiles is not None and not profiles.is_dir():
         parser.error("--player-profiles must point to an exported Players directory.")
-    for original in (source, profiles):
+    world_settings = args.world_settings.resolve() if args.world_settings else None
+    for original in (source, profiles, world_settings):
         if original is not None and (output.is_relative_to(original) or original.is_relative_to(output)):
             parser.error("The import directory and Paper data must be separate.")
     try:
         geo_settings = collect_geo_settings(args.resources_config) if args.resources_config else None
+        availability = (
+            availability_fragment(args.item_config, world_settings, worlds)
+            if args.item_config is not None or world_settings is not None else None
+        )
         with paper_snapshot(source) as root:
             records = collect(root, worlds)
             universal = collect_universal(root)
             players = collect_backpacks(root, profiles)
             geo = collect_geo(root, worlds)
-        publish(output, records, universal, players, geo, geo_settings)
+        publish(output, records, universal, players, geo, geo_settings, availability)
     except (OSError, ValueError, BadZipFile, yaml.YAMLError) as error:
         parser.error(str(error))
     print(f"Prepared an import with {len(records)} block or inventory locations, "
@@ -518,6 +581,9 @@ def main():
           f"and {len(geo)} GEO chunks.")
     if geo_settings is not None:
         print(f"Merge the stock GEO resource settings in {output / 'settings-geo.toml'} "
+              "into slimefun-server.toml.")
+    if availability is not None:
+        print(f"Merge the stock availability settings in {output / 'settings-item-availability.toml'} "
               "into slimefun-server.toml.")
 
 
