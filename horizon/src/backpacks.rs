@@ -11,12 +11,18 @@ use mod_api::{
 
 use crate::{
     items::{
-        GOLD_6K, GOLD_10K, GOLD_14K, GOLD_16K, GOLD_22K, GOLD_24K, HeadTexture, Kind, item, item_id,
+        ALUMINUM_INGOT, GOLD_6K, GOLD_10K, GOLD_14K, GOLD_16K, GOLD_22K, GOLD_24K, HeadTexture,
+        Kind, item, item_id,
     },
     recipes::{CraftingRecipe, Research, Stack},
     research,
     storage::decode_archived_slots,
+    thermal_machines::{COOLING, COOLING_UNIT},
 };
+
+mod cooler;
+use cooler::COOLER;
+pub(crate) use cooler::CoolerFeed;
 
 #[path = "special_backpacks.rs"]
 mod special;
@@ -252,6 +258,21 @@ pub(crate) const CRAFTING: &[CraftingRecipe] = &[
         RADIANT_BACKPACK,
         &RADIANT_RESEARCH,
     ),
+    recipe(
+        [
+            Some(CLOTH),
+            Some(CLOTH),
+            Some(CLOTH),
+            Some(ALUMINUM_INGOT),
+            Some(COOLING_UNIT),
+            Some(ALUMINUM_INGOT),
+            Some(ALUMINUM_INGOT),
+            Some(ALUMINUM_INGOT),
+            Some(ALUMINUM_INGOT),
+        ],
+        COOLER,
+        &COOLING,
+    ),
 ];
 
 fn tier(id: &str) -> Option<(u32, &'static Research)> {
@@ -262,6 +283,7 @@ fn tier(id: &str) -> Option<(u32, &'static Research)> {
         "WOVEN_BACKPACK" => (36, &WOVEN_RESEARCH),
         "GILDED_BACKPACK" => (45, &GILDED_RESEARCH),
         "RADIANT_BACKPACK" => (54, &RADIANT_RESEARCH),
+        "COOLER" => (cooler::SIZE, &COOLING),
         "BOUND_BACKPACK" => (36, &special::SOULBOUND_STORAGE),
         _ => return None,
     })
@@ -284,7 +306,17 @@ pub(crate) fn item_lore(id: &str) -> Option<Tag> {
     if size == 54 {
         label.push_str(" (Double chest)");
     }
-    Some(Tag::List(vec![
+    let mut lines = Vec::new();
+    if id == COOLER.id() {
+        for description in [
+            "Allows you to store Juices/Smoothies",
+            "and automatically consumes them when you are hungry",
+            "and you have this in your Inventory",
+        ] {
+            lines.push(text(description, "white", false));
+        }
+    }
+    lines.extend([
         Tag::String("".into()),
         Tag::compound([
             ("text", Tag::String("Size: ".into())),
@@ -295,7 +327,8 @@ pub(crate) fn item_lore(id: &str) -> Option<Tag> {
         text("ID: <ID>", "gray", false),
         Tag::String("".into()),
         open_lore(),
-    ]))
+    ]);
+    Some(Tag::List(lines))
 }
 
 fn open_lore() -> Tag {
@@ -318,11 +351,7 @@ fn allowed_contents(host: &dyn Host, stack: &ItemStack) -> bool {
         return false;
     }
     item_id(stack).is_none_or(|id| {
-        tier(&id).is_none()
-            && !matches!(
-                id.as_str(),
-                "RESTORED_BACKPACK" | "COOLER" | "ENDER_BACKPACK"
-            )
+        tier(&id).is_none() && !matches!(id.as_str(), "RESTORED_BACKPACK" | "ENDER_BACKPACK")
     })
 }
 
@@ -980,6 +1009,7 @@ pub(crate) fn register(registrar: &mut dyn Registrar) {
             at: at.clone(),
             id,
             size,
+            cooler: COOLER.matches(host, &stack),
         }))
     });
 }
@@ -988,12 +1018,23 @@ struct BackpackInventory {
     at: ItemPlace,
     id: BackpackId,
     size: u32,
+    cooler: bool,
 }
 
 impl BackpackInventory {
+    fn accepts(&self, host: &dyn Host, stack: &ItemStack) -> bool {
+        if self.cooler {
+            crate::juice::identify(host, stack).is_some()
+        } else {
+            allowed_contents(host, stack)
+        }
+    }
+
     fn read(&self, host: &mut dyn ServerHost) -> Option<Backpack> {
         let held = self.at.stack(host)?;
-        if held_id(host, &held).ok()? != (self.id, self.size) {
+        if held_id(host, &held).ok()? != (self.id, self.size)
+            || self.cooler != COOLER.matches(host, &held)
+        {
             return None;
         }
         live_bag(host, self.id, self.size).ok().flatten()
@@ -1036,7 +1077,7 @@ impl ResourceHandler<ItemResource> for BackpackInventory {
 
     fn capacity(&self, host: &mut dyn ServerHost, index: usize, resource: &ItemResource) -> u32 {
         if index >= self.size as usize
-            || !allowed_contents(host, resource.as_stack())
+            || !self.accepts(host, resource.as_stack())
             || self.read(host).is_none()
         {
             return 0;
@@ -1058,7 +1099,7 @@ impl ResourceHandler<ItemResource> for BackpackInventory {
         let Some(mut bag) = self.read(host) else {
             return 0;
         };
-        if slot >= bag.size || !allowed_contents(host, resource.as_stack()) {
+        if slot >= bag.size || !self.accepts(host, resource.as_stack()) {
             return 0;
         }
         let resident = bag.slots.get(&slot);
@@ -1126,6 +1167,22 @@ impl BackpackMenus {
             .is_some_and(|&(_, window)| event.window == window)
         {
             viewers.remove(&event.uuid);
+        }
+    }
+
+    fn refresh_cooler(&self, host: &mut dyn ServerHost, id: BackpackId) {
+        let viewer = self
+            .0
+            .lock()
+            .unwrap()
+            .iter()
+            .find_map(|(&viewer, &(open, window))| (open == id).then_some((viewer, window)));
+        if let Some((viewer, window)) = viewer
+            && host.menu(viewer, window).is_some()
+            && let Ok(Some(mut bag)) = live_bag(host, id, cooler::SIZE)
+        {
+            let slots = (0..bag.size).map(|slot| bag.slots.remove(&slot)).collect();
+            let _ = host.menu_set_items(viewer, window, slots);
         }
     }
 
@@ -1492,8 +1549,12 @@ mod tests {
         ];
         assert_eq!(CRAFTING[0].output.count, 8);
         assert_eq!(CRAFTING[0].inputs[0].unwrap().id(), "minecraft:white_wool");
-        for (index, recipe) in CRAFTING[1..].iter().enumerate() {
-            assert_eq!(recipe.inputs[4].unwrap().id(), expected[index]);
+        let tiers = CRAFTING[1..]
+            .iter()
+            .filter(|recipe| recipe.output.kind != COOLER);
+        assert_eq!(tiers.clone().count(), expected.len());
+        for (index, (center, recipe)) in expected.into_iter().zip(tiers).enumerate() {
+            assert_eq!(recipe.inputs[4].unwrap().id(), center);
             assert_eq!(
                 tier(recipe.output.kind.id()).map(|(size, _)| size),
                 Some(9 * (index as u32 + 1))
@@ -1671,6 +1732,7 @@ mod tests {
             at: shell,
             id: ID,
             size: 9,
+            cooler: false,
         };
         assert_eq!(original.amount(&mut host, 8), 2);
         host.players.get_mut(OWNER).unwrap().slots.remove(&0);
@@ -1688,6 +1750,7 @@ mod tests {
             },
             id: ID,
             size: 9,
+            cooler: false,
         };
         assert_eq!(transferred.amount(&mut host, 8), 2);
         let recipient = (&host as &dyn Host).player(RECIPIENT).unwrap();

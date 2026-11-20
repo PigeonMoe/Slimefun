@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use mod_api::{
-    ActiveEffect, Flow, ItemStack, LivingEntityUseItemFinishEvent, LivingEntityUseItemStartEvent,
-    ServerHost, Text,
+    ActiveEffect, Flow, Host, ItemStack, LivingEntityUseItemFinishEvent,
+    LivingEntityUseItemStartEvent, ServerHost, Text,
 };
 
 use crate::items::{
@@ -77,7 +77,7 @@ pub(crate) fn finish(host: &mut dyn ServerHost, event: &mut LivingEntityUseItemF
     }
 }
 
-fn identify(host: &dyn ServerHost, stack: &ItemStack) -> Option<Kind> {
+pub(crate) fn identify(host: &dyn Host, stack: &ItemStack) -> Option<Kind> {
     let id = crate::items::item_id(stack)?;
     JUICING
         .iter()

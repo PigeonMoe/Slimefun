@@ -154,7 +154,7 @@ const DRYING: Research = Research {
     name: "A Dry Day",
     cost: 15,
 };
-const COOLING: Research = Research {
+pub(crate) const COOLING: Research = Research {
     id: "cooler",
     name: "Portable Beverages",
     cost: 24,

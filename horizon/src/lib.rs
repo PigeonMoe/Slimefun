@@ -143,6 +143,7 @@ struct Slimefun {
     transport: gps_transport::Transport,
     elevators: elevator::Elevators,
     backpacks: backpacks::BackpackMenus,
+    cooler_feed: backpacks::CoolerFeed,
     bee_wings: bee_wings::BeeWings,
     universal: universal_storage::UniversalStorage,
 }
@@ -185,6 +186,7 @@ impl Default for Slimefun {
             transport: gps_transport::Transport::default(),
             elevators: elevator::Elevators::default(),
             backpacks: backpacks::BackpackMenus::default(),
+            cooler_feed: backpacks::CoolerFeed::default(),
             bee_wings: bee_wings::BeeWings::default(),
             universal: universal_storage::UniversalStorage::default(),
         }
@@ -1476,6 +1478,19 @@ impl Hooks for Slimefun {
         );
     }
 
+    fn food_level_changed(
+        &self,
+        host: &mut dyn ServerHost,
+        event: &mut mod_api::FoodLevelChangedEvent<'_>,
+    ) -> Flow {
+        if event.to < event.from
+            && let Some(player) = host.player(event.player)
+        {
+            self.cooler_feed.check(host, player);
+        }
+        Flow::Continue
+    }
+
     #[listener(priority = -100)]
     fn player_environment_damage_pre(
         &self,
@@ -1489,6 +1504,10 @@ impl Hooks for Slimefun {
             "minecraft:in_fire" => self
                 .talismans
                 .protect_from_fire(host, event.player, event.damage_type),
+            "minecraft:starve" => {
+                self.cooler_feed.check(host, event.player);
+                false
+            }
             _ => false,
         };
         if protected {
@@ -1708,6 +1727,7 @@ impl Hooks for Slimefun {
 
     fn scheduled_task(&self, host: &mut dyn ServerHost, event: &mut ScheduledTaskEvent<'_>) {
         self.snacks.due(host, event);
+        self.cooler_feed.due(host, event, &self.backpacks);
         self.climbing.due(event);
         self.jet_boots.due(event);
         self.jetpacks.due(event);
@@ -1742,6 +1762,7 @@ impl Hooks for Slimefun {
         rainbow::placed::clear();
         auto_crafter::clear();
         self.backpacks.clear();
+        self.cooler_feed.clear();
         self.bee_wings.clear();
         self.universal.clear();
         self.gps.clear();
