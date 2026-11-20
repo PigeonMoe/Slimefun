@@ -244,6 +244,7 @@ impl Slimefun {
         self.solar_helmet.configure(table.get("solar-helmet"));
         settings.book_binder = book_binder::Rules::read_config(&table);
         settings.wind_power = elemental_staves::wind_power(table.get("wind-staff"));
+        settings.jerky_saturation.read_config(table.get("items"));
         enchantment_machines::configure(&table);
         settings.infused = infused::Settings::read_config(&table);
         if let Some(value) = table
@@ -427,7 +428,7 @@ impl Hooks for Slimefun {
         event.configs.push(Config::new(
             "slimefun",
             ConfigKind::Server,
-            &format!("{}{}{}{}{}{}{}{}",
+            &format!("{}{}{}{}{}{}{}{}{}",
             "double-ores = true\ncrucible-allow-water-in-nether = false\nlegacy-ore-washer = false\nlegacy-dust-washer = false\nlegacy-ore-grinder = true\nelectric-gold-pan-override-output-limit = [false, false, false]\nfreezer-use-vanilla-ratios = [false, false, false]\nfire-breaking-chance = 34\noutput-chest-enabled = true\ndrop-from-golems = true\ngolem-drop-chance = 75\n\n[guide]\nreceive-on-first-join = true\nshow-hidden-item-groups-in-search = false\n\n[researches]\nfree-in-creative-mode = true\nenable-fireworks = true\ndisable-learning-animation = false\n\n[URID]\ncustom-ticker-delay = 10\n\n[networks]\nmax-size = 200\nenable-visualizer = true\ncargo-ticker-delay = 0\n\n[wind-staff]\npower = 4\n\n[book-binder]\nbypass-vanilla-max-level = false\nhas-custom-max-level = false\ncustom-max-level = 15\n\n[solar-generator-4]\nother-dimensions-use-night-energy = false\n\n[portable-teleporter]\nteleportation-cost = 10\n\n[produce-collector]\nrange = 2\n\n[pickaxe-of-vein-mining]\nmax-blocks = 16\n\n[pickaxe-of-the-seeker]\nmax-range = 5\n\n[blade-of-vampires]\nchance = 45\n\n[reinforced-spawner]\nallow-spawn-eggs = true\n\n[ancient-altar]\nstep-delay = 8\n\n[miner-android]\nreduced-block-updates = true\n\n[industrial-miner]\ncan-mine-ancient-debris = false\ncan-mine-deepslate-ores = true\n\n[advanced-industrial-miner]\ncan-mine-ancient-debris = false\ncan-mine-deepslate-ores = true\n",
                 enchantment_machines::default_config(),
                 beheading::DEFAULT_CONFIG,
@@ -435,7 +436,8 @@ impl Hooks for Slimefun {
                 climbing_pick::DEFAULT_CONFIG,
                 teleposition_scroll::DEFAULT_CONFIG,
                 nether_goo::DEFAULT_CONFIG,
-                talismans::DEFAULT_CONFIG),
+                talismans::DEFAULT_CONFIG,
+                thermal_machines::JERKY_CONFIG),
         ));
     }
 
@@ -1571,7 +1573,8 @@ impl Hooks for Slimefun {
     ) {
         if let HostSide::Server(host) = host {
             juice::finish(host, event);
-            thermal_machines::finish_eating_jerky(host, event);
+            let jerky_saturation = self.settings.lock().unwrap().jerky_saturation;
+            thermal_machines::finish_eating_jerky(host, event, jerky_saturation);
             medical::finish(host, event);
             self.snacks.finish(host, event, &self.rolls);
         }

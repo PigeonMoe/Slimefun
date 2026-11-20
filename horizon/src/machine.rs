@@ -41,6 +41,7 @@ pub(crate) struct Dispenser {
 pub(crate) struct Settings {
     pub book_binder: crate::book_binder::Rules,
     pub wind_power: u32,
+    pub jerky_saturation: crate::thermal_machines::JerkySaturation,
     pub infused: crate::infused::Settings,
     pub double_ores: bool,
     pub legacy_ore_washer: bool,
@@ -65,6 +66,7 @@ impl Default for Settings {
         Self {
             book_binder: crate::book_binder::Rules::default(),
             wind_power: crate::elemental_staves::DEFAULT_WIND_POWER,
+            jerky_saturation: crate::thermal_machines::JerkySaturation::default(),
             infused: crate::infused::Settings::default(),
             double_ores: true,
             legacy_ore_washer: false,

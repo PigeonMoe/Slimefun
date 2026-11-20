@@ -326,17 +326,72 @@ const fn jerky(item: Kind, meat: &'static str) -> CraftingRecipe {
     }
 }
 
-fn is_jerky(host: &dyn Host, stack: &ItemStack) -> bool {
-    [
-        BEEF_JERKY,
-        PORK_JERKY,
-        CHICKEN_JERKY,
-        MUTTON_JERKY,
-        RABBIT_JERKY,
-        FISH_JERKY,
-    ]
-    .into_iter()
-    .any(|jerky| jerky.matches(host, stack))
+const MEAT_JERKY_ITEMS: [Kind; 6] = [
+    BEEF_JERKY,
+    PORK_JERKY,
+    CHICKEN_JERKY,
+    MUTTON_JERKY,
+    RABBIT_JERKY,
+    FISH_JERKY,
+];
+const DEFAULT_JERKY_SATURATION: i32 = 6;
+
+pub(crate) const JERKY_CONFIG: &str = r#"
+[items.BEEF_JERKY]
+saturation-level = 6
+
+[items.PORK_JERKY]
+saturation-level = 6
+
+[items.CHICKEN_JERKY]
+saturation-level = 6
+
+[items.MUTTON_JERKY]
+saturation-level = 6
+
+[items.RABBIT_JERKY]
+saturation-level = 6
+
+[items.FISH_JERKY]
+saturation-level = 6
+"#;
+
+#[derive(Clone, Copy)]
+pub(crate) struct JerkySaturation([i32; MEAT_JERKY_ITEMS.len()]);
+
+impl Default for JerkySaturation {
+    fn default() -> Self {
+        Self([DEFAULT_JERKY_SATURATION; MEAT_JERKY_ITEMS.len()])
+    }
+}
+
+impl JerkySaturation {
+    pub(crate) fn read_config(&mut self, items: Option<&toml::Value>) {
+        for (item, amount) in MEAT_JERKY_ITEMS.into_iter().zip(&mut self.0) {
+            let value = items
+                .and_then(|items| items.get(item.id()))
+                .and_then(|entry| entry.get("saturation-level"))
+                .and_then(toml::Value::as_integer)
+                .and_then(|amount| i32::try_from(amount).ok());
+            *amount = match value {
+                Some(value) if value >= 0 => value,
+                Some(_) => *amount,
+                None => DEFAULT_JERKY_SATURATION,
+            };
+        }
+    }
+}
+
+fn jerky_index(host: &dyn Host, stack: &ItemStack) -> Option<usize> {
+    MEAT_JERKY_ITEMS
+        .into_iter()
+        .position(|jerky| jerky.matches(host, stack))
+}
+
+fn saturation_after_dried_meat(food: i32, saturation: f32, extra: i32) -> f32 {
+    // Paper adds the bonus inside PlayerItemConsumeEvent. The normal meal
+    // applies its saturation next and caps it to the new food level.
+    (saturation + extra as f32).clamp(0.0, food.max(0) as f32)
 }
 
 pub(crate) fn start_eating_jerky(
@@ -344,7 +399,7 @@ pub(crate) fn start_eating_jerky(
     event: &LivingEntityUseItemStartEvent<'_>,
 ) -> Flow {
     if event.entity.is_none()
-        && is_jerky(host, event.stack)
+        && jerky_index(host, event.stack).is_some()
         && let Some(player) = host.players().acting_player()
         && !crate::research::can_use(host, player, &JERKY)
     {
@@ -360,13 +415,17 @@ pub(crate) fn start_eating_jerky(
 pub(crate) fn finish_eating_jerky(
     host: &mut dyn ServerHost,
     event: &LivingEntityUseItemFinishEvent<'_>,
+    saturation: JerkySaturation,
 ) {
     if event.entity.is_none()
-        && is_jerky(host, event.stack)
+        && let Some(item) = jerky_index(host, event.stack)
         && let Some(player) = host.players().acting_player()
         && let Some(food) = player.food(host)
     {
-        let _ = player.set_saturation(host, food.saturation + 6.0);
+        let _ = player.set_saturation(
+            host,
+            saturation_after_dried_meat(food.level, food.saturation, saturation.0[item]),
+        );
     }
 }
 
@@ -486,4 +545,50 @@ pub(crate) fn dry_plant(host: &dyn Host, inputs: &[Option<ItemStack>]) -> Option
         }
     }
     None
+}
+
+#[cfg(test)]
+mod jerky_tests {
+    use super::*;
+
+    #[test]
+    fn paper_jerky_config_validates_each_meat_and_keeps_the_vanilla_food_cap() {
+        let default = JERKY_CONFIG.parse::<toml::Table>().unwrap();
+        let mut configured = JerkySaturation::default();
+        configured.read_config(default.get("items"));
+        assert_eq!(configured.0, [6; 6]);
+
+        let options = r#"
+[items.BEEF_JERKY]
+saturation-level = 9
+[items.PORK_JERKY]
+saturation-level = 0
+[items.CHICKEN_JERKY]
+saturation-level = 15
+[items.MUTTON_JERKY]
+saturation-level = 2147483647
+[items.RABBIT_JERKY]
+saturation-level = "bad"
+[items.FISH_JERKY]
+saturation-level = 2147483648
+"#
+        .parse::<toml::Table>()
+        .unwrap();
+        configured.read_config(options.get("items"));
+        assert_eq!(configured.0, [9, 0, 15, i32::MAX, 6, 6]);
+
+        // Actual Paper FoodData adds cooked-beef nutrition/saturation after the
+        // Slimefun handler; these are the resulting food and saturation.
+        assert_eq!(saturation_after_dried_meat(19, 12.8, 6), 18.8);
+        assert_eq!(saturation_after_dried_meat(19, 12.8, configured.0[0]), 19.0);
+        assert_eq!(saturation_after_dried_meat(20, 20.0, configured.0[0]), 20.0);
+        assert_eq!(saturation_after_dried_meat(19, 12.8, configured.0[1]), 12.8);
+        assert_eq!(saturation_after_dried_meat(7, 7.0, configured.0[3]), 7.0);
+
+        let reload = "[items.BEEF_JERKY]\nsaturation-level = -1"
+            .parse::<toml::Table>()
+            .unwrap();
+        configured.read_config(reload.get("items"));
+        assert_eq!(configured.0, [9, 6, 6, 6, 6, 6]);
+    }
 }
