@@ -1543,7 +1543,9 @@ fn processing_recipe(
                 let pan = PANS
                     .iter()
                     .find(|pan| pan.target_sound(&material).is_some())?;
-                let output = pan.drop_for(roll(100)?)?.stack(host, 1)?;
+                let output = pan
+                    .roll_stack(host, &settings.pan_weights, &mut roll)
+                    .ok()??;
                 let seconds = if pan.item == GOLD_PAN { 3 } else { 4 };
                 fits(host, data, &output).then(|| {
                     RecipeRun::single(slot, input.clone(), 1, output)
@@ -3040,7 +3042,7 @@ mod tests {
         );
         settings.gold_pan_override_output_limit[1] = true;
         let rolled = test_recipe(&host, "ELECTRIC_GOLD_PAN_2", &data, settings, |bound| {
-            assert_eq!(bound, 100);
+            assert_eq!(bound, 1 << 24);
             Some(0)
         })
         .unwrap();
@@ -3073,6 +3075,76 @@ mod tests {
     }
 
     #[test]
+    fn electric_panning_uses_each_paper_pan_weight_and_does_not_consume_when_disabled() {
+        let host = recipe_host([
+            "minecraft:gravel",
+            "minecraft:soul_soil",
+            "minecraft:clay_ball",
+            "minecraft:ghast_tear",
+        ]);
+        let mut data = Compound::new();
+        assert!(write_stack(
+            &host,
+            &mut data,
+            INPUT[0],
+            Kind::Vanilla("minecraft:gravel").stack(&host, 5)
+        ));
+        let mut settings = Settings::default();
+        let config = r#"
+            [items.GOLD_PAN.chance]
+            FLINT = 0
+            CLAY = 1
+            SIFTED_ORE = 0
+            IRON_NUGGET = 0
+            [items.NETHER_GOLD_PAN.chance]
+            QUARTZ = 0
+            GOLD_NUGGET = 0
+            NETHER_WART = 0
+            BLAZE_POWDER = 0
+            GLOWSTONE_DUST = 0
+            GHAST_TEAR = 7
+        "#;
+        let parsed = config.parse::<toml::Table>().unwrap();
+        settings.pan_weights.read_config(parsed.get("items"));
+
+        let ids = [
+            "ELECTRIC_GOLD_PAN",
+            "ELECTRIC_GOLD_PAN_2",
+            "ELECTRIC_GOLD_PAN_3",
+        ];
+        for id in ids {
+            let recipe = test_recipe(&host, id, &data, settings, |bound| Some(bound - 1)).unwrap();
+            assert_eq!(recipe.quantity(), 1);
+            assert!(Kind::Vanilla("minecraft:clay_ball").matches(&host, &recipe.outputs[0]));
+        }
+
+        let disabled = config.replace("CLAY = 1", "CLAY = 0");
+        settings
+            .pan_weights
+            .read_config(disabled.parse::<toml::Table>().unwrap().get("items"));
+        for id in ids {
+            assert!(
+                test_recipe(&host, id, &data, settings, |_| panic!(
+                    "disabled Gravel ran"
+                ))
+                .is_none()
+            );
+        }
+        assert!(write_stack(
+            &host,
+            &mut data,
+            INPUT[1],
+            Kind::Vanilla("minecraft:soul_soil").stack(&host, 4)
+        ));
+        for id in ids {
+            let recipe = test_recipe(&host, id, &data, settings, |bound| Some(bound - 1)).unwrap();
+            assert!(recipe.inputs[0].is_none());
+            assert_eq!(recipe.inputs[1].as_ref().unwrap().1, 1);
+            assert!(Kind::Vanilla("minecraft:ghast_tear").matches(&host, &recipe.outputs[0]));
+        }
+    }
+
+    #[test]
     fn electric_gravel_washing_and_ingot_processing_follow_the_paper_chain() {
         use crate::items::{LEAD_DUST, LEAD_INGOT};
 
@@ -3088,8 +3160,10 @@ mod tests {
         let mut settings = Settings::default();
         let gravel = Kind::Vanilla("minecraft:gravel").stack(&host, 1);
         assert!(write_stack(&host, &mut data, INPUT[0], gravel));
-        let sifted =
-            test_recipe(&host, "ELECTRIC_GOLD_PAN", &data, settings, |_| Some(60)).unwrap();
+        let sifted = test_recipe(&host, "ELECTRIC_GOLD_PAN", &data, settings, |bound| {
+            Some(bound * 61 / 100)
+        })
+        .unwrap();
         assert!(SIFTED_ORE.matches(&host, &sifted.outputs[0]));
 
         let washer = "ELECTRIC_DUST_WASHER_2";

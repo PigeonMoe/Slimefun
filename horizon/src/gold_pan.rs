@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use mod_api::{LevelRef, PlayerRef, ServerHost, SoundSource, Text};
+use mod_api::{Host, ItemStack, LevelRef, PlayerRef, ServerHost, SoundSource, Text};
 
 use crate::items::{GOLD_PAN, Kind, NETHER_GOLD_PAN};
 use crate::random::Rolls;
@@ -13,7 +13,7 @@ pub(crate) struct Pan {
     pub item: Kind,
     pub research: &'static Research,
     pub targets: &'static [(&'static str, &'static str)],
-    pub drops: &'static [(u32, Kind)],
+    drops: &'static [(u32, Kind)],
 }
 
 pub(crate) const PANS: &[Pan] = &[
@@ -34,6 +34,70 @@ pub(crate) const PANS: &[Pan] = &[
     },
 ];
 
+const OVERWORLD_KEYS: [&str; 4] = ["FLINT", "CLAY", "SIFTED_ORE", "IRON_NUGGET"];
+const NETHER_KEYS: [&str; 6] = [
+    "QUARTZ",
+    "GOLD_NUGGET",
+    "NETHER_WART",
+    "BLAZE_POWDER",
+    "GLOWSTONE_DUST",
+    "GHAST_TEAR",
+];
+// Dough samples with Random.nextFloat, which uses 24 bits of entropy.
+const SAMPLE_COUNT: u32 = 1 << 24;
+
+#[derive(Clone, Copy)]
+pub(crate) struct Weights {
+    overworld: [u32; OVERWORLD_KEYS.len()],
+    nether: [u32; NETHER_KEYS.len()],
+}
+
+impl Default for Weights {
+    fn default() -> Self {
+        Self {
+            overworld: std::array::from_fn(|index| PAN_DROPS[index].0),
+            nether: std::array::from_fn(|index| NETHER_PAN_DROPS[index].0),
+        }
+    }
+}
+
+impl Weights {
+    pub(crate) fn read_config(&mut self, items: Option<&toml::Value>) {
+        let defaults = Self::default();
+        let chance = |id| items.and_then(|items| items.get(id)?.get("chance"));
+        apply_weights(
+            &mut self.overworld,
+            defaults.overworld,
+            OVERWORLD_KEYS,
+            chance("GOLD_PAN"),
+        );
+        apply_weights(
+            &mut self.nether,
+            defaults.nether,
+            NETHER_KEYS,
+            chance("NETHER_GOLD_PAN"),
+        );
+    }
+}
+
+fn apply_weights<const COUNT: usize>(
+    weights: &mut [u32; COUNT],
+    defaults: [u32; COUNT],
+    keys: [&str; COUNT],
+    config: Option<&toml::Value>,
+) {
+    for (index, key) in keys.into_iter().enumerate() {
+        match config
+            .and_then(|chance| chance.get(key)?.as_integer())
+            .and_then(|n| i32::try_from(n).ok())
+        {
+            Some(n) if n >= 0 => weights[index] = n as u32,
+            Some(_) => {} // Paper retains the previous value for a negative integer.
+            None => weights[index] = defaults[index],
+        }
+    }
+}
+
 impl Pan {
     pub(crate) fn use_on(
         &self,
@@ -42,6 +106,7 @@ impl Pan {
         level: LevelRef,
         pos: [i32; 3],
         rolls: &Rolls,
+        weights: &Weights,
         require_research: bool,
     ) {
         let Some(state) = level.block_state(host, pos) else {
@@ -59,13 +124,8 @@ impl Pan {
             return;
         }
 
-        let Some(kind) = rolls
-            .next(host, level, 100)
-            .and_then(|roll| self.drop_for(roll))
+        let Ok(stack) = self.roll_stack(host, weights, |bound| rolls.next(host, level, bound))
         else {
-            return;
-        };
-        let Some(stack) = kind.stack(host, 1) else {
             return;
         };
         if !player.remove_block_without_drops(host, pos, state) {
@@ -73,7 +133,9 @@ impl Pan {
         }
 
         let [x, y, z] = pos.map(|axis| f64::from(axis) + 0.5);
-        let _ = level.spawn_item(host, x, y, z, stack, 10);
+        if let Some(stack) = stack {
+            let _ = level.spawn_item(host, x, y, z, stack, 10);
+        }
         let _ = level.play_sound(host, sound, [x, y, z], SoundSource::Blocks, 1.0, 1.0);
     }
 
@@ -83,14 +145,55 @@ impl Pan {
             .find_map(|&(target, sound)| (target == block).then_some(sound))
     }
 
-    pub(crate) fn drop_for(&self, mut roll: u32) -> Option<Kind> {
-        for &(weight, kind) in self.drops {
-            if roll < weight {
-                return Some(kind);
-            }
-            roll -= weight;
+    pub(crate) fn weighted_drops(
+        &self,
+        weights: &Weights,
+    ) -> impl Iterator<Item = (u32, Kind)> + Clone {
+        let configured: &[u32] = if self.item == GOLD_PAN {
+            &weights.overworld
+        } else {
+            &weights.nether
+        };
+        configured
+            .iter()
+            .copied()
+            .zip(self.drops.iter().map(|&(_, kind)| kind))
+            .filter(|&(weight, _)| weight != 0)
+    }
+
+    pub(crate) fn roll_stack(
+        &self,
+        host: &dyn Host,
+        weights: &Weights,
+        sample: impl FnMut(u32) -> Option<u32>,
+    ) -> Result<Option<ItemStack>, ()> {
+        self.choose(weights, sample)?
+            .map(|kind| kind.stack(host, 1).ok_or(()))
+            .transpose()
+    }
+
+    fn choose(
+        &self,
+        weights: &Weights,
+        mut sample: impl FnMut(u32) -> Option<u32>,
+    ) -> Result<Option<Kind>, ()> {
+        let drops = self.weighted_drops(weights);
+        let total: f32 = drops.clone().map(|(weight, _)| weight as f32).sum();
+        if total == 0.0 {
+            return Ok(None);
         }
-        None
+        let sample = sample(SAMPLE_COUNT)
+            .filter(|&sample| sample < SAMPLE_COUNT)
+            .ok_or(())?;
+        let target = (sample as f32 / SAMPLE_COUNT as f32) * total;
+        let mut cumulative = 0.0;
+        for (weight, kind) in drops {
+            cumulative += weight as f32;
+            if cumulative >= target {
+                return Ok(Some(kind));
+            }
+        }
+        Ok(None)
     }
 }
 
@@ -102,10 +205,14 @@ mod tests {
 
     fn distribution(pan: &Pan) -> BTreeMap<&'static str, usize> {
         let mut counts = BTreeMap::new();
-        for roll in 0..100 {
-            *counts.entry(pan.drop_for(roll).unwrap().id()).or_insert(0) += 1;
+        let weights = Weights::default();
+        for bucket in 0..100 {
+            let drop = pan
+                .choose(&weights, |bound| Some((2 * bucket + 1) * bound / 200))
+                .unwrap()
+                .unwrap();
+            *counts.entry(drop.id()).or_insert(0) += 1;
         }
-        assert_eq!(pan.drop_for(100), None);
         counts
     }
 
@@ -140,5 +247,65 @@ mod tests {
                 ("minecraft:ghast_tear", 2),
             ]),
         );
+    }
+    #[test]
+    fn config_uses_paper_keys_and_positive_weights_normalize_without_a_hundred_cap() {
+        let mut weights = Weights::default();
+        let options = r#"
+            [items.GOLD_PAN.chance]
+            FLINT = 0
+            CLAY = 2
+            SIFTED_ORE = 0
+            IRON_NUGGET = 6
+            [items.NETHER_GOLD_PAN.chance]
+            QUARTZ = 0
+            GOLD_NUGGET = 0
+            NETHER_WART = 0
+            BLAZE_POWDER = 0
+            GLOWSTONE_DUST = 0
+            GHAST_TEAR = 2147483647
+        "#
+        .parse::<toml::Table>()
+        .unwrap();
+        weights.read_config(options.get("items"));
+        let choose = |pan: usize, sample| {
+            PANS[pan]
+                .choose(&weights, |_| Some(sample))
+                .unwrap()
+                .map(Kind::id)
+        };
+        assert_eq!(choose(0, 0), Some("minecraft:clay_ball"));
+        assert_eq!(choose(0, SAMPLE_COUNT / 4), Some("minecraft:clay_ball"));
+        assert_eq!(
+            choose(0, SAMPLE_COUNT / 4 + 1),
+            Some("minecraft:iron_nugget")
+        );
+        assert_eq!(choose(0, SAMPLE_COUNT - 1), Some("minecraft:iron_nugget"));
+        assert_eq!(choose(1, SAMPLE_COUNT - 1), Some("minecraft:ghast_tear"));
+        assert!(PANS[0].choose(&weights, |_| None).is_err());
+
+        let changed = r#"
+            [items.GOLD_PAN.chance]
+            FLINT = 0
+            CLAY = 0
+            SIFTED_ORE = 0
+            IRON_NUGGET = 0
+            [items.NETHER_GOLD_PAN.chance]
+            GHAST_TEAR = -1
+            QUARTZ = "invalid"
+            GOLD_NUGGET = 2147483648
+        "#
+        .parse::<toml::Table>()
+        .unwrap();
+        weights.read_config(changed.get("items"));
+        assert_eq!(
+            PANS[0].choose(&weights, |_| panic!("disabled pan should not draw")),
+            Ok(None)
+        );
+        assert_eq!(weights.nether, [50, 25, 10, 8, 5, 2147483647]);
+
+        weights.read_config(None);
+        assert_eq!(weights.overworld, Weights::default().overworld);
+        assert_eq!(weights.nether, Weights::default().nether);
     }
 }

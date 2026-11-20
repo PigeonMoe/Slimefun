@@ -102,6 +102,8 @@ Angel 在鞋靴、缓降和受伤冷却已处理后，按 Paper 的 0–75 随�
 
 在 `[solar-generator-4]` 中启用 `other-dimensions-use-night-energy` 后，第四档太阳能发电机可在下界和末地每次网络更新提供 64 J。默认关闭。使用原版主世界维度类型的额外世界也按各自的时间、天气和天空光照发电。
 
+手持淘金盘、自动淘金机和三档电动淘金机共用 Paper 掉落权重。可在 `[items.GOLD_PAN.chance]` 配置 `FLINT`、`CLAY`、`SIFTED_ORE`、`IRON_NUGGET`，在 `[items.NETHER_GOLD_PAN.chance]` 配置 `QUARTZ`、`GOLD_NUGGET`、`NETHER_WART`、`BLAZE_POWDER`、`GLOWSTONE_DUST`、`GHAST_TEAR`。正数按权重合计归一，0 会停用该掉落物。对应盘的权重全为 0 时，电动版本保留原料和电量，手持及自动版本照常处理原料，产物为空。
+
 电炉和电动矿物粉碎机各有三档，电动锭粉碎机有一档，加热压力舱有两档。这些机器通过能源调节器取电，保存输入、输出、剩余进度及缓冲电量。部分原料来源和其他电力机器仍待移植。
 
 研究 `multimeter` 后，可用万用表右击有储能容量的设备查看当前电量和容量。太阳能头盔使用 `solar_panel_and_helmet` 研究，默认在指定日照时间且眼部天空光为 15 时，每 10 刻给手持及穿戴的可充电物品各充 0.1 J。可在 `[solar-helmet]` 调整 `enable-armor-effects`、`armor-update-interval` 和 `charge-amount`。

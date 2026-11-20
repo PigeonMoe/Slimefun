@@ -6,7 +6,7 @@ use mod_api::{
 };
 
 use crate::compressor::DelayedCrafts;
-use crate::gold_pan::PANS;
+use crate::gold_pan::{PANS, Weights};
 use crate::machine::{has_block, opposite_blocks};
 use crate::output_chest;
 use crate::random::Rolls;
@@ -45,6 +45,7 @@ impl HandMachine {
         pos: [i32; 3],
         delayed_crafts: &DelayedCrafts,
         rolls: &Rolls,
+        weights: &Weights,
     ) {
         let required = match self {
             Self::TableSaw => &TABLE_SAW,
@@ -97,10 +98,8 @@ impl HandMachine {
                     wrong_item(host, player);
                     return;
                 };
-                let Some(output) = rolls
-                    .next(host, level, 100)
-                    .and_then(|roll| pan.drop_for(roll))
-                    .and_then(|kind| kind.stack(host, 1))
+                let Ok(output) =
+                    pan.roll_stack(host, weights, |bound| rolls.next(host, level, bound))
                 else {
                     return;
                 };

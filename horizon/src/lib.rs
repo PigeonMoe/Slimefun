@@ -231,7 +231,8 @@ impl Slimefun {
                 {
                     let _permitted = multi_tool::PanUse::new(player, level, pos);
                     let pan = &gold_pan::PANS[usize::from(mode == Mode::NetherPan)];
-                    pan.use_on(host, player, level, pos, &self.rolls, false);
+                    let weights = self.settings.lock().unwrap().pan_weights;
+                    pan.use_on(host, player, level, pos, &self.rolls, &weights, false);
                 }
             }
             Mode::Grapple => {}
@@ -294,6 +295,7 @@ impl Slimefun {
         settings.book_binder = book_binder::Rules::read_config(&table);
         settings.wind_power = elemental_staves::wind_power(table.get("wind-staff"));
         settings.jerky_saturation.read_config(table.get("items"));
+        settings.pan_weights.read_config(table.get("items"));
         enchantment_machines::configure(&table);
         settings.infused = infused::Settings::read_config(&table);
         if let Some(value) = table
@@ -1007,7 +1009,7 @@ impl Hooks for Slimefun {
                 researches().count()
             )],
             Some("recipe") => match event.command.argument("item") {
-                Some(CommandArgumentValue::String(item)) => describe_recipe(item, self.settings.lock().unwrap().double_ores),
+                Some(CommandArgumentValue::String(item)) => describe_recipe(item, *self.settings.lock().unwrap()),
                 _ => return Flow::Continue,
             },
             Some("research") => {
@@ -1271,7 +1273,16 @@ impl Hooks for Slimefun {
                 .iter()
                 .find(|pan| pan.item.matches(host, stack))
         {
-            pan.use_on(host, player, level, event.click.pos, &self.rolls, true);
+            let weights = self.settings.lock().unwrap().pan_weights;
+            pan.use_on(
+                host,
+                player,
+                level,
+                event.click.pos,
+                &self.rolls,
+                &weights,
+                true,
+            );
             *event.cancellation_result = InteractionResult::Consume;
             return Flow::Cancel;
         }
@@ -1283,6 +1294,7 @@ impl Hooks for Slimefun {
             return Flow::Cancel;
         }
         if let Some(machine) = hand_machine::HandMachine::at(host, level, event.click.pos) {
+            let weights = self.settings.lock().unwrap().pan_weights;
             machine.activate(
                 host,
                 player,
@@ -1290,6 +1302,7 @@ impl Hooks for Slimefun {
                 event.click.pos,
                 &self.delayed_crafts,
                 &self.rolls,
+                &weights,
             );
             *event.cancellation_result = InteractionResult::Consume;
             return Flow::Cancel;
@@ -1905,7 +1918,7 @@ fn vanilla_station_blocks(host: &dyn mod_api::Host, item: &mod_api::ItemStack) -
     guide::blocks_vanilla_station(item) || guide::is_guide_book(host, item)
 }
 
-fn describe_recipe(id: &str, double_ores: bool) -> Vec<String> {
+fn describe_recipe(id: &str, settings: Settings) -> Vec<String> {
     let outputs = |output: &str| {
         output.eq_ignore_ascii_case(id)
             || output
@@ -1918,7 +1931,7 @@ fn describe_recipe(id: &str, double_ores: bool) -> Vec<String> {
     for (name, recipes, multiplier) in [
         ("Grind Stone", GRINDING, 1),
         ("Ore Crusher", CRUSHING, 1),
-        ("Ore Crusher", DOUBLING, 1 + u32::from(double_ores)),
+        ("Ore Crusher", DOUBLING, 1 + u32::from(settings.double_ores)),
         ("Compressor", COMPRESSING, 1),
         ("Pressure Chamber", PRESSING, 1),
         ("Juicer", JUICING, 1),
@@ -2016,8 +2029,12 @@ fn describe_recipe(id: &str, double_ores: bool) -> Vec<String> {
         }
     }
     for pan in gold_pan::PANS {
-        for &(weight, kind) in pan.drops {
+        let drops = pan.weighted_drops(&settings.pan_weights);
+        let total: f64 = drops.clone().map(|(weight, _)| f64::from(weight)).sum();
+        for (weight, kind) in drops {
             if outputs(kind.id()) {
+                let chance = format!("{:.2}", f64::from(weight) / total * 100.0);
+                let chance = chance.trim_end_matches('0').trim_end_matches('.');
                 let targets = pan
                     .targets
                     .iter()
@@ -2026,7 +2043,7 @@ fn describe_recipe(id: &str, double_ores: bool) -> Vec<String> {
                     .join(" or ");
                 for machine in [pan.research.name, "Electric Gold Pan"] {
                     lines.push(format!(
-                        "{machine} | {targets} -> 1 × {} ({weight}%)",
+                        "{machine} | {targets} -> 1 × {} ({chance}%)",
                         kind.id()
                     ));
                 }
@@ -2166,7 +2183,7 @@ mod tests {
     #[test]
     fn nether_pan_recipe_and_uses_have_the_paper_ingredients_and_targets() {
         assert_eq!(
-            describe_recipe("NETHER_GOLD_PAN", true),
+            describe_recipe("NETHER_GOLD_PAN", Settings::default()),
             [
                 "Enhanced Crafting Table | 1 × NETHER_GOLD_PAN | research nether_gold_pan",
                 "- | - | -",
@@ -2174,15 +2191,47 @@ mod tests {
                 "minecraft:nether_brick | minecraft:nether_brick | minecraft:nether_brick",
             ],
         );
-        assert!(describe_recipe("ghast_tear", true).iter().any(|line| line ==
+        assert!(describe_recipe("ghast_tear", Settings::default()).iter().any(|line| line ==
             "Nether Gold Pan | minecraft:soul_sand or minecraft:soul_soil -> 1 × minecraft:ghast_tear (2%)"
         ));
         assert_eq!(recipes::NETHER_GOLD_PAN_RESEARCH.cost, 8);
     }
 
     #[test]
+    fn recipe_lookup_reports_normalized_paper_pan_chances_and_omits_zero_weights() {
+        let mut settings = Settings::default();
+        let config = r#"
+            [items.GOLD_PAN.chance]
+            FLINT = 0
+            CLAY = 1
+            SIFTED_ORE = 0
+            IRON_NUGGET = 7
+        "#
+        .parse::<toml::Table>()
+        .unwrap();
+        settings.pan_weights.read_config(config.get("items"));
+        assert!(
+            describe_recipe("clay_ball", settings)
+                .iter()
+                .any(|line| line
+                    == "Electric Gold Pan | minecraft:gravel -> 1 × minecraft:clay_ball (12.5%)")
+        );
+        assert!(
+            !describe_recipe("flint", settings)
+                .iter()
+                .any(|line| line.starts_with("Electric Gold Pan |"))
+        );
+    }
+
+    #[test]
     fn recipe_lookup_reports_the_configured_ore_yield() {
-        let normal = describe_recipe("diamond", false);
+        let normal = describe_recipe(
+            "diamond",
+            Settings {
+                double_ores: false,
+                ..Settings::default()
+            },
+        );
         assert!(
             normal
                 .iter()
@@ -2190,7 +2239,7 @@ mod tests {
                     == "Ore Crusher | 1 × minecraft:diamond_ore -> 1 × minecraft:diamond")
         );
 
-        let double = describe_recipe("diamond", true);
+        let double = describe_recipe("diamond", Settings::default());
         assert!(
             double
                 .iter()

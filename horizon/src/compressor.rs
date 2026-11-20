@@ -50,7 +50,7 @@ enum Action {
         level: LevelRef,
         position: [i32; 3],
         cauldron: [i32; 3],
-        stack: ItemStack,
+        stack: Option<ItemStack>,
     },
     Output(Output),
 }
@@ -162,7 +162,7 @@ impl DelayedCrafts {
         position: [i32; 3],
         cauldron: [i32; 3],
         sound: &'static str,
-        stack: ItemStack,
+        stack: Option<ItemStack>,
     ) -> Result<(), Refusal> {
         // Dough schedules five successive 20-tick delays, then 20 ticks for output.
         let steps = (1..=5).map(|step| {
@@ -262,8 +262,19 @@ impl DelayedCrafts {
                 cauldron,
                 stack,
             }) => {
+                let location = position.map(|axis| f64::from(axis) + 0.5);
+                let Some(stack) = stack else {
+                    let _ = level.play_sound(
+                        host,
+                        "minecraft:entity.armor_stand.break",
+                        location,
+                        SoundSource::Blocks,
+                        1.0,
+                        1.0,
+                    );
+                    return;
+                };
                 if output_chest::route_or_drop(host, level, cauldron, position, &stack) {
-                    let location = position.map(|axis| f64::from(axis) + 0.5);
                     let _ = level.play_sound(
                         host,
                         "minecraft:entity.arrow.hit_player",
@@ -279,7 +290,7 @@ impl DelayedCrafts {
                             level,
                             position,
                             cauldron,
-                            stack,
+                            stack: Some(stack),
                         },
                     );
                 }
@@ -353,5 +364,39 @@ impl Output {
             Ok(())
         });
         result.map_err(|_| self)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use mod_api::testing::FakeHost;
+
+    use super::*;
+
+    #[test]
+    fn panning_with_no_configured_output_finishes_with_papers_failure_sound_once() {
+        let tasks = DelayedCrafts::default();
+        let mut host = FakeHost::new();
+        let id = TaskId(1);
+        tasks.tasks.lock().unwrap().insert(
+            id,
+            Action::PanOutput {
+                level: host.level.level(),
+                position: [1, 65, 2],
+                cauldron: [1, 64, 2],
+                stack: None,
+            },
+        );
+        let event = ScheduledTaskEvent {
+            id,
+            owner: "slimefun",
+            token: 0,
+        };
+        tasks.scheduled_task(&mut host, &event);
+        tasks.scheduled_task(&mut host, &event);
+        assert!(tasks.tasks.lock().unwrap().is_empty());
+        assert_eq!(host.sounds.len(), 1);
+        assert_eq!(host.sounds[0].sound, "minecraft:entity.armor_stand.break");
+        assert_eq!(host.sounds[0].at, [1.5, 65.5, 2.5]);
     }
 }
