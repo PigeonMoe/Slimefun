@@ -222,7 +222,7 @@ fn update_charge(host: &dyn Host, stack: &ItemStack, change: Change) -> Option<A
     }
     let id = item_id(stack)?;
     let Some((carrier, maximum)) = rechargeable(&id) else {
-        return Some(Action::ReturnOther);
+        return crate::guide::has_stock_item_id(&id).then_some(Action::ReturnOther);
     };
     if stack.item().id(host) != carrier {
         return None;
@@ -286,6 +286,7 @@ mod tests {
         let mut host = FakeHost::new();
         let materials = [
             "minecraft:compass",
+            "minecraft:glass_bottle",
             "minecraft:leather_chestplate",
             "minecraft:shears",
             "minecraft:iron_boots",
@@ -343,6 +344,39 @@ mod tests {
                 charge_lore(charge, capacity),
             ])
         );
+    }
+
+    #[test]
+    fn charging_bench_returns_only_registered_non_rechargeables() {
+        let host = host();
+        let material = "minecraft:glass_bottle";
+        let ordinary = Kind::Vanilla(material).stack(&host, 1).unwrap();
+        assert!(action(&host, &ordinary).is_none());
+
+        let flask = paper_stack(
+            &host,
+            "FLASK_OF_KNOWLEDGE",
+            material,
+            None,
+            Tag::String("".into()),
+        );
+        assert!(matches!(action(&host, &flask), Some(Action::ReturnOther)));
+        for id in ["QA_UNREGISTERED_FLASK", "flask_of_knowledge"] {
+            let unknown = paper_stack(&host, id, material, None, Tag::String("".into()));
+            assert!(action(&host, &unknown).is_none(), "{id}");
+        }
+
+        let teleporter = paper_stack(
+            &host,
+            "PORTABLE_TELEPORTER",
+            "minecraft:compass",
+            Some(10.0),
+            charge_lore(10.0, 50.0),
+        );
+        let Some(Action::Charge(charged)) = action(&host, &teleporter) else {
+            panic!("Expected the registered teleporter to charge")
+        };
+        assert_charge(&charged, 15.0, 50.0);
     }
 
     #[test]

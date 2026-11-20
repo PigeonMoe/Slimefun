@@ -116,6 +116,10 @@ pub(crate) fn is_guide_book(host: &dyn Host, item: &ItemStack) -> bool {
     book_mode(host, item).is_some()
 }
 
+pub(crate) fn has_stock_item_id(id: &str) -> bool {
+    catalog::has_stock_item_id(id)
+}
+
 pub(crate) fn blocks_vanilla_station(item: &ItemStack) -> bool {
     let tickers = Tickers::current();
     crate::items::item_id(item).is_some_and(|id| {

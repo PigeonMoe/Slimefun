@@ -247,6 +247,10 @@ pub(super) fn lookup(id: &str) -> Option<&'static Entry> {
     CATALOG.get(&canonical(id))
 }
 
+pub(super) fn has_stock_item_id(id: &str) -> bool {
+    CATALOG.get(id).is_some_and(|entry| entry.id == id) || listed_stock_item(id)
+}
+
 pub(super) fn blocks_vanilla_station(id: &str) -> bool {
     if !id.bytes().all(|ch| ch.is_ascii_uppercase() || ch.is_ascii_digit() || ch == b'_') {
         return false;
@@ -254,6 +258,10 @@ pub(super) fn blocks_vanilla_station(id: &str) -> bool {
     if let Some(entry) = CATALOG.get(id) {
         return entry.label.is_some() || matches!(entry.item.kind, Kind::Slimefun(_));
     }
+    listed_stock_item(id)
+}
+
+fn listed_stock_item(id: &str) -> bool {
     crate::rainbow::item(id).is_some()
         || include_str!("stock.tsv").lines().any(|line| {
             line.split_once('\t')
