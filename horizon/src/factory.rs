@@ -23,7 +23,9 @@ use crate::{
     geo_deposits::{self, Mining, Resource},
     geology,
     gold_pan::PANS,
-    items::{GOLD_PAN, Kind, PULVERIZED_ORE, PURE_ORE_CLUSTER, SALT, SIFTED_ORE},
+    items::{
+        COPPER_DUST, GOLD_DUST, GOLD_PAN, Kind, PULVERIZED_ORE, PURE_ORE_CLUSTER, SALT, SIFTED_ORE,
+    },
     machine::{Settings, makeshift_recipe},
     network_runtime,
     random::Rolls,
@@ -1460,6 +1462,33 @@ fn dust_to_ingot_recipes() -> impl Iterator<Item = SingleRecipe> {
         })
 }
 
+fn ingot_pulverizer_recipes(post_setup_recipes: bool) -> impl Iterator<Item = SingleRecipe> {
+    // Paper registers these two vanilla ingots before installing its smeltery-derived recipes.
+    [
+        (Kind::Vanilla("minecraft:gold_ingot"), GOLD_DUST),
+        (Kind::Vanilla("minecraft:copper_ingot"), COPPER_DUST),
+    ]
+    .into_iter()
+    .map(|(ingot, dust)| SingleRecipe {
+        input: Stack {
+            kind: ingot,
+            count: 1,
+        },
+        output: Stack {
+            kind: dust,
+            count: 1,
+        },
+    })
+    .chain(
+        dust_to_ingot_recipes()
+            .filter(move |_| post_setup_recipes)
+            .map(|recipe| SingleRecipe {
+                input: recipe.output,
+                output: recipe.input,
+            }),
+    )
+}
+
 fn single_recipe(
     host: &dyn Host,
     inputs: &[Option<ItemStack>; 2],
@@ -1599,6 +1628,18 @@ fn find_recipe(
     enchantment_viewed: bool,
     roll: impl FnMut(u32) -> Option<u32>,
 ) -> Option<RecipeRun> {
+    let post_setup_recipes = crate::ticker_policy::Tickers::current().enabled();
+    // These three machines have no default recipes. Paper adds their recipes only to enabled items.
+    if !post_setup_recipes
+        && (machine.is_smeltery()
+            || matches!(machine.family, RecipeFamily::OreGrinder)
+            || matches!(
+                machine.family,
+                RecipeFamily::Processing(spec) if matches!(spec.family, Family::IngotFactory)
+            ))
+    {
+        return None;
+    }
     if let RecipeFamily::Advanced(spec) = machine.family {
         let layout: &[usize] = if machine.is_smeltery() {
             &SMELTERY_INPUT
@@ -1638,10 +1679,7 @@ fn find_recipe(
         RecipeFamily::IngotPulverizer => single_recipe(
             host,
             &inputs,
-            dust_to_ingot_recipes().map(|recipe| SingleRecipe {
-                input: recipe.output,
-                output: recipe.input,
-            }),
+            ingot_pulverizer_recipes(post_setup_recipes),
             false,
         ),
         RecipeFamily::HeatedPressure => heated_recipe(host, &inputs, machine.speed),
@@ -3290,6 +3328,40 @@ mod tests {
             ),
             (1, 1, 2, 20)
         );
+    }
+
+    #[test]
+    fn the_ingot_pulverizer_keeps_its_two_vanilla_recipes_before_paper_post_setup() {
+        use crate::items::LEAD_INGOT;
+
+        let host = recipe_host([
+            "minecraft:copper_ingot",
+            "minecraft:glowstone_dust",
+            "minecraft:gold_ingot",
+            "minecraft:gunpowder",
+            "minecraft:iron_ingot",
+        ]);
+        let machine = ElectricMachine::for_item("ELECTRIC_INGOT_PULVERIZER").unwrap();
+        for (ingot, dust) in [
+            (Kind::Vanilla("minecraft:gold_ingot"), GOLD_DUST),
+            (Kind::Vanilla("minecraft:copper_ingot"), COPPER_DUST),
+        ] {
+            let mut data = Compound::new();
+            let input = ingot.stack(&host, 4).unwrap();
+            assert!(write_stack(&host, &mut data, INPUT[0], Some(input.clone())));
+            let active = find_recipe(&host, &data, machine, Settings::default(), false, |_| None)
+                .unwrap();
+            assert_eq!(active.quantity(), 1);
+            assert!(dust.matches(&host, &active.outputs[0]));
+
+            let inputs = [Some(input), None];
+            let installed = single_recipe(&host, &inputs, ingot_pulverizer_recipes(false), false)
+                .unwrap();
+            assert!(dust.matches(&host, &installed.outputs[0]));
+        }
+        let paper_ingot = [LEAD_INGOT.stack(&host, 1), None];
+        assert!(single_recipe(&host, &paper_ingot, ingot_pulverizer_recipes(true), false).is_some());
+        assert!(single_recipe(&host, &paper_ingot, ingot_pulverizer_recipes(false), false).is_none());
     }
 
     #[test]
