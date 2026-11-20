@@ -9,6 +9,7 @@ use mod_api::{
 };
 
 use crate::{
+    availability,
     enchantment_rune::{self, ANCIENT_RUNE_ENCHANTMENT},
     items::{Kind, item, text},
     random::Rolls,
@@ -64,6 +65,20 @@ enum Rune {
 }
 
 impl Rune {
+    fn for_toss(
+        host: &dyn Host,
+        stack: &ItemStack,
+        denial: impl FnOnce(&str) -> Option<availability::Denied>,
+    ) -> Result<Option<Self>, availability::Denied> {
+        let rune = [Self::Soulbound, Self::Enchantment]
+            .into_iter()
+            .find(|rune| rune.kind().matches(host, stack));
+        match rune.and_then(|kind| denial(kind.kind().id())) {
+            Some(denied) => Err(denied),
+            None => Ok(rune),
+        }
+    }
+
     fn kind(self) -> Kind {
         match self {
             Self::Soulbound => ANCIENT_RUNE_SOULBOUND,
@@ -108,11 +123,17 @@ impl Rituals {
         let Some(stack) = event.item.stack(host) else {
             return;
         };
-        let Some(kind) = [Rune::Soulbound, Rune::Enchantment]
-            .into_iter()
-            .find(|kind| kind.kind().matches(host, &stack))
-        else {
-            return;
+        let kind = match Rune::for_toss(host, &stack, |id| {
+            availability::use_denial(host.dimension(), id)
+        }) {
+            Ok(Some(kind)) => kind,
+            Ok(None) => return,
+            Err(denied) => {
+                if let Some(player) = host.player(event.player) {
+                    denied.tell(host, player);
+                }
+                return;
+            }
         };
         let Some(player) = host.player(event.player) else {
             return;
@@ -641,6 +662,36 @@ mod tests {
         assert!(!is_bound(
             &host,
             &with("minecraft:custom_data", custom_data(Tag::Int(1)))
+        ));
+    }
+
+    #[test]
+    fn both_tossed_runes_require_availability_for_their_own_paper_id() {
+        let mut host = FakeHost::new();
+        let carrier = Identifier::parse("minecraft:firework_star").unwrap();
+        host.registries.resolve_items([carrier.clone()]).unwrap();
+        for (rune, id) in [
+            (Rune::Soulbound, "ANCIENT_RUNE_SOULBOUND"),
+            (Rune::Enchantment, "ANCIENT_RUNE_ENCHANTMENT"),
+        ] {
+            let stack = rune.kind().stack(&host, 1).unwrap();
+            for denied in [availability::Denied::Item, availability::Denied::World] {
+                let result = Rune::for_toss(&host, &stack, |checked| {
+                    assert_eq!(checked, id);
+                    Some(denied)
+                });
+                assert!(matches!(result, Err(reason) if reason == denied));
+            }
+            assert!(
+                matches!(Rune::for_toss(&host, &stack, |_| None), Ok(Some(kind)) if kind == rune)
+            );
+        }
+        let vanilla = ItemStack::new(host.item_key(&carrier).unwrap(), 1).unwrap();
+        assert!(matches!(
+            Rune::for_toss(&host, &vanilla, |_| panic!(
+                "vanilla item checked as a rune"
+            )),
+            Ok(None)
         ));
     }
 
