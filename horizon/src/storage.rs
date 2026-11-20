@@ -6,6 +6,7 @@ use mod_api::{
     AttachmentCodec, AttachmentType, CommandArgumentValue, CommandSource, Compound, ConfigPath,
     Holder, HostTransaction, ItemStack, LevelRef, RunModCommandEvent, ServerHost, Tag,
 };
+use sha2::{Digest, Sha256};
 
 use crate::{
     ancient_altar, block_placer,
@@ -17,8 +18,9 @@ use crate::{
 
 // One receipt per coordinate, in the same chunk as the restored inventory. The
 // receipt survives breaking and replacing the carrier with another copy of the item.
-static ORPHAN_RECEIPTS: AttachmentType<Compound> = AttachmentType {
+static MENU_RECEIPTS: AttachmentType<Compound> = AttachmentType {
     namespace: "slimefun",
+    // Keep the persisted name and string receipts from inventory-only imports.
     name: "paper_orphan_menu_receipts",
     default: Compound::new,
     codec: Some(AttachmentCodec {
@@ -486,6 +488,29 @@ fn is_orphan_inventory(row: &toml::Table) -> bool {
     !row.contains_key("metadata") && row.contains_key("paper_inventory")
 }
 
+fn menu_receipt_key([x, y, z]: [i32; 3]) -> String {
+    format!("{x},{y},{z}")
+}
+
+fn factory_menu_receipt(row: &toml::Table, id: &str) -> Result<Tag, String> {
+    // Hash the validated archived slots, independently of world state or a
+    // later DataFixer version. The exporter already normalizes component keys.
+    let mut items: Vec<_> = row
+        .get("paper_items")
+        .and_then(toml::Value::as_array)
+        .ok_or("The Paper archive has no converted inventory slots.")?
+        .iter()
+        .collect();
+    items.sort_unstable_by_key(|item| item.get("slot").and_then(toml::Value::as_integer));
+    let encoded =
+        serde_json::to_vec(&items).map_err(|_| "Could not fingerprint the Paper menu.")?;
+    let digest = format!("{:x}", Sha256::digest(encoded));
+    Ok(Tag::compound([
+        ("id", Tag::String(id.into())),
+        ("slots_sha256", Tag::String(digest.as_str().into())),
+    ]))
+}
+
 fn orphan_preset(row: &toml::Table) -> Result<Option<&str>, String> {
     if !is_orphan_inventory(row)
         || row
@@ -524,14 +549,13 @@ fn restore_orphan_inventory(
             return Err("This inventory-only Paper menu preset is unsupported.".into());
         }
         let holder = Holder::Chunk(column(pos));
-        let mut receipts = ORPHAN_RECEIPTS
+        let mut receipts = MENU_RECEIPTS
             .get_existing(host, holder)
             .map_err(|_| "Could not read the Paper inventory receipts.")?
             .unwrap_or_default();
-        let [x, y, z] = pos;
-        let key = format!("{x},{y},{z}").as_str().into();
+        let key = menu_receipt_key(pos);
         let receipt = Tag::String(id.as_str().into());
-        if let Some(previous) = receipts.get(&key) {
+        if let Some(previous) = receipts.get(&key.as_str().into()) {
             return if previous == &receipt {
                 Ok(format!(
                     "The inventory-only Paper archive for {id} was already restored."
@@ -542,8 +566,8 @@ fn restore_orphan_inventory(
         }
 
         crate::network_runtime::restore_installed_menu(host, level, pos, &id, component, items)?;
-        receipts.insert(key, receipt);
-        ORPHAN_RECEIPTS
+        receipts.insert(key.as_str().into(), receipt);
+        MENU_RECEIPTS
             .set(host, holder, receipts)
             .map_err(|_| "Could not save the Paper inventory receipt.")?;
         Ok(format!(
@@ -594,10 +618,33 @@ fn restore_network(
         return networks.restore(host, level, pos, id, metadata, row);
     }
     let inventory = decode_inventory(host, row)?;
-    let has_archive = inventory.is_some();
-    if has_archive {
+    let pending_receipts = if inventory.is_some() {
         validate_block_inventory_preset(row, id)?;
-    }
+        if !level.in_place(host) {
+            return Err("The electric machine is not supported in this level.".into());
+        }
+        let holder = Holder::Chunk(column(pos));
+        let mut receipts = MENU_RECEIPTS
+            .get_existing(host, holder)
+            .map_err(|_| "Could not read the Paper inventory receipts.")?
+            .unwrap_or_default();
+        let key = menu_receipt_key(pos);
+        let receipt = factory_menu_receipt(row, id)?;
+        let legacy = Tag::String(id.into());
+        if let Some(previous) = receipts.get(&key.as_str().into()) {
+            return if previous == &receipt || previous == &legacy {
+                Ok(format!(
+                    "The Paper inventory for {id} was already restored."
+                ))
+            } else {
+                Err("This position already has a receipt for a different Paper inventory.".into())
+            };
+        }
+        receipts.insert(key.as_str().into(), receipt);
+        Some((holder, receipts))
+    } else {
+        None
+    };
     let prepared = crate::factory::prepare_paper_inventory(
         host,
         level,
@@ -607,6 +654,12 @@ fn restore_network(
     )?;
     let count = prepared.len();
     host.transaction(|host, _| {
+        let has_archive = pending_receipts.is_some();
+        if let Some((holder, receipts)) = pending_receipts {
+            MENU_RECEIPTS
+                .set(host, holder, receipts)
+                .map_err(|_| "Could not save the Paper inventory receipt.")?;
+        }
         let restored = networks.restore(host, level, pos, id, metadata, row)?;
         crate::factory::restore_paper_assembler_controls(host, level, pos, id, metadata)?;
         if has_archive {

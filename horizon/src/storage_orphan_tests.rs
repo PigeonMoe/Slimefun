@@ -122,8 +122,7 @@ impl ModStateServerHost for OrphanHost {
     }
 }
 
-#[test]
-fn an_orphan_gold_pan_without_a_preset_keeps_charge_and_cannot_refill_a_replacement() {
+fn gold_pan_host() -> OrphanHost {
     mod_api::__private::initialize().unwrap();
     let carrier = Arc::new(Mutex::new(None));
     mod_api::__private::part_tests::install_parts_fixture(&[ModEntry::new(
@@ -131,8 +130,13 @@ fn an_orphan_gold_pan_without_a_preset_keeps_charge_and_cannot_refill_a_replacem
         Box::new(CarrierFixture(carrier.clone())),
     )])
     .unwrap();
+    OrphanHost(FakeHost::new(), carrier.lock().unwrap().unwrap())
+}
+
+#[test]
+fn an_orphan_gold_pan_without_a_preset_keeps_charge_and_cannot_refill_a_replacement() {
+    let mut host = gold_pan_host();
     let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
-    let mut host = OrphanHost(FakeHost::new(), carrier.lock().unwrap().unwrap());
     let level = host.0.level.level();
     let pos = POSITION;
     let archive = tests::orphan_gold_pan();
@@ -217,6 +221,101 @@ fn an_orphan_gold_pan_without_a_preset_keeps_charge_and_cannot_refill_a_replacem
     let answer = restore_orphan_inventory(&mut host, level, pos, &archive, &networks).unwrap();
     assert!(answer.contains("already restored"));
     assert_eq!(host.0.attachments.to_nbt(), saved_replacement);
+    assert_eq!(
+        crate::network_runtime::charge(&mut host, level, pos),
+        Some(68)
+    );
+}
+
+#[test]
+fn a_paired_factory_archive_cannot_refill_consumed_or_replaced_inventory() {
+    let mut host = gold_pan_host();
+    let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
+    let level = host.0.level.level();
+    let pos = POSITION;
+    let mut archive = tests::orphan_gold_pan();
+    let id = orphan_preset(&archive).unwrap().unwrap().to_owned();
+    let material = Identifier::parse("minecraft:gravel").unwrap();
+    host.0.registries.resolve_items([material]).unwrap();
+    let metadata = format!("id = '{id}'\nenergy-charge = '37'")
+        .parse::<toml::Table>()
+        .unwrap();
+    archive.insert("metadata".into(), toml::Value::Table(metadata.clone()));
+    let networks = Mutex::new(Networks::default());
+    networks
+        .lock()
+        .unwrap()
+        .bind_fixture_node(&mut host, level, pos, &id, &metadata, true);
+    let original = host.0.attachments.to_nbt();
+    let mut invalid = archive.clone();
+    invalid
+        .get_mut("paper_items")
+        .unwrap()
+        .as_array_mut()
+        .unwrap()[0]
+        .as_table_mut()
+        .unwrap()
+        .insert("slot".into(), 22.into());
+    // Both the single and batch commands reach restore_network for paired menus.
+    assert!(restore_network(&mut host, level, pos, &invalid, &networks).is_err());
+    assert_eq!(host.0.attachments.to_nbt(), original);
+    let rollback = (&mut host as &mut dyn ServerHost).transaction(|host, _| {
+        restore_network(host, level, pos, &archive, &networks).unwrap();
+        Err::<(), _>("abort after saving the menu and chunk receipt")
+    });
+    assert!(rollback.is_err());
+    assert_eq!(host.0.attachments.to_nbt(), original);
+    restore_network(&mut host, level, pos, &archive, &networks).unwrap();
+
+    // Simulate withdrawing the restored gravel and pre-receipt persisted data.
+    let mut saved = host.0.attachments.to_nbt();
+    let Some(Tag::Compound(slimefun)) = saved.get_mut(&"slimefun".into()) else {
+        panic!("Slimefun attachments")
+    };
+    assert!(slimefun.remove(&MENU_RECEIPTS.name.into()).is_some());
+    let Some(Tag::Compound(inventories)) = slimefun.get_mut(&"machine_positions".into()) else {
+        panic!("live factory inventory")
+    };
+    let Some(Tag::Compound(positions)) = inventories.get_mut(&"value".into()) else {
+        panic!("factory position index")
+    };
+    let Some(Tag::Compound(menu)) = positions.get_mut(&menu_receipt_key(pos).as_str().into())
+    else {
+        panic!("restored Gold Pan")
+    };
+    assert!(menu.remove(&"19".into()).is_some());
+    assert!(menu.contains_key(&"paper_inventory_import".into()));
+    let consumed = menu.clone();
+    host.0.attachments = mod_api::Attachments::from_nbt(saved);
+    restore_network(&mut host, level, pos, &archive, &networks).unwrap();
+
+    let mut saved = host.0.attachments.to_nbt();
+    let Some(Tag::Compound(slimefun)) = saved.get_mut(&"slimefun".into()) else {
+        panic!("Slimefun attachments")
+    };
+    assert!(slimefun.contains_key(&MENU_RECEIPTS.name.into()));
+    assert_eq!(
+        slimefun
+            .get(&"machine_positions".into())
+            .and_then(|entry| entry.get("value"))
+            .and_then(|positions| positions.get(menu_receipt_key(pos).as_str())),
+        Some(&Tag::Compound(consumed)),
+    );
+
+    // Break and replace the Gold Pan. Keep only the restored location receipt.
+    slimefun.remove(&"machine_positions".into());
+    slimefun.remove(&"plain_energy_nodes".into());
+    host.0.attachments = mod_api::Attachments::from_nbt(saved);
+    let replacement = "energy-charge = '68'".parse().unwrap();
+    networks
+        .lock()
+        .unwrap()
+        .bind_fixture_node(&mut host, level, pos, &id, &replacement, true);
+    let before_repeat = host.0.attachments.to_nbt();
+    let repeat = restore_network(&mut host, level, pos, &archive, &networks).unwrap();
+    assert!(repeat.contains("already restored"), "{repeat}");
+    assert!(restore_network(&mut host, level, pos, &invalid, &networks).is_err());
+    assert_eq!(host.0.attachments.to_nbt(), before_repeat);
     assert_eq!(
         crate::network_runtime::charge(&mut host, level, pos),
         Some(68)

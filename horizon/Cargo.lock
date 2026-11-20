@@ -489,6 +489,7 @@ version = "0.1.0-dev.10"
 dependencies = [
  "horizon-mod-api",
  "serde_json",
+ "sha2",
  "toml",
 ]
 
