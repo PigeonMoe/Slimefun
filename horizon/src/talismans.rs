@@ -757,14 +757,20 @@ fn possible_magic_enchants(
     candidates
 }
 
-fn present(host: &dyn Host, player: PlayerRef, spec: &Talisman) -> bool {
+fn present(host: &dyn ServerHost, player: PlayerRef, spec: &Talisman) -> bool {
     carried_talisman(host, player, spec).is_some() && learned(host, player, spec)
 }
 
-fn learned(host: &dyn Host, player: PlayerRef, spec: &Talisman) -> bool {
+fn learned(host: &dyn ServerHost, player: PlayerRef, spec: &Talisman) -> bool {
     player
         .persistent_data(host)
-        .is_some_and(|data| research::unlocked(&data, spec.research))
+        .is_some_and(|data| can_activate(host.dimension(), spec, &data))
+}
+
+fn can_activate(dimension: &str, spec: &Talisman, data: &mod_api::Compound) -> bool {
+    // Paper calls the base talisman's canUse even when it found the Ender item.
+    crate::availability::use_denial(dimension, spec.normal.id()).is_none()
+        && research::unlocked(data, spec.research)
 }
 
 enum StorageSlot {
@@ -801,7 +807,7 @@ fn first_matching(
 }
 
 fn activated(
-    host: &dyn Host,
+    host: &dyn ServerHost,
     player: PlayerRef,
     level: LevelRef,
     spec: &Talisman,
@@ -851,6 +857,41 @@ mod tests {
         assert!(first_matching(&host, [(4, normal)], 27, WISE.ender).is_none());
         assert!(first_matching(&host, [(4, ender.clone())], 36, WISE.normal).is_none());
         assert!(first_matching(&host, [(26, ender)], 27, WISE.ender).is_some());
+    }
+
+    #[test]
+    fn passive_talismans_use_the_base_items_availability_for_ender_copies() {
+        struct ResetAvailability;
+        impl Drop for ResetAvailability {
+            fn drop(&mut self) {
+                crate::availability::configure(&toml::Table::new());
+            }
+        }
+        let _reset = ResetAvailability;
+        crate::availability::configure(
+            &r#"
+                [worlds."fixture:disabled_base".items]
+                FIRE_TALISMAN = false
+                ENDER_FIRE_TALISMAN = true
+                [worlds."fixture:disabled_ender".items]
+                FIRE_TALISMAN = true
+                ENDER_FIRE_TALISMAN = false
+            "#
+            .parse()
+            .unwrap(),
+        );
+        let key = format!("slimefun:{}", FIRE.research.id);
+        let learned = mod_api::Compound::from([(
+            "PlayerPersisted".into(),
+            Tag::compound([(key.as_str(), Tag::Byte(1))]),
+        )]);
+        assert!(!can_activate("fixture:disabled_base", &FIRE, &learned));
+        assert!(can_activate("fixture:disabled_ender", &FIRE, &learned));
+        assert!(!can_activate(
+            "fixture:disabled_ender",
+            &FIRE,
+            &mod_api::Compound::new()
+        ));
     }
 
     #[test]
