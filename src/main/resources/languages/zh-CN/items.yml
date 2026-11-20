@@ -393,8 +393,20 @@ SEISMIC_AXE:
     target: '&7&o制造一场地震...'
 EXPLOSIVE_BOW:
   name: '&c爆裂之弓'
+  lore:
+  - source: '&fAny Arrows fired using this Bow'
+    target: '&f用这把弓射出的箭'
+  - source: '&fwill launch hit enemys into the air'
+    target: '&f会将命中的敌人击飞'
 ICY_BOW:
   name: '&b冰封之弓'
+  lore:
+  - source: '&fAny Arrows fired using this Bow'
+    target: '&f用这把弓射出的箭'
+  - source: '&fwill prevent hit enemys from moving'
+    target: '&f会使被命中的敌人无法移动'
+  - source: '&ffor 2 seconds'
+    target: '&f持续 2 秒'
 SMELTERS_PICKAXE:
   name: '&6熔炉镐'
   lore:

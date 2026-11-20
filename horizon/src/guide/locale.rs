@@ -2,7 +2,7 @@
 
 use std::sync::LazyLock;
 
-use mod_api::{Compound, ItemStack, Tag};
+use mod_api::{Compound, Tag};
 use serde_json::Value;
 
 use super::colored_lore;
@@ -83,66 +83,24 @@ pub(crate) fn localize_item_components(id: &str, components: &mut Compound) {
         return;
     };
     let translations: Vec<_> = translations(id)
-        .map(|(source, target)| (literal(&colored_lore(source)), target))
+        .filter_map(|(source, target)| {
+            let styled = crate::network_runtime::paper_text(&colored_lore(source))?;
+            Some((styled, target))
+        })
         .collect();
     for line in lore {
         let displayed = literal(line);
         let content = base.and(name).filter(|_| displayed.starts_with("Content: "));
         let translated = content
             .or_else(|| {
-                translations.iter().find_map(|(source, target)| {
-                    (source.trim() == displayed.trim()).then_some(*target)
-                })
+                let styled = crate::network_runtime::paper_text(line)?;
+                translations
+                    .iter()
+                    .find_map(|(source, target)| (source == &styled).then_some(*target))
             })
             .or_else(|| shared_lore(&displayed));
         if let Some(target) = translated {
             *line = colored_lore(target);
         }
     }
-}
-
-/// The guide can omit untranslated hints and fill in missing reference descriptions.
-pub(in crate::guide) fn item_icon(mut stack: ItemStack, id: &str) -> Option<ItemStack> {
-    let name = item_name(id).unwrap_or("远古工艺物品");
-    let mut translations: Vec<_> = translations(id)
-        .map(|(source, target)| (literal(&colored_lore(source)), target, false))
-        .collect();
-    let mut lore = Vec::new();
-    if let Some(Tag::List(lines)) = stack
-        .components()
-        .and_then(|patch| patch.as_nbt().get(&"minecraft:lore".into()))
-    {
-        for line in lines {
-            let displayed = literal(line);
-            if let Some((_, target, shown)) = translations
-                .iter_mut()
-                .find(|(source, _, _)| source.trim() == displayed.trim())
-            {
-                *shown = true;
-                lore.push(colored_lore(target));
-            } else if let Some(target) = shared_lore(&displayed) {
-                lore.push(colored_lore(target));
-            } else if !displayed.chars().any(|ch| ch.is_ascii_alphabetic())
-                || displayed.chars().any(|ch| ('\u{4e00}'..='\u{9fff}').contains(&ch))
-            {
-                lore.push(line.clone());
-            }
-        }
-    }
-    for (source, target, shown) in translations {
-        // Dynamic templates, such as a spawner's mob type, need a value from the stack.
-        if !shown && !source.contains('<') {
-            let line = colored_lore(target);
-            if !lore.contains(&line) {
-                lore.push(line);
-            }
-        }
-    }
-    stack
-        .apply_components(&Compound::from([
-            ("minecraft:custom_name".into(), colored_lore(name)),
-            ("minecraft:lore".into(), Tag::List(lore)),
-        ]))
-        .ok()?;
-    Some(stack)
 }

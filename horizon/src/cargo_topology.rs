@@ -222,16 +222,21 @@ pub(super) fn block_invalid_placement(host: HostSide<'_>, event: &UseOnEvent<'_>
     };
     let [x, y, z] = event.pos;
     let [dx, dy, dz] = event.face;
-    if dy != 0 {
-        return true;
+    let allowed = dy == 0
+        && matches!(
+            level
+                .block_state(host, [x + dx, y, z + dz])
+                .map(|state| state.block().id(host))
+                .as_deref(),
+            Some("minecraft:air" | "minecraft:cave_air" | "minecraft:void_air")
+        );
+    if !allowed {
+        let _ = player.tell(
+            host,
+            crate::hologram_projector::colored_label("&4货运节点必须放置在箱子或机器上!"),
+        );
     }
-    let free = level
-        .block_state(host, [x + dx, y, z + dz])
-        .map(|state| state.block().id(host));
-    !matches!(
-        free.as_deref(),
-        Some("minecraft:air" | "minecraft:cave_air" | "minecraft:void_air")
-    )
+    !allowed
 }
 
 pub(super) fn item_key(host: &dyn ServerHost, id: &str) -> Option<ItemKey> {

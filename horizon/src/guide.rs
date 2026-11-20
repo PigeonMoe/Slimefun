@@ -995,14 +995,6 @@ fn entry_action(entry: &'static Entry, cheat: bool) -> Action {
     }
 }
 
-fn guide_stack(host: &dyn Host, kind: Kind, count: u32) -> Option<ItemStack> {
-    let stack = kind.stack(host, count)?;
-    match kind {
-        Kind::Slimefun(item) => locale::item_icon(stack, item.id),
-        _ => Some(stack),
-    }
-}
-
 // The Paper categories use these actual item templates and seasonal head skins.
 const CHRISTMAS_ICON: HeadTexture = HeadTexture {
     profile: [696803316, -1167118050, -1409946767, -1076270746],
@@ -1071,7 +1063,7 @@ fn method_icon(host: &dyn Host, entry: &Entry) -> Option<ItemStack> {
             lore,
         );
     }
-    let mut stack = guide_stack(host, method.icon, 1)?;
+    let mut stack = method.icon.stack(host, 1)?;
     if !method.lore.is_empty() {
         let mut lore = stack
             .components()
@@ -1098,7 +1090,7 @@ fn ingredient_icon(
     index: usize,
     item: crate::recipes::Stack,
 ) -> Option<ItemStack> {
-    let mut stack = guide_stack(host, item.kind, item.count)?;
+    let mut stack = item.kind.stack(host, item.count)?;
     if let Some(visual) = entry.visuals.iter().find(|visual| visual.slot == index) {
         let mut parts =
             Compound::from([("minecraft:custom_name".into(), colored_lore(visual.label))]);
@@ -1126,7 +1118,7 @@ fn entry_name(entry: &Entry) -> String {
 }
 
 fn entry_icon(host: &dyn Host, entry: &Entry, count: u32) -> Option<ItemStack> {
-    let mut stack = guide_stack(host, entry.item.kind, count)?;
+    let mut stack = entry.item.kind.stack(host, count)?;
     if entry.label.is_some() {
         stack
             .apply_components(&Compound::from([(
@@ -1391,6 +1383,60 @@ mod tests {
         assert!(inventory.given.is_empty());
         assert!(ItemResource::of(&normal).matches(&inventory.slots[&1]));
         assert_eq!(inventory.slots[&1].count(), host.max_stack_size(normal.item()).unwrap());
+    }
+
+    #[test]
+    fn the_guide_retains_item_lore_without_a_paper_translation() {
+        mod_api::__private::initialize().unwrap();
+        let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
+        let mut host = FakeHost::new();
+        let entry = lookup("BLADE_OF_VAMPIRES").unwrap();
+        host.registries
+            .resolve_items([Identifier::parse(entry.item.kind.material()).unwrap()])
+            .unwrap();
+        let actual = entry.item.kind.stack(&host, 1).unwrap();
+        let icon = entry_icon(&host, entry, 1).unwrap();
+        let parts = actual.components().unwrap().as_nbt();
+        assert_eq!(
+            parts.get(&"minecraft:custom_name".into()),
+            Some(&colored_lore("&c吸血鬼之刀")),
+        );
+        assert!(parts.get(&"minecraft:lore".into()).is_some());
+        assert_eq!(icon.components().unwrap().as_nbt(), parts);
+    }
+
+    #[test]
+    fn special_bow_lore_preserves_the_paper_line_order_and_duration() {
+        mod_api::__private::initialize().unwrap();
+        let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
+        let descriptions = [
+            (
+                "EXPLOSIVE_BOW",
+                &["&f用这把弓射出的箭", "&f会将命中的敌人击飞"][..],
+            ),
+            (
+                "ICY_BOW",
+                &[
+                    "&f用这把弓射出的箭",
+                    "&f会使被命中的敌人无法移动",
+                    "&f持续 2 秒",
+                ][..],
+            ),
+        ];
+        let mut host = FakeHost::new();
+        host.registries
+            .resolve_items([Identifier::parse("minecraft:bow").unwrap()])
+            .unwrap();
+        for (id, lines) in descriptions {
+            let stack = entry_icon(&host, lookup(id).unwrap(), 1).unwrap();
+            let lore = stack
+                .components()
+                .unwrap()
+                .as_nbt()
+                .get(&"minecraft:lore".into());
+            let expected = Tag::List(lines.iter().map(|line| colored_lore(line)).collect());
+            assert_eq!(lore, Some(&expected), "{id}");
+        }
     }
 
     #[test]

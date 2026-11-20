@@ -632,7 +632,7 @@
           "target": "&7收件人: &e你"
         }
       ],
-      "name": "&7来自 &e原作者 &7的礼物"
+      "name": "&7来自 &eTheBusyBiscuit &7的礼物"
     },
     "CLIMBING_PICK": {
       "name": "&b攀岩镐"
@@ -1393,6 +1393,16 @@
       "name": "&4来世精华"
     },
     "EXPLOSIVE_BOW": {
+      "lore": [
+        {
+          "source": "&fAny Arrows fired using this Bow",
+          "target": "&f用这把弓射出的箭"
+        },
+        {
+          "source": "&fwill launch hit enemys into the air",
+          "target": "&f会将命中的敌人击飞"
+        }
+      ],
       "name": "&c爆裂之弓"
     },
     "EXPLOSIVE_PICKAXE": {
@@ -1890,6 +1900,20 @@
       "name": "&a猎人护身符"
     },
     "ICY_BOW": {
+      "lore": [
+        {
+          "source": "&fAny Arrows fired using this Bow",
+          "target": "&f用这把弓射出的箭"
+        },
+        {
+          "source": "&fwill prevent hit enemys from moving",
+          "target": "&f会使被命中的敌人无法移动"
+        },
+        {
+          "source": "&ffor 2 seconds",
+          "target": "&f持续 2 秒"
+        }
+      ],
       "name": "&b冰封之弓"
     },
     "IGNITION_CHAMBER": {

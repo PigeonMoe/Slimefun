@@ -2,7 +2,6 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """Regenerate the guide's packaged translation table from the Paper resources."""
 import json
-import re
 from pathlib import Path
 
 import yaml
@@ -10,7 +9,6 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 LANGUAGE = ROOT / "src/main/resources/languages/zh-CN"
 OUTPUT = ROOT / "horizon/src/guide/zh-cn.json"
-ENGLISH_NAME = re.compile(r"\s*\([A-Za-z][A-Za-z0-9 /,'-]+\)$")
 
 
 def read(name):
@@ -20,7 +18,7 @@ def read(name):
 def main():
     items = {
         key: {
-            "name": ENGLISH_NAME.sub("", value["name"]).replace("TheBusyBiscuit", "原作者"),
+            "name": value["name"],
             **({"lore": value["lore"]} if value.get("lore") else {}),
         }
         for key, value in read("items").items()
