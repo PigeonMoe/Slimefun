@@ -6,7 +6,7 @@ use mod_api::{
 };
 
 use super::{
-    ElectricMachine, Position, RecipeFamily, Storage, VIEWERS, data_at, display_item,
+    ElectricMachine, Position, RecipeFamily, Storage, VIEWERS, data_at, display_item, max_stack,
     paper_progress_item, place, save, stack_in,
 };
 use crate::{
@@ -88,6 +88,17 @@ pub(crate) struct Fuel {
     pub(crate) byproduct: Option<Kind>,
 }
 
+impl Fuel {
+    const fn new(kind: Kind, seconds: u32, byproduct: Option<Kind>) -> Self {
+        Self {
+            kind,
+            // Paper's MachineFuel converts nominal seconds to two Slimefun ticks each.
+            ticks: seconds * 2,
+            byproduct,
+        }
+    }
+}
+
 pub(crate) struct Reactor {
     pub(crate) item: Kind,
     progress_icon: Kind,
@@ -110,21 +121,9 @@ static NUCLEAR: Reactor = Reactor {
     generation: 250,
     coolant: REACTOR_COLLANT_CELL,
     fuels: &[
-        Fuel {
-            kind: URANIUM,
-            ticks: 1_200,
-            byproduct: Some(NEPTUNIUM),
-        },
-        Fuel {
-            kind: NEPTUNIUM,
-            ticks: 600,
-            byproduct: Some(PLUTONIUM),
-        },
-        Fuel {
-            kind: BOOSTED_URANIUM,
-            ticks: 1_500,
-            byproduct: None,
-        },
+        Fuel::new(URANIUM, 1_200, Some(NEPTUNIUM)),
+        Fuel::new(NEPTUNIUM, 600, Some(PLUTONIUM)),
+        Fuel::new(BOOSTED_URANIUM, 1_500, None),
     ],
     withers: false,
 };
@@ -136,11 +135,7 @@ static NETHER: Reactor = Reactor {
     capacity: 32_768,
     generation: 512,
     coolant: NETHER_ICE_COOLANT_CELL,
-    fuels: &[Fuel {
-        kind: STAR,
-        ticks: 1_800,
-        byproduct: None,
-    }],
+    fuels: &[Fuel::new(STAR, 1_800, None)],
     withers: true,
 };
 
@@ -694,14 +689,9 @@ fn restock_fuel(
     reactor: Storage,
     spec: &Reactor,
 ) -> Result<(), ()> {
-    let data = data_at(host, port).ok_or(())?;
-    if let Some((slot, stack)) = FUEL_SLOTS.into_iter().find_map(|slot| {
-        let stack = stack_in(host, &data, slot)?;
-        spec.fuels
-            .iter()
-            .any(|fuel| fuel.kind.matches(host, &stack))
-            .then_some((slot, stack))
-    }) {
+    let incoming = data_at(host, port).ok_or(())?;
+    let stored = data_at(host, reactor).ok_or(())?;
+    if let Some((slot, stack)) = restock_candidate(host, spec, &incoming, &stored) {
         let from = place(port.level, port.pos, slot);
         let slots = FUEL_SLOTS.map(|slot| place(reactor.level, reactor.pos, slot));
         move_stack(
@@ -716,6 +706,34 @@ fn restock_fuel(
         )?;
     }
     Ok(())
+}
+
+fn restock_candidate(
+    host: &dyn Host,
+    spec: &Reactor,
+    incoming: &Compound,
+    stored: &Compound,
+) -> Option<(usize, ItemStack)> {
+    FUEL_SLOTS.into_iter().find_map(|slot| {
+        let stack = stack_in(host, incoming, slot)?;
+        if !spec
+            .fuels
+            .iter()
+            .any(|fuel| fuel.kind.matches(host, &stack))
+        {
+            return None;
+        }
+        // Paper fits one item before pushing the stack. A non-fitting first fuel
+        // must not block a later compatible stack in the access port.
+        let resource = ItemResource::of(&stack);
+        let limit = max_stack(host, &resource);
+        let fits = limit > 0
+            && FUEL_SLOTS.into_iter().any(|target| {
+                stack_in(host, stored, target)
+                    .is_none_or(|item| resource.matches(&item) && item.count() < limit)
+            });
+        fits.then_some((slot, stack))
+    })
 }
 
 fn restock_coolant(
@@ -788,7 +806,7 @@ mod tests {
                     .map(|item| Identifier::parse(item).unwrap()),
             )
             .unwrap();
-        for (reactor, time) in [(&NUCLEAR, "7m 30s"), (&NETHER, "11m 15s")] {
+        for (reactor, time) in [(&NUCLEAR, "15m 0s"), (&NETHER, "22m 30s")] {
             let mut data = Compound::new();
             Operation {
                 fuel_index: 0,
@@ -832,33 +850,121 @@ mod tests {
                 .map(|fuel| (fuel.kind.id(), fuel.ticks, fuel.byproduct.map(Kind::id)))
                 .collect::<Vec<_>>(),
             vec![
-                ("URANIUM", 1_200, Some("NEPTUNIUM")),
-                ("NEPTUNIUM", 600, Some("PLUTONIUM")),
-                ("BOOSTED_URANIUM", 1_500, None),
+                ("URANIUM", 2_400, Some("NEPTUNIUM")),
+                ("NEPTUNIUM", 1_200, Some("PLUTONIUM")),
+                ("BOOSTED_URANIUM", 3_000, None),
             ]
         );
         let nether = reactor("NETHERSTAR_REACTOR").unwrap();
         assert_eq!(
             (nether.capacity, nether.generation, nether.fuels[0].ticks),
-            (32_768, 512, 1_800)
+            (32_768, 512, 3_600)
         );
 
         let mut data = Compound::new();
-        let last_coolant = Operation {
+        let saved = Operation {
             fuel_index: 1,
             progress: 600,
             missing_water: false,
         };
-        last_coolant.store(&mut data);
-        assert_eq!(progress(&data, nuclear), Some((600, 600)));
-        assert_eq!(Operation::load(&data, nuclear), Ok(Some(last_coolant)));
+        saved.store(&mut data);
+        assert_eq!(progress(&data, nuclear), Some((600, 1_200)));
+        assert_eq!(Operation::load(&data, nuclear), Ok(Some(saved)));
         assert!(Operation::load(&data, nether).is_err());
         Operation {
-            progress: 601,
-            ..last_coolant
+            progress: 1_201,
+            ..saved
         }
         .store(&mut data);
         assert!(Operation::load(&data, nuclear).is_err());
+    }
+
+    #[test]
+    fn a_saved_reactor_finishes_on_the_paper_duration_not_the_previous_cutoff() {
+        use mod_api::HostTransaction;
+
+        let mut host = FakeHost::new();
+        let level = host.level.level();
+        let pos = [0, 64, 0];
+        host.level.block_entity(pos);
+        let storage = Storage {
+            level,
+            pos,
+            plain: false,
+        };
+        let rolls = Rolls::default();
+
+        for (elapsed, still_burning) in [(1_500, true), (3_000, false)] {
+            let operation = Operation {
+                fuel_index: 2,
+                progress: elapsed,
+                missing_water: false,
+            };
+            let mut data = Compound::new();
+            operation.store(&mut data);
+            assert!(save(&mut host, storage, data));
+            let result = host
+                .transaction(|host, tx| {
+                    poll(
+                        host,
+                        tx,
+                        level,
+                        pos,
+                        &NUCLEAR,
+                        NUCLEAR.capacity,
+                        false,
+                        &rolls,
+                    )
+                })
+                .unwrap();
+            assert_eq!(result.energy, 0);
+            assert!(!result.melt);
+            let saved = data_at(&mut host, storage).unwrap();
+            assert_eq!(
+                Operation::load(&saved, &NUCLEAR),
+                Ok(still_burning.then_some(operation))
+            );
+        }
+    }
+
+    #[test]
+    fn a_blocked_access_port_fuel_does_not_hide_the_next_fuel_that_fits() {
+        use super::super::write_stack;
+
+        let mut host = FakeHost::new();
+        let carrier = "minecraft:player_head";
+        host.registries
+            .resolve_items([Identifier::parse(carrier).unwrap()])
+            .unwrap();
+        host.registries
+            .item_component(carrier, "minecraft:max_stack_size", Tag::Int(64));
+        let uranium = URANIUM.stack(&host, 16).unwrap();
+        let neptunium = NEPTUNIUM.stack(&host, 3).unwrap();
+        let mut incoming = Compound::new();
+        assert!(write_stack(&host, &mut incoming, 0, Some(uranium.clone())));
+        assert!(write_stack(
+            &host,
+            &mut incoming,
+            1,
+            Some(neptunium.clone())
+        ));
+        let mut stored = Compound::new();
+        for (slot, count) in [63, 64, 64].into_iter().enumerate() {
+            let stack = NEPTUNIUM.stack(&host, count).unwrap();
+            assert!(write_stack(&host, &mut stored, slot, Some(stack)));
+        }
+        assert_eq!(
+            restock_candidate(&host, &NUCLEAR, &incoming, &stored),
+            Some((1, neptunium))
+        );
+        let full = NEPTUNIUM.stack(&host, 64).unwrap();
+        assert!(write_stack(&host, &mut stored, 0, Some(full)));
+        assert_eq!(restock_candidate(&host, &NUCLEAR, &incoming, &stored), None);
+        assert!(write_stack(&host, &mut stored, 0, None));
+        assert_eq!(
+            restock_candidate(&host, &NUCLEAR, &incoming, &stored),
+            Some((0, uranium))
+        );
     }
 
     #[test]
