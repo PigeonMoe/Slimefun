@@ -242,7 +242,7 @@ impl ItemPart for NetworkPlacement {
             return Some(InteractionResult::Fail);
         }
         if let HostSide::Server(host) = host {
-            if crate::ticker_policy::Tickers::current().blocks_stack(event.stack) {
+            if crate::availability::stack_denial(host.dimension(), event.stack).is_some() {
                 return Some(InteractionResult::Fail);
             }
             if crate::items::GOLD_24K_BLOCK.matches(host, event.stack)
@@ -281,7 +281,7 @@ impl ItemPart for NetworkPlacement {
         let Some(id) = item_id(event.stack) else {
             return;
         };
-        if !crate::ticker_policy::Tickers::current().allows(&id)
+        if crate::availability::use_denial(host.dimension(), &id).is_some()
             || !network_item(&id).is_some_and(|item| item.matches(host, event.stack))
         {
             return;
@@ -1271,14 +1271,12 @@ pub(crate) fn has_block_marker(host: &mut dyn ServerHost, level: LevelRef, pos: 
         || crate::hologram_projector::marked(host, level, pos)
 }
 
-pub(crate) fn clicks_disabled_ticker(
+pub(crate) fn placed_id(
     host: &mut dyn ServerHost,
     level: LevelRef,
     pos: Position,
-    tickers: crate::ticker_policy::Tickers,
-) -> bool {
-    block_data(host, level, pos).is_some_and(|data| !tickers.allows(&data.id))
-        || crate::rainbow::placed::marked(host, level, pos)
+) -> Option<String> {
+    block_data(host, level, pos).map(|data| data.id)
 }
 
 fn block_data(host: &mut dyn ServerHost, level: LevelRef, pos: Position) -> Option<BlockData> {
@@ -1395,6 +1393,9 @@ pub(crate) fn tick(
                     .is_some_and(|(node, _)| node.component == Component::CargoManager)
         });
     for (&pos, &(node, _)) in &active {
+        if !crate::availability::globally_enabled(&node.id) {
+            continue;
+        }
         if node.component == Component::TrashCan {
             trash::clear(host, pos);
         }
@@ -1499,6 +1500,9 @@ pub(crate) fn tick(
     }
     let mut gps_signals = BTreeMap::new();
     for (&pos, &(node, _)) in &active {
+        if !crate::availability::globally_enabled(&node.id) {
+            continue;
+        }
         if let Component::GpsTransmitter { .. } = node.component
             && let Some(transmitter) = geology::transmitter(&node.id)
             && let Ok(signal) = host.transaction(|host, _| {

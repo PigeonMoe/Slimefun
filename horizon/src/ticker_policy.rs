@@ -2,7 +2,7 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use mod_api::{ItemStack, PlayerRef, ServerHost, Text};
+use mod_api::ItemStack;
 
 use crate::{items::item_id, recipes::CraftingRecipe};
 
@@ -185,10 +185,6 @@ fn load_into(current: &AtomicBool, fresh: bool, urid: Option<&toml::Value>) {
 
 pub(crate) fn load(fresh: bool, urid: Option<&toml::Value>) {
     load_into(&ENABLED, fresh, urid);
-}
-
-pub(crate) fn tell_unavailable(host: &mut dyn ServerHost, player: PlayerRef) {
-    let _ = player.tell(host, Text::literal("This item has been disabled."));
 }
 
 #[cfg(test)]

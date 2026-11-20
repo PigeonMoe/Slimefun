@@ -231,7 +231,10 @@ fn try_deposit_matching(
     require_empty: bool,
     mut allowed: impl FnMut(&mut dyn ServerHost, [i32; 3]) -> bool,
 ) -> bool {
-    if !level.in_place(host) || !enabled(host.dimension()) {
+    if !level.in_place(host)
+        || !enabled(host.dimension())
+        || crate::availability::use_denial(host.dimension(), OUTPUT_CHEST.id()).is_some()
+    {
         return false;
     }
     let Some(chest) = host.block_key("minecraft:chest") else {

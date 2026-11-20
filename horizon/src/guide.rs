@@ -15,6 +15,7 @@ use mod_api::{
 };
 
 use crate::{
+    availability,
     hologram_projector::{colored_label, colored_lore},
     items::Kind,
     recipes::Research,
@@ -83,16 +84,17 @@ pub(crate) fn is_guide_book(host: &dyn Host, item: &ItemStack) -> bool {
 
 pub(crate) fn blocks_vanilla_station(item: &ItemStack) -> bool {
     let tickers = Tickers::current();
-    crate::items::item_id(item)
-        .is_some_and(|id| tickers.allows(&id) && catalog::blocks_vanilla_station(&id))
+    crate::items::item_id(item).is_some_and(|id| {
+        availability::visible(tickers, None, &id) && catalog::blocks_vanilla_station(&id)
+    })
 }
 
-pub(crate) fn research_available(id: &str, tickers: Tickers) -> bool {
-    if tickers.enabled() {
-        return true;
+pub(crate) fn research_available(id: &str, tickers: Tickers, dimension: Option<&str>) -> bool {
+    if dimension.is_some_and(|dimension| !availability::world_enabled(dimension)) {
+        return false;
     }
     let mut items = catalog::items_for_research(id).peekable();
-    items.peek().is_none() || items.any(|kind| tickers.allows(kind.id()))
+    items.peek().is_none() || items.any(|id| availability::visible(tickers, dimension, id))
 }
 
 pub(crate) fn research_topics() -> impl Iterator<Item = &'static Research> {
@@ -198,6 +200,7 @@ impl Guide {
     pub(crate) fn first_join(&self, host: &mut dyn ServerHost, uuid: u128) {
         if self.receive_on_first_join.load(Ordering::Relaxed)
             && let Some(player) = host.player(uuid)
+            && player.dimension(host).is_none_or(|dimension| availability::world_enabled(&dimension.to_string()))
         {
             give(host, player);
         }
@@ -273,10 +276,14 @@ impl Guide {
     }
 
     fn show(&self, host: &mut dyn ServerHost, player: PlayerRef, mut path: Vec<Page>) {
+        if !availability::world_enabled(host.dimension()) {
+            availability::Denied::World.tell(host, player);
+            return;
+        }
         let month = host.server_local_minute()[1];
         let availability = Availability::for_dimension(host.dimension());
         if matches!(path.last(), Some(Page::Group(group, _)) if !group.in_season(month))
-            || matches!(path.last(), Some(Page::Recipe(entry)) if !availability.allows(entry))
+            || matches!(path.last(), Some(Page::Recipe(entry)) if !availability.allows_search(entry))
         {
             path = vec![Page::Main];
         }
@@ -419,7 +426,7 @@ impl Guide {
             Action::Research(topic) => {
                 let availability = Availability::for_dimension(host.dimension());
                 if (topic.id == crate::recipes::CHEST_RESEARCH.id && !availability.output_chest)
-                    || !research_available(topic.id, availability.tickers)
+                    || !research_available(topic.id, availability.tickers, availability.dimension)
                 {
                     self.show(host, player, path);
                     return;
@@ -505,22 +512,29 @@ fn learned(host: &dyn Host, player: PlayerRef, topic: &Research) -> bool {
 }
 
 #[derive(Clone, Copy)]
-struct Availability {
+struct Availability<'a> {
     output_chest: bool,
     tickers: Tickers,
+    dimension: Option<&'a str>,
 }
 
-impl Availability {
-    fn for_dimension(dimension: &str) -> Self {
+impl<'a> Availability<'a> {
+    fn for_dimension(dimension: &'a str) -> Self {
         Self {
             output_chest: crate::output_chest::enabled(dimension),
             tickers: Tickers::current(),
+            dimension: Some(dimension),
         }
     }
 
     fn allows(self, entry: &Entry) -> bool {
         (self.output_chest || entry.item.kind != crate::items::OUTPUT_CHEST)
-            && self.tickers.allows(entry.item.kind.id())
+            && availability::visible(self.tickers, self.dimension, entry.id)
+    }
+
+    fn allows_search(self, entry: &Entry) -> bool {
+        // Paper searches its enabled global registry, unlike its group pages.
+        Self { dimension: None, ..self }.allows(entry)
     }
 }
 
@@ -530,7 +544,7 @@ fn render(
     screen: &Page,
     month: i32,
     show_hidden: bool,
-    availability: Availability,
+    availability: Availability<'_>,
 ) -> Menu {
     let visible_entry = |entry: &&Entry| availability.allows(entry);
     let mut menu = Menu {
@@ -781,14 +795,14 @@ fn search_matches(
     query: &str,
     month: i32,
     show_hidden: bool,
-    availability: Availability,
+    availability: Availability<'_>,
 ) -> impl Iterator<Item = (&'static Group, &'static Entry)> {
     let query = strip_colors(query).to_lowercase();
     GROUPS
         .iter()
         .filter(move |group| show_hidden || group.in_season(month))
         .flat_map(|group| named_group_entries(group).map(move |(id, entry)| (group, id, entry)))
-        .filter(move |(_, _, entry)| availability.allows(entry))
+        .filter(move |(_, _, entry)| availability.allows_search(entry))
         .filter_map(move |(group, id, entry)| {
             (id.to_ascii_lowercase().contains(&query)
                 || strip_colors(&entry_name(entry))
@@ -1244,10 +1258,11 @@ mod tests {
         );
     }
 
-    fn available() -> Availability {
+    fn available() -> Availability<'static> {
         Availability {
             output_chest: true,
             tickers: Tickers::default(),
+            dimension: None,
         }
     }
 
@@ -1275,8 +1290,8 @@ mod tests {
         assert!(!unavailable.allows(lookup("ELECTRIC_FURNACE_3").unwrap()));
         assert!(unavailable.allows(lookup("SOLAR_GENERATOR_4").unwrap()));
         let hidden_topic = lookup("ELECTRIC_FURNACE").unwrap().research.unwrap();
-        assert!(!research_available(hidden_topic.id, unavailable.tickers));
-        assert!(research_available("cargo_nodes", unavailable.tickers));
+        assert!(!research_available(hidden_topic.id, unavailable.tickers, None));
+        assert!(research_available("cargo_nodes", unavailable.tickers, None));
     }
 
     #[test]

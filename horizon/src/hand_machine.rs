@@ -47,10 +47,14 @@ impl HandMachine {
         rolls: &Rolls,
         weights: &Weights,
     ) {
-        let required = match self {
-            Self::TableSaw => &TABLE_SAW,
-            Self::AutomatedPan { .. } => &AUTOMATED_PANNING_MACHINE,
+        let (id, required) = match self {
+            Self::TableSaw => ("TABLE_SAW", &TABLE_SAW),
+            Self::AutomatedPan { .. } => ("AUTOMATED_PANNING_MACHINE", &AUTOMATED_PANNING_MACHINE),
         };
+        if let Some(denied) = crate::availability::use_denial(host.dimension(), id) {
+            denied.tell(host, player);
+            return;
+        }
         if !research::can_use(host, player, required) {
             let _ = player.tell(
                 host,

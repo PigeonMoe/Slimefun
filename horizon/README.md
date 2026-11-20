@@ -315,6 +315,20 @@ Enhanced Furnace I–XI、Reinforced Furnace 和 Carbonado Edged Furnace 使用�
 
 在 `slimefun-server.toml` 的 `[URID]` 表中设置 `enable-tickers = false` 并重启，可停止方块计时器物品的配方、指南展示、新放置和手动使用。已有标记方块按 Paper 的旧存档规则保留其计时处理、库存和可恢复的掉落。电动熔炉、电动磨石和电动锭厂会跳过 Paper 启动后追加的处理配方。已有的电动锭粉碎机仍可将原版铜锭和金锭磨成粉。普通货运节点、发电机和手动设备仍可制作和放置。
 
+服主也可以关闭指定物品，或仅在某个维度关闭。配置在重启时读取。示例中的货运管理器全服关闭，高级货运输出节点仅在下界关闭。
+
+```toml
+[item-settings.CARGO_MANAGER]
+enabled = false
+
+[worlds."minecraft:the_nether".items]
+CARGO_NODE_OUTPUT_ADVANCED = false
+```
+
+世界表内的 `enabled = false` 会同时关闭该世界的 Slimefun 指南入口。用 `slimefun-enabled = false` 可保留指南入口并关闭该世界所有原版 Slimefun 物品的手动使用。分组目录按当前世界过滤，搜索沿用 Paper 的全服物品范围。全服关闭某件物品会停掉它自身的计时器，包括已有的货运管理器或能源调节器。仅按世界关闭会保留旧方块的计时和库存。已经铺设的普通货运节点和被动能源构件仍由运行中的管理器或调节器识别。关闭 Slimefun 的连锁甲、鞘翅等原版物品配方时，原版物品本身仍可正常使用。
+
+导入 Paper 配置时，可给 `horizon/tools/import-block-storage.py` 附加 `--item-config <Paper 的 Items.yml>` 和 `--world-settings <Paper 的 world-settings 目录>`。自定义世界使用相同的 `--map-world` 参数。将生成的 `settings-item-availability.toml` 合并到 `slimefun-server.toml` 后重启。
+
 将货运输入或输出节点挂到库存方块侧面，再右键配置频道。输入和高级输出节点可放置白名单或黑名单物品。输入节点另可启用轮询和智能填充。空白名单不转移物品。货运支持普通库存和已移植的电动机器，每次按实际源、目标库存位置检查 Horizon 的库存转移许可。目标只能接收部分物品时，源端保留余量。
 
 向熔炉、高炉及烟熏炉送货时，可燃原木优先进入原料槽，原料槽无法接收时进入燃料槽。木板等非原木燃料进入燃料槽。已经启动的电网先保留发现范围内的调节器位置，后加的调节器显示冲突。拆除旧调节器后，仍连通的调节器可在下一轮发现中接管。

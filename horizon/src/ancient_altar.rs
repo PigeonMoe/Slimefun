@@ -834,6 +834,9 @@ fn start_ritual(
     let items: [ItemStack; 8] = items.try_into().map_err(|_| "Incomplete pedestal ring.")?;
     let recipe =
         ritual_recipe(host, &catalyst, &items).ok_or("No Ancient Altar recipe matched.")?;
+    if crate::availability::output_denial(host.dimension(), recipe.output.kind).is_some() {
+        return Err("This item has been disabled in this world.");
+    }
     if !recipe.research.id.is_empty() && !research::can_use(host, player, recipe.research) {
         return Err(match recipe.research.id {
             "essence_of_afterlife" => "Unlock Necromancy with /sf research essence_of_afterlife.",
@@ -904,6 +907,10 @@ pub(crate) fn use_at(
     let Some((kind, marker)) = device(host, level, pos) else {
         return false;
     };
+    if let Some(denied) = crate::availability::use_denial(host.dimension(), kind.id()) {
+        denied.tell(host, player);
+        return true;
+    }
     let activate = |host: &mut dyn ServerHost| {
         let all = rituals(host)?;
         let active = dimension_rituals(&all, host.dimension())?;
@@ -1222,7 +1229,7 @@ fn ritual_recipe(
         .chain(crate::rainbow::ALTAR_RECIPES)
         .chain(crate::soulbound_gear::ALTAR_RECIPES)
         .find(|recipe| {
-            tickers.allows_recipe(recipe)
+            crate::availability::recipe_registered(tickers, recipe.output.kind)
                 && recipe.inputs[4].is_some_and(|kind| kind.matches(host, catalyst))
                 && (0..8).any(|rotation| {
                     PEDESTAL_PATTERN.iter().enumerate().all(|(offset, &cell)| {

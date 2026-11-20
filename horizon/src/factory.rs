@@ -1447,17 +1447,25 @@ fn furnace_recipe(host: &dyn Host, inputs: &[Option<ItemStack>; 2]) -> Option<Re
 }
 
 fn grinder_recipes(settings: Settings) -> impl Iterator<Item = SingleRecipe> {
+    let grinder_enabled = crate::availability::globally_enabled("GRIND_STONE");
+    let crusher_enabled = crate::availability::globally_enabled("ORE_CRUSHER");
     GRINDING
         .iter()
-        .chain(CRUSHING)
+        .filter(move |_| grinder_enabled)
+        .chain(CRUSHING.iter().filter(move |_| crusher_enabled))
         .copied()
-        .chain(DOUBLING.iter().map(move |recipe| SingleRecipe {
-            input: recipe.input,
-            output: Stack {
-                count: recipe.output.count * (1 + u32::from(settings.double_ores)),
-                ..recipe.output
-            },
-        }))
+        .chain(
+            DOUBLING
+                .iter()
+                .filter(move |_| crusher_enabled)
+                .map(move |recipe| SingleRecipe {
+                    input: recipe.input,
+                    output: Stack {
+                        count: recipe.output.count * (1 + u32::from(settings.double_ores)),
+                        ..recipe.output
+                    },
+                }),
+        )
 }
 
 fn dust_to_ingot_recipes() -> impl Iterator<Item = SingleRecipe> {
@@ -1636,14 +1644,12 @@ fn find_recipe(
     roll: impl FnMut(u32) -> Option<u32>,
 ) -> Option<RecipeRun> {
     let post_setup_recipes = crate::ticker_policy::Tickers::current().enabled();
-    // These three machines have no default recipes. Paper adds their recipes only to enabled items.
-    if !post_setup_recipes
-        && (machine.is_smeltery()
-            || matches!(machine.family, RecipeFamily::OreGrinder)
-            || matches!(
-                machine.family,
-                RecipeFamily::Processing(spec) if matches!(spec.family, Family::IngotFactory)
-            ))
+    let smeltery_recipes = post_setup_recipes && crate::availability::globally_enabled("SMELTERY");
+    // Paper appends recipes only to enabled machines and only loads the manual Smeltery as a source when enabled.
+    let requires_smeltery = machine.is_smeltery()
+        || matches!(machine.family, RecipeFamily::Processing(spec) if matches!(spec.family, Family::IngotFactory));
+    if (!post_setup_recipes && matches!(machine.family, RecipeFamily::OreGrinder))
+        || (!smeltery_recipes && requires_smeltery)
     {
         return None;
     }
@@ -1686,7 +1692,7 @@ fn find_recipe(
         RecipeFamily::IngotPulverizer => single_recipe(
             host,
             &inputs,
-            ingot_pulverizer_recipes(post_setup_recipes),
+            ingot_pulverizer_recipes(smeltery_recipes),
             false,
         ),
         RecipeFamily::HeatedPressure => heated_recipe(host, &inputs, machine.speed),

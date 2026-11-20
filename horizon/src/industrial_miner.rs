@@ -231,6 +231,11 @@ impl Miners {
         let Some((advanced, pistons)) = structure(host, level, pos) else {
             return false;
         };
+        let id = if advanced { "ADVANCED_INDUSTRIAL_MINER" } else { "INDUSTRIAL_MINER" };
+        if let Some(denied) = crate::availability::use_denial(host.dimension(), id) {
+            denied.tell(host, player);
+            return true;
+        }
         let required = if advanced {
             &ADVANCED_RESEARCH
         } else {

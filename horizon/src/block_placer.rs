@@ -377,6 +377,9 @@ impl Placers {
         host: &mut dyn ServerHost,
         event: &DispenserSelectedEvent<'_>,
     ) -> Flow {
+        if crate::availability::use_denial(event.dimension, BLOCK_PLACER.id()).is_some() {
+            return Flow::Continue;
+        }
         let Some(level) = host.level(event.dimension) else {
             return Flow::Continue;
         };
@@ -411,6 +414,9 @@ impl Placers {
             && let Some(placement) = host.block_state_default(block)
         {
             let custom = match item_id(event.stack) {
+                Some(id) if crate::availability::use_denial(event.dimension, &id).is_some() => {
+                    return Flow::Cancel;
+                }
                 Some(id) => match placeable_custom(&id) {
                     Some(CustomBlock::OutputChest)
                         if !crate::output_chest::enabled(event.dimension) =>

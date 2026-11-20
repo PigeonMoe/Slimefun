@@ -26,6 +26,7 @@ mod armor_forge;
 mod auto_anvil;
 mod auto_brewer;
 mod auto_crafter;
+mod availability;
 mod backpacks;
 mod bee_wings;
 mod beheading;
@@ -250,6 +251,7 @@ impl Slimefun {
         let mut settings = self.settings.lock().unwrap();
         if fresh {
             ticker_policy::load(true, None);
+            availability::configure(&toml::Table::new());
             geo_deposits::load_config(true, None);
             *settings = Settings::default();
             enchantment_machines::configure(&toml::Table::new());
@@ -271,6 +273,9 @@ impl Slimefun {
         let Ok(table) = config.text.parse::<toml::Table>() else {
             return;
         };
+        if fresh {
+            availability::configure(&table);
+        }
         geo_deposits::load_config(fresh, table.get("geo-resources"));
         output_chest::configure(&table);
         self.guide.configure(table.get("guide"), table.get("researches"));
@@ -1018,7 +1023,7 @@ impl Hooks for Slimefun {
                 vec![format!(
                     "Slimefun Horizon development | Grind Stone {} | Enhanced Crafting Table {} | Ore Crusher {} | Compressor {} | Pressure Chamber {} | Juicer {} | Ore Washer {} dusts and {} recipes | Smeltery {} recipes | Research {}",
                     GRINDING.len(),
-                    crafting().filter(|recipe| tickers.allows_recipe(recipe)).count(),
+                    crafting().filter(|recipe| availability::recipe_registered(tickers, recipe.output.kind)).count(),
                     CRUSHING.len() + DOUBLING.len(),
                     COMPRESSING.len(),
                     PRESSING.len(),
@@ -1026,7 +1031,7 @@ impl Hooks for Slimefun {
                     WASHER_DUSTS.len(),
                     WASHING.len(),
                     smelting().count() + ALLOY_RECIPES.len(),
-                    researches().filter(|topic| guide::research_available(topic.id, tickers)).count()
+                    researches().filter(|topic| guide::research_available(topic.id, tickers, None)).count()
                 )]
             },
             Some("recipe") => match event.command.argument("item") {
@@ -1038,8 +1043,9 @@ impl Hooks for Slimefun {
                     return Flow::Continue;
                 };
                 let tickers = ticker_policy::Tickers::current();
+                let dimension = host.dimension().to_owned();
                 let available = || {
-                    researches().filter(|topic| guide::research_available(topic.id, tickers))
+                    researches().filter(|topic| guide::research_available(topic.id, tickers, Some(&dimension)))
                 };
                 let Some(research) = available().find(|research| research.id.eq_ignore_ascii_case(id)) else {
                     let ids = available().map(|research| research.id).collect::<Vec<_>>().join(", ");
@@ -1100,23 +1106,22 @@ impl Hooks for Slimefun {
         if event.cancelled {
             return Flow::Continue;
         }
-        if event.click.stack.is_some_and(|stack| {
+        let Some(player) = host.player(event.click.player) else {
+            return Flow::Continue;
+        };
+        if *event.use_item != TriState::False
+            && let Some(held) = event.click.stack
+            && let Some(denied) = availability::stack_denial(host.dimension(), held)
+        {
+            *event.use_item = TriState::False;
+            self.item_clicks.record_block_use(host, event.click.player, event.click.hand, held);
+            denied.tell(host, player);
+        }
+        if *event.use_item != TriState::False && event.click.stack.is_some_and(|stack| {
             zombie_pills::MAGICAL_ZOMBIE_PILLS.matches(host, stack)
         }) {
             *event.cancellation_result = InteractionResult::Fail;
             return Flow::Cancel;
-        }
-        let Some(player) = host.player(event.click.player) else {
-            return Flow::Continue;
-        };
-        let tickers = ticker_policy::Tickers::current();
-        if *event.use_item != TriState::False
-            && let Some(held) = event.click.stack
-            && tickers.blocks_stack(held)
-        {
-            *event.use_item = TriState::False;
-            self.item_clicks.record_block_use(host, event.click.player, event.click.hand, held);
-            ticker_policy::tell_unavailable(host, player);
         }
         // Paper lets an unlocked Seismic Axe also perform the normal axe use.
         if *event.use_item != TriState::False
@@ -1211,12 +1216,11 @@ impl Hooks for Slimefun {
             *event.cancellation_result = InteractionResult::Consume;
             return Flow::Cancel;
         }
-        if !tickers.enabled()
-            && event.click.hand == Hand::Main
+        if event.click.hand == Hand::Main
             && let Some(level) = player.entity().level(host)
-            && network_runtime::clicks_disabled_ticker(host, level, event.click.pos, tickers)
+            && let Some(denied) = placed_use_denial(host, level, event.click.pos)
         {
-            ticker_policy::tell_unavailable(host, player);
+            denied.tell(host, player);
             *event.cancellation_result = InteractionResult::Fail;
             return Flow::Cancel;
         }
@@ -1334,7 +1338,8 @@ impl Hooks for Slimefun {
         if player.entity().is_crouching(host) != Some(false) {
             return Flow::Continue;
         }
-        if let Some(stack) = event.click.stack
+        if *event.use_item != TriState::False
+            && let Some(stack) = event.click.stack
             && let Some(pan) = gold_pan::PANS
                 .iter()
                 .find(|pan| pan.item.matches(host, stack))
@@ -1398,14 +1403,14 @@ impl Hooks for Slimefun {
         let Some(player) = host.player(event.click.player) else {
             return Flow::Continue;
         };
-        if ticker_policy::Tickers::current().blocks_stack(event.click.stack) {
+        if let Some(denied) = availability::stack_denial(host.dimension(), event.click.stack) {
             if !self.item_clicks.consume_fallthrough(
                 host,
                 event.click.player,
                 event.click.hand,
                 event.click.stack,
             ) {
-                ticker_policy::tell_unavailable(host, player);
+                denied.tell(host, player);
             }
             *event.cancellation_result = InteractionResult::Fail;
             return Flow::Cancel;
@@ -2010,6 +2015,30 @@ fn vanilla_station_blocks(host: &dyn mod_api::Host, item: &mod_api::ItemStack) -
     guide::blocks_vanilla_station(item) || guide::is_guide_book(host, item)
 }
 
+fn placed_use_denial(
+    host: &mut dyn ServerHost,
+    level: mod_api::LevelRef,
+    pos: [i32; 3],
+) -> Option<availability::Denied> {
+    if !availability::has_use_restrictions(host.dimension()) {
+        return None;
+    }
+    if let Some(id) = network_runtime::placed_id(host, level, pos) {
+        return availability::use_denial(host.dimension(), &id);
+    }
+    if let Some(id) = rainbow::placed::placed_id(host, level, pos) {
+        return availability::use_denial(host.dimension(), id);
+    }
+    let entity = host.block_entity(level, pos)?;
+    if output_chest::live_marker(host, entity) {
+        availability::use_denial(host.dimension(), items::OUTPUT_CHEST.id())
+    } else if block_placer::marked(host, entity) {
+        availability::use_denial(host.dimension(), block_placer::BLOCK_PLACER.id())
+    } else {
+        None
+    }
+}
+
 fn describe_recipe(id: &str, settings: Settings) -> Vec<String> {
     describe_available_recipe(id, settings, ticker_policy::Tickers::current())
 }
@@ -2019,7 +2048,8 @@ fn describe_available_recipe(
     settings: Settings,
     tickers: ticker_policy::Tickers,
 ) -> Vec<String> {
-    if !tickers.enabled() && !tickers.allows(&id.to_ascii_uppercase()) {
+    let requested_id = id.strip_prefix("minecraft:").unwrap_or(id).to_ascii_uppercase();
+    if !availability::visible(tickers, None, &requested_id) {
         return vec!["This item has been disabled.".into()];
     }
     let outputs = |output: &str| {
@@ -2253,7 +2283,7 @@ fn describe_available_recipe(
                 .map(|recipe| ("Ancient Altar", recipe)),
         );
     for (workbench, recipe) in workbenches.filter(|(bench, recipe)| {
-        tickers.allows_recipe(recipe)
+        availability::recipe_registered(tickers, recipe.output.kind)
             && (outputs(recipe.output.kind.id())
                 || (*bench == "Armor Forge" && outputs(armor_forge::paper_id(recipe.output.kind))))
     }) {

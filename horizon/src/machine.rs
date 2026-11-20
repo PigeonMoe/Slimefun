@@ -126,6 +126,7 @@ impl Dispenser {
 pub(crate) enum Refusal {
     Locked,
     Disabled,
+    DeniedItem(crate::availability::Denied),
     MissingRecipe,
     MissingResearch(&'static str),
     NoOutputSpace,
@@ -134,6 +135,22 @@ pub(crate) enum Refusal {
 }
 
 impl Machine {
+    fn paper_id(self) -> &'static str {
+        match self {
+            Self::Grinding => "GRIND_STONE",
+            Self::Crafting => "ENHANCED_CRAFTING_TABLE",
+            Self::MagicCrafting { .. } => "MAGIC_WORKBENCH",
+            Self::ArmorCrafting => "ARMOR_FORGE",
+            Self::Crushing => "ORE_CRUSHER",
+            Self::Compressing => "COMPRESSOR",
+            Self::Pressing => "PRESSURE_CHAMBER",
+            Self::Juicing => "JUICER",
+            Self::Washing => "ORE_WASHER",
+            Self::Smelting { makeshift: true, .. } => "MAKESHIFT_SMELTERY",
+            Self::Smelting { makeshift: false, .. } => "SMELTERY",
+        }
+    }
+
     pub fn at(host: &dyn Host, level: LevelRef, clicked: [i32; 3]) -> Option<(Self, Dispenser)> {
         let [x, y, z] = clicked;
         let block = level.block_state(host, clicked)?.block().id(host);
@@ -233,6 +250,10 @@ impl Machine {
         settings: Settings,
         rolls: &Rolls,
     ) {
+        if let Some(denied) = crate::availability::use_denial(host.dimension(), self.paper_id()) {
+            denied.tell(host, player);
+            return;
+        }
         let outcome = self.process(host, player, dispenser, delayed_crafts, settings, rolls);
 
         let message = match outcome {
@@ -285,6 +306,10 @@ impl Machine {
             }
             Err(Refusal::Locked) => "The dispenser is locked.".to_owned(),
             Err(Refusal::Disabled) => "The machine output is disabled in this world.".to_owned(),
+            Err(Refusal::DeniedItem(denied)) => {
+                denied.tell(host, player);
+                return;
+            }
             Err(Refusal::MissingRecipe) => {
                 "No matching Slimefun recipe in the dispenser.".to_owned()
             }
@@ -478,7 +503,7 @@ impl Machine {
                 Self::Crafting | Self::MagicCrafting { .. } | Self::ArmorCrafting => {
                     let tickers = crate::ticker_policy::Tickers::current();
                     let matches_inputs = |recipe: &&crate::recipes::CraftingRecipe| {
-                        tickers.allows_recipe(recipe)
+                        crate::availability::recipe_registered(tickers, recipe.output.kind)
                             && recipe.inputs.iter().zip(&slots).all(|(input, actual)| {
                                 match (input, actual) {
                                     (None, None) => true,
@@ -497,6 +522,9 @@ impl Machine {
                         _ => crafting().find(matches_inputs),
                     }
                     .ok_or(Refusal::MissingRecipe)?;
+                    if let Some(denied) = crate::availability::output_denial(host.dimension(), recipe.output.kind) {
+                        return Err(Refusal::DeniedItem(denied));
+                    }
                     if recipe.output.kind == OUTPUT_CHEST
                         && !output_chest::enabled(host.dimension())
                     {

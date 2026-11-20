@@ -879,6 +879,9 @@ fn check_candidate(
     key: &str,
 ) -> Result<(), &'static str> {
     match recipe {
+        RecipeView::Slimefun(recipe) if crate::availability::use_paper_item_denial(
+            host.dimension(), crate::availability::paper_id(recipe.output.kind),
+        ).is_some() => Err("This item is unavailable for a new Auto-Crafter selection."),
         RecipeView::Slimefun(recipe)
             if !recipe.research.id.is_empty()
                 && !research::can_use(host, player, recipe.research) =>

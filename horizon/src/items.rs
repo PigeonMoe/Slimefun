@@ -388,7 +388,7 @@ pub(crate) fn item_id(stack: &ItemStack) -> Option<String> {
 
 pub(crate) fn usable_in_workbench(stack: &ItemStack) -> bool {
     item_id(stack).is_none_or(|id| {
-        matches!(
+        !crate::availability::visible(crate::ticker_policy::Tickers::current(), None, &id) || matches!(
             id.as_str(),
             "SYNTHETIC_SAPPHIRE"
                 | "SYNTHETIC_DIAMOND"

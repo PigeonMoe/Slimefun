@@ -219,16 +219,14 @@ fn active_marker(host: &mut dyn ServerHost, dimension: &str, pos: Pos) -> Option
 }
 
 pub(crate) fn marked(host: &mut dyn ServerHost, level: LevelRef, pos: Pos) -> bool {
-    let Some(dimension) = level.dimension().id(host) else {
-        return false;
-    };
-    level
-        .block(host, pos)
-        .map(|state| state.id(host))
-        .filter(|id| is_carrier(id))
-        .is_some_and(|id| {
-            active_marker(host, &dimension, pos).is_some_and(|mark| mark.accepts(&id))
-        })
+    placed_id(host, level, pos).is_some()
+}
+
+pub(crate) fn placed_id(host: &mut dyn ServerHost, level: LevelRef, pos: Pos) -> Option<&'static str> {
+    let dimension = level.dimension().id(host)?;
+    let id = level.block(host, pos).map(|state| state.id(host)).filter(|id| is_carrier(id))?;
+    let mark = active_marker(host, &dimension, pos)?;
+    mark.accepts(&id).then(|| mark.kind.id())
 }
 
 pub(crate) fn protected(
@@ -436,6 +434,9 @@ pub(crate) fn tick(host: &mut dyn ServerHost, level: LevelRef) {
             let Some((index, rainbow)) = id.to_string().ok().as_deref().and_then(block) else {
                 continue;
             };
+            if !crate::availability::globally_enabled(rainbow.kind.id()) {
+                continue;
+            }
             let address = (dimension.clone(), at);
             if RUNTIME.lock().unwrap().retired.contains_key(&address) {
                 continue;

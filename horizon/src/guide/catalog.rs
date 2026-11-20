@@ -106,6 +106,7 @@ const FACED_PISTONS: &[IngredientVisual] = &[
 
 #[derive(Clone, Copy)]
 pub(super) struct Entry {
+    pub id: &'static str,
     pub item: Stack,
     pub label: Option<&'static str>,
     pub ingredients: [Option<Stack>; 9],
@@ -260,12 +261,12 @@ pub(super) fn blocks_vanilla_station(id: &str) -> bool {
         })
 }
 
-pub(super) fn items_for_research(id: &str) -> impl Iterator<Item = Kind> {
+pub(super) fn items_for_research(id: &str) -> impl Iterator<Item = &'static str> {
     CATALOG.values().filter_map(move |entry| {
         entry
             .research
             .filter(|topic| topic.id == id)
-            .map(|_| entry.item.kind)
+            .map(|_| entry.id)
     })
 }
 
@@ -494,6 +495,7 @@ fn multiblocks(entries: &mut BTreeMap<String, Entry>) {
         entries.insert(
             id.to_owned(),
             Entry {
+                id,
                 item: stack_of(Kind::Vanilla(icon)),
                 label: Some(name),
                 ingredients: stacks,
@@ -519,8 +521,9 @@ fn stack_of(kind: Kind) -> Stack {
     Stack { kind, count: 1 }
 }
 
-fn workbench(recipe_type: RecipeType, recipe: &CraftingRecipe) -> Entry {
+fn workbench(id: &'static str, recipe_type: RecipeType, recipe: &CraftingRecipe) -> Entry {
     Entry {
+        id,
         item: recipe.output,
         label: None,
         ingredients: recipe.inputs.map(|entry| entry.map(stack_of)),
@@ -534,6 +537,7 @@ fn processing(recipe_type: RecipeType, recipe: &SingleRecipe) -> Entry {
     let mut ingredients = [None; 9];
     ingredients[0] = Some(recipe.input);
     Entry {
+        id: crate::availability::paper_id(recipe.output.kind),
         item: recipe.output,
         label: None,
         ingredients,
@@ -559,14 +563,10 @@ fn build() -> BTreeMap<String, Entry> {
         )
         .chain(recipes::crafting().map(|r| (ENHANCED_CRAFTING, r)));
     for (recipe_type, recipe) in benches {
-        let id = if recipe_type.name == ARMOR_FORGE.name {
-            armor_forge::paper_id(recipe.output.kind)
-        } else {
-            recipe.output.kind.id()
-        };
+        let id = crate::availability::paper_id(recipe.output.kind);
         entries
             .entry(canonical(id))
-            .or_insert_with(|| workbench(recipe_type, recipe));
+            .or_insert_with(|| workbench(id, recipe_type, recipe));
     }
     for r in recipes::ALLOY_RECIPES.iter().chain(recipes::smelting()) {
         let mut ingredients = [None; 9];
@@ -576,6 +576,7 @@ fn build() -> BTreeMap<String, Entry> {
         entries
             .entry(canonical(r.output.kind.id()))
             .or_insert(Entry {
+                id: crate::availability::paper_id(r.output.kind),
                 item: r.output,
                 label: None,
                 ingredients,
@@ -624,6 +625,7 @@ fn stock_sources(entries: &mut BTreeMap<String, Entry>) {
         entries.insert(
             canonical(output.id()),
             Entry {
+                id: crate::availability::paper_id(output),
                 item: Stack {
                     kind: output,
                     count,

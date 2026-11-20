@@ -406,6 +406,14 @@ pub(crate) fn process(host: &dyn Host, event: &mut FurnaceProcessEvent<'_>, roll
     let Some(furnace) = crate::network_runtime::enhanced_furnace(host, event.entity) else {
         return;
     };
+    let disabled = if matches!(event.stage, FurnaceProcessStage::Progress { .. }) {
+        !crate::availability::globally_enabled(furnace.item.id())
+    } else {
+        crate::availability::use_denial(host.dimension(), furnace.item.id()).is_some()
+    };
+    if disabled {
+        return;
+    }
     let Some(level) = event.entity.level(host) else {
         return;
     };

@@ -54,10 +54,18 @@ impl Discovery {
         }
         self.update(topology);
 
-        let mut groups = self.discover_energy(active, budget);
+        // An explicitly disabled root has no registered Paper BlockTicker.
+        // The existing positions still classify normally for passive routing.
+        let mut groups = if crate::availability::globally_enabled("ENERGY_REGULATOR") {
+            self.discover_energy(active, budget)
+        } else {
+            Vec::new()
+        };
+        let cargo_enabled = crate::availability::globally_enabled("CARGO_MANAGER");
         let mut claimed = BTreeSet::new();
         for (&pos, &(family, role)) in &self.topology {
-            if family != Network::Cargo || role != Role::Regulator || !claimed.insert(pos) {
+            if !cargo_enabled || family != Network::Cargo || role != Role::Regulator || !claimed.insert(pos)
+            {
                 continue;
             }
             let graph = self.graphs.entry(pos).or_insert_with(|| Graph::new(pos));
