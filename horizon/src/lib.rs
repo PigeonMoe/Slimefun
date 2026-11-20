@@ -1917,6 +1917,7 @@ impl Hooks for Slimefun {
 
     fn level_tick_post(&self, host: HostSide<'_>, event: &mut LevelTickPostEvent) {
         if let HostSide::Server(host) = host {
+            self.delayed_crafts.tick(host, event.level);
             let settings = *self.settings.lock().unwrap();
             self.magic_weapons.tick(host, event.level, &self.rolls);
             self.grapple.tick(host, event.level);
@@ -2003,6 +2004,10 @@ impl Hooks for Slimefun {
         industrial_miner::validate_tickets(event);
     }
 
+    fn server_started(&self, host: &mut dyn ServerHost, _: &mut mod_api::ServerStartedEvent) {
+        DelayedCrafts::remove_saved_progress(host);
+    }
+
     fn server_stopping(&self, host: &mut dyn ServerHost, _: &mut ServerStoppingEvent) {
         self.item_clicks.clear();
         self.climbing.clear();
@@ -2032,7 +2037,7 @@ impl Hooks for Slimefun {
         self.transport.clear();
         factory::VIEWERS.clear();
         self.networks.lock().unwrap().clear();
-        self.delayed_crafts.clear();
+        self.delayed_crafts.clear(host);
         self.composters.clear();
         self.crucibles.clear();
         self.industrial_miners.clear(host);

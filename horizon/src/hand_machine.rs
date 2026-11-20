@@ -112,7 +112,7 @@ impl HandMachine {
                         return Err(());
                     }
                     delayed_crafts
-                        .queue_panning(host, level, pos, cauldron, sound, output)
+                        .queue_panning(host, player, level, pos, cauldron, sound, output)
                         .map_err(|_| ())
                 })
             }

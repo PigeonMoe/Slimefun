@@ -40,7 +40,9 @@ const BOOK_LORE: &[&str] = &[
 const GUIDE_KEY: &str = "slimefun:slimefun_guide_mode";
 const SURVIVAL: &str = "SURVIVAL_MODE";
 const DISCOVERY_SLOTS: usize = 36;
-const INGREDIENT_SLOTS: [usize; 9] = [3, 4, 5, 12, 13, 14, 21, 22, 23];
+const INGREDIENT_SLOTS: [usize; 9] = [12, 13, 14, 21, 22, 23, 30, 31, 32];
+const RECIPE_METHOD_SLOT: usize = 19;
+const RECIPE_OUTPUT_SLOT: usize = 25;
 
 fn book(host: &dyn Host) -> Option<ItemStack> {
     let mut item = icon(
@@ -802,8 +804,8 @@ fn render(
                     );
                 }
             }
-            menu.slots[10] = method_icon(host, entry);
-            menu.slots[16] = entry_icon(host, entry, entry.item.count);
+            menu.slots[RECIPE_METHOD_SLOT] = method_icon(host, entry);
+            menu.slots[RECIPE_OUTPUT_SLOT] = entry_icon(host, entry, entry.item.count);
         }
         Page::Info => {
             menu.slots[2] = icon(
@@ -1254,7 +1256,7 @@ mod tests {
     }
 
     #[test]
-    fn basic_machine_page_and_real_recipe_use_the_paper_slots() {
+    fn basic_machine_page_keeps_navigation_above_the_recipe() {
         let mut host = FakeHost::new();
         let materials = [
             "minecraft:gray_stained_glass_pane",
@@ -1302,10 +1304,11 @@ mod tests {
                 .as_ref()
                 .map(|item| item.item().id(&host))
         };
-        assert_eq!(shown(10).as_deref(), Some("minecraft:bricks"));
-        assert_eq!(shown(13).as_deref(), Some("minecraft:crafting_table"));
-        assert_eq!(shown(16).as_deref(), Some("minecraft:crafting_table"));
-        assert_eq!(shown(22).as_deref(), Some("minecraft:dispenser"));
+        assert_eq!(shown(19).as_deref(), Some("minecraft:bricks"));
+        assert_eq!(shown(22).as_deref(), Some("minecraft:crafting_table"));
+        assert_eq!(shown(25).as_deref(), Some("minecraft:crafting_table"));
+        assert_eq!(shown(31).as_deref(), Some("minecraft:dispenser"));
+        assert_eq!(shown(4).as_deref(), Some("minecraft:gray_stained_glass_pane"));
     }
 
     #[test]
@@ -1332,7 +1335,7 @@ mod tests {
         let listed = listed.as_ref().unwrap();
         assert_eq!(listed.count(), 1);
         let recipe = render(&host, None, &Page::Recipe(entry), 1, false, available(), false);
-        let output = recipe.slots[16].as_ref().unwrap();
+        let output = recipe.slots[25].as_ref().unwrap();
         assert_eq!(output.count(), 8);
         let lore = colored_lore("&d在彩虹的各个颜色之间循环切换！");
         for stack in [listed, output] {
@@ -1419,10 +1422,10 @@ mod tests {
         let table = lookup("TABLE_SAW").unwrap();
         let menu = render(&host, None, &Page::Recipe(table), 1, false, available(), false);
         for (slot, material) in [
-            (12, "smooth_stone_slab"),
-            (13, "stonecutter"),
-            (14, "smooth_stone_slab"),
-            (22, "iron_block"),
+            (21, "smooth_stone_slab"),
+            (22, "stonecutter"),
+            (23, "smooth_stone_slab"),
+            (31, "iron_block"),
         ] {
             assert_eq!(
                 menu.slots[slot].as_ref().unwrap().item().id(&host),
@@ -1447,16 +1450,16 @@ mod tests {
             assert_eq!(miner.research.unwrap().cost, cost);
             let shown = render(&host, None, &Page::Recipe(miner), 1, false, available(), false);
             assert_eq!(
-                shown.slots[13].as_ref().unwrap().item().id(&host),
+                shown.slots[22].as_ref().unwrap().item().id(&host),
                 "minecraft:chest"
             );
-            assert_eq!(shown.slots[21].as_ref().unwrap().item().id(&host), base);
+            assert_eq!(shown.slots[30].as_ref().unwrap().item().id(&host), base);
             assert_eq!(
-                shown.slots[22].as_ref().unwrap().item().id(&host),
+                shown.slots[31].as_ref().unwrap().item().id(&host),
                 "minecraft:blast_furnace"
             );
-            assert_eq!(shown.slots[23].as_ref().unwrap().item().id(&host), base);
-            for slot in [12, 14] {
+            assert_eq!(shown.slots[32].as_ref().unwrap().item().id(&host), base);
+            for slot in [21, 23] {
                 let parts = shown.slots[slot].as_ref().unwrap().components().unwrap();
                 assert_eq!(
                     parts.as_nbt().get(&"minecraft:custom_name".into()),
@@ -1489,7 +1492,7 @@ mod tests {
         assert_eq!(sifted.research.unwrap().id, "ore_washer");
         let circuit = lookup("BASIC_CIRCUIT_BOARD").unwrap();
         let shown = render(&host, None, &Page::Recipe(circuit), 1, false, available(), false);
-        let head = shown.slots[13].as_ref().unwrap();
+        let head = shown.slots[22].as_ref().unwrap();
         assert_eq!(head.item().id(&host), "minecraft:player_head");
         assert!(
             head.components()
@@ -1498,7 +1501,7 @@ mod tests {
                 .contains_key(&"minecraft:profile".into())
         );
         assert_eq!(
-            shown.slots[10].as_ref().unwrap().item().id(&host),
+            shown.slots[19].as_ref().unwrap().item().id(&host),
             "minecraft:iron_sword"
         );
     }

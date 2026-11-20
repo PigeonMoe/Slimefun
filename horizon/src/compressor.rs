@@ -4,8 +4,8 @@ use std::collections::BTreeMap;
 use std::sync::Mutex;
 
 use mod_api::{
-    BlockEntityRef, HostTransaction, ItemStack, LevelRef, PlayerRef, ScheduledTaskEvent,
-    ServerHost, SoundSource, TaskId,
+    BlockEntityRef, BossBarColor, BossBarRef, HostTransaction, ItemStack, LevelRef, PlayerRef,
+    ScheduledTaskEvent, ServerHost, SoundSource, TaskId, Text,
 };
 
 use crate::machine::{Dispenser, Refusal, deposit_stack};
@@ -16,10 +16,23 @@ const STEPS: &[(u32, &str)] = &[
     (20, "minecraft:block.piston.contract"),
     (40, "minecraft:block.piston.extend"),
 ];
+const MACHINE_TICKS: u32 = 60;
+const PANNING_TICKS: u32 = 120;
+const PROGRESS_BAR_PREFIX: &str = "slimefun:craft_progress_";
+const PROGRESS_STEP: i64 = 4;
 
 #[derive(Default)]
 pub(crate) struct DelayedCrafts {
     tasks: Mutex<BTreeMap<TaskId, Action>>,
+    progress: Mutex<BTreeMap<TaskId, CraftProgress>>,
+}
+
+struct CraftProgress {
+    bar: BossBarRef,
+    level: LevelRef,
+    started: i64,
+    duration: i32,
+    shown: i32,
 }
 
 struct Output {
@@ -71,14 +84,19 @@ impl DelayedCrafts {
         };
         let actions = STEPS
             .iter()
-            .map(|&(delay, sound)| (delay, Action::Sound(player, sound)))
-            .chain([(60, Action::Output(output))]);
-        self.queue(host, actions)
+            .map(|&(delay, sound)| (delay, Action::Sound(player, sound)));
+        self.queue(
+            host,
+            (player, dispenser.level, "压缩机压缩中"),
+            actions,
+            (MACHINE_TICKS, Action::Output(output)),
+        )
     }
 
     pub fn queue_pressure_chamber(
         &self,
         host: &mut dyn ServerHost,
+        player: PlayerRef,
         holder: BlockEntityRef,
         dispenser: Dispenser,
         position: [i32; 3],
@@ -99,12 +117,18 @@ impl DelayedCrafts {
             dispenser,
             stack,
         };
-        self.queue(host, steps.chain([(60, Action::Output(output))]))
+        self.queue(
+            host,
+            (player, dispenser.level, "压力舱压缩中"),
+            steps,
+            (MACHINE_TICKS, Action::Output(output)),
+        )
     }
 
     pub fn queue_magic_crafting(
         &self,
         host: &mut dyn ServerHost,
+        player: PlayerRef,
         holder: BlockEntityRef,
         dispenser: Dispenser,
         position: [i32; 3],
@@ -125,12 +149,18 @@ impl DelayedCrafts {
             dispenser,
             stack,
         };
-        self.queue(host, steps.chain([(60, Action::Output(output))]))
+        self.queue(
+            host,
+            (player, dispenser.level, "魔法工作台合成中"),
+            steps,
+            (MACHINE_TICKS, Action::Output(output)),
+        )
     }
 
     pub fn queue_armor_forge(
         &self,
         host: &mut dyn ServerHost,
+        player: PlayerRef,
         holder: BlockEntityRef,
         dispenser: Dispenser,
         stack: ItemStack,
@@ -144,20 +174,20 @@ impl DelayedCrafts {
             (0, "minecraft:entity.arrow.hit_player"),
             (20, "minecraft:entity.arrow.hit_player"),
             (40, "minecraft:entity.arrow.hit_player"),
-            (60, "minecraft:block.anvil.use"),
+            (MACHINE_TICKS, "minecraft:block.anvil.use"),
         ];
         self.queue(
             host,
-            sounds
-                .map(|(delay, sound)| (delay, Action::BlockSound(dispenser, sound)))
-                .into_iter()
-                .chain([(60, Action::Output(output))]),
+            (player, dispenser.level, "盔甲锻造台锻造中"),
+            sounds.map(|(delay, sound)| (delay, Action::BlockSound(dispenser, sound))),
+            (MACHINE_TICKS, Action::Output(output)),
         )
     }
 
     pub fn queue_panning(
         &self,
         host: &mut dyn ServerHost,
+        player: PlayerRef,
         level: LevelRef,
         position: [i32; 3],
         cauldron: [i32; 3],
@@ -177,25 +207,30 @@ impl DelayedCrafts {
         });
         self.queue(
             host,
-            steps.chain([(
-                120,
+            (player, level, "自动淘金机淘洗中"),
+            steps,
+            (
+                PANNING_TICKS,
                 Action::PanOutput {
                     level,
                     position,
                     cauldron,
                     stack,
                 },
-            )]),
+            ),
         )
     }
 
     fn queue(
         &self,
         host: &mut dyn ServerHost,
+        (player, level, title): (PlayerRef, LevelRef, &'static str),
         actions: impl IntoIterator<Item = (u32, Action)>,
+        finish: (u32, Action),
     ) -> Result<(), Refusal> {
+        let duration = finish.0 as i32;
         let mut scheduled = Vec::new();
-        for (delay, action) in actions {
+        for (delay, action) in actions.into_iter().chain([finish]) {
             let Ok(id) = host.schedule_task(delay, 0) else {
                 for (pending, _) in scheduled {
                     host.cancel_task(pending);
@@ -204,8 +239,45 @@ impl DelayedCrafts {
             };
             scheduled.push((id, action));
         }
+        let completion = scheduled.last().expect("the output task is scheduled last").0;
         self.tasks.lock().unwrap().extend(scheduled);
+        if let Some(started) = level.game_time(host)
+            && let Ok(Some(bar)) = host.create_boss_bar(
+                &format!("{PROGRESS_BAR_PREFIX}{}", completion.0),
+                Text::literal(title),
+            )
+        {
+            bar.set_color(host, BossBarColor::Yellow);
+            if bar.set_max(host, duration) && bar.add_player(host, player) {
+                self.progress.lock().unwrap().insert(completion, CraftProgress {
+                    bar,
+                    level,
+                    started,
+                    duration,
+                    shown: 0,
+                });
+            } else {
+                bar.remove(host);
+            }
+        }
         Ok(())
+    }
+
+    pub fn tick(&self, host: &mut dyn ServerHost, level: LevelRef) {
+        let mut progress = self.progress.lock().unwrap();
+        if progress.is_empty() {
+            return;
+        }
+        let Some(now) = level.game_time(host) else { return };
+        for craft in progress.values_mut().filter(|craft| craft.level == level) {
+            let elapsed = now.saturating_sub(craft.started).max(0);
+            let value = (elapsed / PROGRESS_STEP * PROGRESS_STEP)
+                .min(i64::from(craft.duration - 1)) as i32;
+            if value > craft.shown {
+                craft.bar.set_value(host, value);
+                craft.shown = value;
+            }
+        }
     }
 
     pub fn scheduled_task(&self, host: &mut dyn ServerHost, event: &ScheduledTaskEvent<'_>) {
@@ -213,6 +285,9 @@ impl DelayedCrafts {
             return;
         }
         let action = self.tasks.lock().unwrap().remove(&event.id);
+        if let Some(craft) = self.progress.lock().unwrap().remove(&event.id) {
+            craft.bar.remove(host);
+        }
         match action {
             Some(Action::Sound(player, sound)) => {
                 player.play_sound(host, sound, SoundSource::Blocks, 1.0, 1.0);
@@ -309,7 +384,18 @@ impl DelayedCrafts {
         }
     }
 
-    pub fn clear(&self) {
+    pub fn remove_saved_progress(host: &mut dyn ServerHost) {
+        for bar in host.boss_bars() {
+            if bar.id(host).is_some_and(|id| id.starts_with(PROGRESS_BAR_PREFIX)) {
+                bar.remove(host);
+            }
+        }
+    }
+
+    pub fn clear(&self, host: &mut dyn ServerHost) {
+        for (_, craft) in std::mem::take(&mut *self.progress.lock().unwrap()) {
+            craft.bar.remove(host);
+        }
         self.tasks.lock().unwrap().clear();
     }
 }

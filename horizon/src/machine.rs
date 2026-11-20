@@ -420,6 +420,7 @@ impl Machine {
                                 let [x, y, z] = dispenser.position;
                                 delayed_crafts.queue_pressure_chamber(
                                     host,
+                                    player,
                                     holder,
                                     dispenser,
                                     [x, y - 2, z],
@@ -559,9 +560,9 @@ impl Machine {
                         .expect_err("the capacity check always rolls back")?;
                         return match self {
                             Self::MagicCrafting { table } => delayed_crafts
-                                .queue_magic_crafting(host, holder, dispenser, table, output),
+                                .queue_magic_crafting(host, player, holder, dispenser, table, output),
                             Self::ArmorCrafting => {
-                                delayed_crafts.queue_armor_forge(host, holder, dispenser, output)
+                                delayed_crafts.queue_armor_forge(host, player, holder, dispenser, output)
                             }
                             _ => unreachable!(),
                         };

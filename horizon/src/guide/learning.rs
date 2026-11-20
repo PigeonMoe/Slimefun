@@ -13,7 +13,8 @@ pub(super) use fireworks::research_rocket;
 pub(crate) use fireworks::launch_random as launch_random_fireworks;
 const PERSISTED: &str = "PlayerPersisted";
 const PROGRESS: [(u32, u8); 6] = [(5, 0), (20, 23), (40, 44), (60, 57), (80, 92), (100, 100)];
-const COMPLETION_DISPLAY_TICKS: u32 = 20;
+const FULL_PROGRESS_TICKS: u32 = 10;
+const SUCCESS_DISPLAY_TICKS: u32 = 25;
 
 #[derive(Clone, Copy)]
 pub(super) enum Preference {
@@ -180,8 +181,16 @@ impl Learning {
             let study = active.get_mut(&uuid)?;
             if study.step == PROGRESS.len() {
                 study.elapsed += 1;
-                if study.elapsed >= PROGRESS[PROGRESS.len() - 1].0 + COMPLETION_DISPLAY_TICKS {
+                let elapsed = study.elapsed - PROGRESS[PROGRESS.len() - 1].0;
+                if elapsed >= FULL_PROGRESS_TICKS + SUCCESS_DISPLAY_TICKS {
                     return active.remove(&uuid)?.return_path;
+                }
+                if elapsed == FULL_PROGRESS_TICKS {
+                    let name = research_name(study.topic.id);
+                    drop(active);
+                    let title = colored_label("&a解锁成功");
+                    let subtitle = colored_label(&format!("&f“{name}”"));
+                    let _ = player.title(host, &title, &subtitle, [0, SUCCESS_DISPLAY_TICKS as i32, 0]);
                 }
                 return None;
             }
@@ -217,9 +226,9 @@ impl Learning {
             }
             Ok(true) => {
                 let name = research_name(topic.id);
-                let title = colored_label(&format!("&a已解锁“{name}”"));
+                let title = colored_label(&format!("&b正在解锁“{name}”"));
                 let subtitle = progress_bar(percent);
-                let _ = player.title(host, &title, &subtitle, [0, COMPLETION_DISPLAY_TICKS as i32, 0]);
+                let _ = player.title(host, &title, &subtitle, [0, FULL_PROGRESS_TICKS as i32, 0]);
                 self.announce_completion(host, player, name);
                 let mut active = self.active.lock().unwrap();
                 if let Some(study) = active.get_mut(&uuid) {
@@ -494,7 +503,14 @@ mod tests {
         let name = research_name(topic.id);
         assert_eq!(host.titles[0], (format!("正在解锁“{name}”"), format!("进度 {}", "□".repeat(20))));
         assert_eq!(host.titles[1].1, format!("进度 {}{}", "■".repeat(4), "□".repeat(16)));
-        assert_eq!(host.titles.last().unwrap(), &(format!("已解锁“{name}”"), format!("进度 {}", "■".repeat(20))));
+        let full = (format!("正在解锁“{name}”"), format!("进度 {}", "■".repeat(20)));
+        assert_eq!(host.titles.last(), Some(&full));
+        for _ in 1..FULL_PROGRESS_TICKS {
+            assert!(reopened.tick(&mut host, player).is_none());
+        }
+        assert_eq!(host.titles.last(), Some(&full));
+        assert!(reopened.tick(&mut host, player).is_none());
+        assert_eq!(host.titles.last(), Some(&("解锁成功".into(), format!("“{name}”"))));
     }
 
     #[test]
