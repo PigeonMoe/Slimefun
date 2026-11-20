@@ -41,12 +41,18 @@ impl CargoSettings {
 
     pub(super) fn from_paper(metadata: &toml::Table, filter: bool) -> Result<Self, &'static str> {
         let field = |name| metadata.get(name).and_then(toml::Value::as_str);
-        let channel = field("frequency")
-            .unwrap_or("0")
-            .parse::<u8>()
-            .ok()
-            .filter(|value| *value <= 16)
-            .ok_or("Invalid Paper cargo frequency.")?;
+        // Paper's NUMERIC pattern is one or more ASCII digits. Its cargo
+        // ticker routes other strings on channel zero.
+        let channel = match field("frequency") {
+            Some(value) if !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit()) => {
+                value
+                    .parse::<u8>()
+                    .ok()
+                    .filter(|value| *value <= 16)
+                    .ok_or("Invalid Paper cargo frequency.")?
+            }
+            _ => 0,
+        };
         let mut result = Self::legacy(
             channel,
             !filter || field("filter-type") != Some("whitelist"),
@@ -685,27 +691,23 @@ pub(super) fn tick(
         ) {
             continue;
         }
-        let Some((inventory, kind)) = attached_inventory(host, level, pos) else {
-            continue;
-        };
         let options = node.cargo_settings(host, level, pos);
-        let Some(filter) = Filter::new(host, node, &options) else {
-            continue;
-        };
-        let terminal = Terminal {
-            pos,
-            inventory,
-            kind,
-            options,
-            filter,
-        };
-        if node.component == Component::CargoInput && terminal.options.channel < 16 {
-            inputs.push(terminal);
+        let channel = options.channel;
+        let terminal = attached_inventory(host, level, pos).and_then(|(inventory, kind)| {
+            let filter = Filter::new(host, node, &options)?;
+            Some(Terminal {
+                pos,
+                inventory,
+                kind,
+                options,
+                filter,
+            })
+        });
+        if node.component == Component::CargoInput && channel < 16 {
+            inputs.extend(terminal);
         } else if matches!(node.component, Component::CargoOutput { .. }) {
-            outputs
-                .entry(terminal.options.channel)
-                .or_default()
-                .push(terminal);
+            // Paper counts even temporarily unusable output nodes in this channel.
+            outputs.entry(channel).or_default().push(terminal);
         }
     }
     for input in &inputs {
@@ -724,7 +726,17 @@ pub(super) fn tick(
         } else {
             0
         };
-        if let Some(next) = route(host, level, input, outputs, cursor)
+        let next = route(
+            host,
+            level,
+            input,
+            outputs,
+            cursor,
+            |host, from, to, stack| {
+                from != to && level.allow_inventory_transfer(host, from, to, stack)
+            },
+        );
+        if let Some(next) = next
             && input.options.round_robin
         {
             networks
@@ -748,8 +760,9 @@ fn route(
     host: &mut dyn ServerHost,
     level: LevelRef,
     input: &Terminal,
-    outputs: &[Terminal],
+    outputs: &[Option<Terminal>],
     cursor: usize,
+    mut permit: impl FnMut(&mut dyn ServerHost, Position, Position, &ItemStack) -> bool,
 ) -> Option<usize> {
     let source = level.capability(host, &ITEMS, input.inventory, None)?;
     let (slot, mut stack) = input.kind.extract(source.size(host)).find_map(|slot| {
@@ -758,27 +771,21 @@ fn route(
             .to_stack(source.amount(host, slot))?;
         input.filter.accepts(host, &stack).then_some((slot, stack))
     })?;
-    let cursor = if cursor < outputs.len() { cursor } else { 0 };
+    // Paper skips rotation when this channel has shrunk past the saved cursor.
+    // Its running index still starts at the old cursor.
+    let start = if cursor < outputs.len() { cursor } else { 0 };
     for offset in 0..outputs.len() {
-        let index = (cursor + offset) % outputs.len();
-        let output = &outputs[index];
+        let index = (start + offset) % outputs.len();
+        let Some(output) = &outputs[index] else {
+            continue;
+        };
         if !output.filter.accepts(host, &stack) || input.inventory == output.inventory {
             continue;
         }
-        let moved = move_to_first(
-            host,
-            level,
-            input,
-            slot,
-            output,
-            &stack,
-            |host, from, to, stack| {
-                from != to && level.allow_inventory_transfer(host, from, to, stack)
-            },
-        );
+        let moved = move_to_first(host, level, input, slot, output, &stack, &mut permit);
         // Each destination fills its first compatible stack, and the next output can receive the remainder.
         if moved == stack.count() {
-            return Some((index + 1) % outputs.len());
+            return Some((cursor % outputs.len() + offset + 1) % outputs.len());
         }
         if moved != 0 {
             stack = stack.shrink(moved)?;
@@ -982,6 +989,124 @@ mod tests {
             .filters
             .insert(FILTER_SLOTS[0], stack.to_nbt(host).unwrap());
         Filter::new(host, &node, &CargoSettings::load(&settings.save()).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn paper_cargo_uses_channel_zero_for_missing_or_nonnumeric_frequency() {
+        let channel = |metadata: &toml::Table| {
+            CargoSettings::from_paper(metadata, false).map(|settings| settings.channel)
+        };
+        assert_eq!(channel(&toml::Table::new()), Ok(0));
+        for (frequency, expected) in [
+            ("", Ok(0)),
+            ("broken", Ok(0)),
+            ("-1", Ok(0)),
+            ("+2", Ok(0)),
+            ("０", Ok(0)),
+            ("03", Ok(3)),
+            ("16", Ok(16)),
+            ("17", Err("Invalid Paper cargo frequency.")),
+            ("99999999999", Err("Invalid Paper cargo frequency.")),
+        ] {
+            let metadata = toml::Table::from_iter([("frequency".into(), frequency.into())]);
+            assert_eq!(channel(&metadata), expected, "{frequency:?}");
+        }
+        assert_eq!(channel(&"frequency = 1".parse().unwrap()), Ok(0));
+    }
+
+    fn round_robin_fixture() -> (FakeHost, ItemKey, Terminal, [Option<Terminal>; 3]) {
+        let mut host = FakeHost::new();
+        let material = Identifier::parse("minecraft:stone").unwrap();
+        host.registries.resolve_items([material.clone()]).unwrap();
+        let item = host.item_key(&material).unwrap();
+        let mut terminal = |x| {
+            let pos = [x, 70, 0];
+            host.level.block_entity(pos).with_items(1);
+            Terminal {
+                pos,
+                inventory: pos,
+                kind: InventoryKind::Ordinary,
+                options: CargoSettings::legacy(0, true),
+                filter: Filter {
+                    items: Vec::new(),
+                    blacklist: true,
+                    lore: false,
+                },
+            }
+        };
+        let input = terminal(0);
+        let outputs = [1, 2, 3].map(|x| Some(terminal(x)));
+        (host, item, input, outputs)
+    }
+
+    fn cargo_test_count(host: &FakeHost, pos: Position) -> u32 {
+        host.level
+            .block_entity_at(pos)
+            .unwrap()
+            .items
+            .as_ref()
+            .unwrap()
+            .slots[0]
+            .as_ref()
+            .map_or(0, ItemStack::count)
+    }
+
+    #[test]
+    fn round_robin_keeps_the_order_when_an_output_inventory_returns() {
+        let (mut host, item, source, mut outputs) = round_robin_fixture();
+        let level = host.level.level();
+        let unavailable = outputs[0].take().unwrap();
+        host.level.remove_block_entity(unavailable.inventory);
+        let restock = |host: &mut FakeHost| {
+            host.level
+                .block_entity(source.inventory)
+                .items
+                .as_mut()
+                .unwrap()
+                .slots[0] = ItemStack::new(item, 1);
+        };
+        let deliver = |host: &mut FakeHost, outputs: &[Option<Terminal>], cursor| {
+            route(host, level, &source, outputs, cursor, |_, _, _, _| true)
+        };
+
+        restock(&mut host);
+        let cursor = deliver(&mut host, &outputs, 0).unwrap();
+        assert_eq!(cursor, 2);
+        assert_eq!(cargo_test_count(&host, [2, 70, 0]), 1);
+        assert_eq!(cargo_test_count(&host, source.inventory), 0);
+
+        host.level.block_entity(unavailable.inventory).with_items(1);
+        outputs[0] = Some(unavailable);
+        restock(&mut host);
+        assert_eq!(deliver(&mut host, &outputs, cursor), Some(0));
+        assert_eq!(cargo_test_count(&host, [1, 70, 0]), 0);
+        assert_eq!(cargo_test_count(&host, [2, 70, 0]), 1);
+        assert_eq!(cargo_test_count(&host, [3, 70, 0]), 1);
+        assert_eq!(cargo_test_count(&host, source.inventory), 0);
+    }
+
+    #[test]
+    fn round_robin_uses_the_previous_index_after_the_output_channel_shrinks() {
+        let (mut host, item, source, outputs) = round_robin_fixture();
+        let level = host.level.level();
+        let outputs = &outputs[..2];
+        host.level
+            .block_entity(source.inventory)
+            .items
+            .as_mut()
+            .unwrap()
+            .slots[0] = ItemStack::new(item, 2);
+
+        assert_eq!(
+            route(&mut host, level, &source, outputs, 3, |_, _, _, _| false),
+            None
+        );
+        assert_eq!(cargo_test_count(&host, source.inventory), 2);
+        let cursor = route(&mut host, level, &source, outputs, 3, |_, _, _, _| true);
+        assert_eq!(cursor, Some(0));
+        assert_eq!(cargo_test_count(&host, [1, 70, 0]), 2);
+        assert_eq!(cargo_test_count(&host, [2, 70, 0]), 0);
+        assert_eq!(cargo_test_count(&host, source.inventory), 0);
     }
 
     #[test]
