@@ -1599,16 +1599,13 @@ pub(crate) fn tick(
                     return drain.map_or(Ok(()), |drain| drain.apply(host, level));
                 }
                 if node.id == experience_collector::XP_COLLECTOR.id() {
-                    data.charge = data
-                        .charge
-                        .checked_sub(experience_collector::COST)
-                        .ok_or(())?;
-                    data.stored_experience = experience_collector::collect(
+                    (data.stored_experience, data.charge) = experience_collector::collect(
                         host,
                         tx,
                         level,
                         pos,
                         data.stored_experience,
+                        data.charge,
                     )?;
                     return write_data(host, pos, data).map_err(|_| ());
                 }

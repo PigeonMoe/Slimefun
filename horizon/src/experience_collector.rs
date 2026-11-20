@@ -101,36 +101,64 @@ pub(crate) fn collect(
     level: LevelRef,
     pos: Position,
     stored: i32,
-) -> Result<i32, ()> {
+    charge: u32,
+) -> Result<(i32, u32), ()> {
+    if charge < COST {
+        return Err(());
+    }
     let dimension = level.dimension().id(host).ok_or(())?;
     let low = pos.map(|n| f64::from(n) - 4.0);
     let high = pos.map(|n| f64::from(n) + 4.0);
-    let orb = host
-        .experience_orbs(&dimension, low, high)
-        .into_iter()
-        .next()
-        .ok_or(())?;
-    let entity = host.entity(orb.id).ok_or(())?;
+    let orbs = host.experience_orbs(&dimension, low, high);
+    if orbs.is_empty() {
+        return Err(());
+    }
     let output = FILLED_FLASK_OF_KNOWLEDGE.stack(host, 1).ok_or(())?;
     let resource = ItemResource::of(&output);
 
-    // Paper fills against the balance from the previous orb, at one bottle
-    // per started group of ten points. The incoming orb funds the next cycle.
-    let requested = bottles_for(stored);
-    let mut remaining = requested;
-    for slot in 0..MENU_SLOTS.len() {
-        remaining -= place(level, pos, slot).insert(host, tx, &resource, remaining);
-        if remaining == 0 {
+    let orbs = orbs.into_iter().map(|orb| (orb.id, orb.value));
+    collect_orbs(stored, charge, orbs, |id, requested| {
+        let entity = host.entity(id).ok_or(())?;
+        let mut remaining = requested;
+        for slot in 0..MENU_SLOTS.len() {
+            if remaining == 0 {
+                break;
+            }
+            remaining -= place(level, pos, slot).insert(host, tx, &resource, remaining);
+        }
+        // Entity removal and bottle writes share the caller's transaction
+        // with the final charge and saved balance.
+        entity
+            .remove(host, RemovalReason::Discarded)
+            .then_some(requested - remaining)
+            .ok_or(())
+    })
+}
+
+fn collect_orbs(
+    mut stored: i32,
+    mut charge: u32,
+    orbs: impl IntoIterator<Item = (u32, i32)>,
+    mut collect: impl FnMut(u32, u32) -> Result<u32, ()>,
+) -> Result<(i32, u32), ()> {
+    let initial_charge = charge;
+    for (id, value) in orbs {
+        let Some(next_charge) = charge.checked_sub(COST) else {
+            break;
+        };
+        // Paper checks the total before withdrawing any bottles. A signed
+        // nonzero total ends the loop, even if the saved balance is zero.
+        let total = i64::from(stored) + i64::from(value);
+        // Bottling uses the balance from before this orb.
+        let items = collect(id, bottles_for(stored))?;
+        stored = i32::try_from(total - i64::from(items) * 10).map_err(|_| ())?;
+        charge = next_charge;
+        if total != 0 {
             break;
         }
     }
-    let spent = i64::from(requested - remaining) * 10;
-    let next = i32::try_from(i64::from(stored) + i64::from(orb.value) - spent).map_err(|_| ())?;
-    // This uses the host's journalled entity removal, so a failing charge or
-    // stored-balance write also restores the orb and all output slots.
-    entity
-        .remove(host, RemovalReason::Discarded)
-        .then_some(next)
+    (charge != initial_charge)
+        .then_some((stored, charge))
         .ok_or(())
 }
 
@@ -211,5 +239,50 @@ mod tests {
     #[test]
     fn flask_count_uses_the_previous_paper_balance_in_ten_point_steps() {
         assert_eq!([-8, 0, 1, 10, 11, 21].map(bottles_for), [0, 0, 1, 1, 2, 3]);
+    }
+
+    #[test]
+    fn zero_total_advances_to_another_orb_and_charges_for_each() {
+        // The ordinary orb sequence 1, 3, 3 reaches the starting balance -3.
+        let orbs = [(41, 3), (42, 1), (43, 7)];
+        let mut taken = Vec::new();
+        assert_eq!(
+            collect_orbs(-3, 30, orbs, |id, bottles| {
+                taken.push((id, bottles));
+                Ok(bottles)
+            }),
+            Ok((1, 10))
+        );
+        assert_eq!(taken, [(41, 0), (42, 0)]);
+
+        taken.clear();
+        assert_eq!(
+            collect_orbs(-3, 19, orbs, |id, bottles| {
+                taken.push((id, bottles));
+                Ok(bottles)
+            }),
+            Ok((0, 9))
+        );
+        assert_eq!(taken, [(41, 0)]);
+        assert_eq!(collect_orbs(-3, 9, orbs, |_, _| unreachable!()), Err(()));
+    }
+
+    #[test]
+    fn the_stop_condition_uses_the_signed_total_before_bottle_withdrawal() {
+        let orbs = [(41, 7), (42, 1)];
+        assert_eq!(
+            collect_orbs(-8, 20, orbs, |id, bottles| {
+                assert_eq!((id, bottles), (41, 0));
+                Ok(0)
+            }),
+            Ok((-1, 10))
+        );
+        assert_eq!(
+            collect_orbs(3, 20, orbs, |id, bottles| {
+                assert_eq!((id, bottles), (41, 1));
+                Ok(bottles)
+            }),
+            Ok((0, 10))
+        );
     }
 }
