@@ -442,6 +442,7 @@ fn has_restorable_menu(component: Option<Component>) -> bool {
                 | Component::ReactorPort
                 | Component::CargoInput
                 | Component::CargoOutput { advanced: true }
+                | Component::TrashCan
         )
     )
 }
@@ -680,7 +681,7 @@ mod tests {
     }
 
     #[test]
-    fn glass_and_furnace_machine_menus_use_the_same_restore_route() {
+    fn supported_paper_menus_can_be_restored_individually_and_in_batches() {
         for machine in [
             "HEATED_PRESSURE_CHAMBER",
             "HEATED_PRESSURE_CHAMBER_2",
@@ -704,6 +705,7 @@ mod tests {
             "CROP_GROWTH_ACCELERATOR_2",
             "CARGO_NODE_INPUT",
             "CARGO_NODE_OUTPUT_ADVANCED",
+            "TRASH_CAN_BLOCK",
         ] {
             assert!(
                 has_restorable_menu(Component::for_item(machine)),

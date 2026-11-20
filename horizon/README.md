@@ -147,6 +147,8 @@ python3 horizon/tools/import-block-storage.py \
 
 `/sf storage restore-chunk minecraft:overworld -1 64 -17` 按位置顺序恢复指定区块已支持的方块。每批最多 32 条，达到当前命令的处理时间后会在完整记录之间暂停。命令会列出拒绝恢复的坐标和原因，也会给出继续使用的偏移量。未移植的方块仍保存在原档案中。
 
+垃圾桶可用 `restore-inventory` 或 `restore-chunk` 恢复 Paper 的 10–16 号进料槽。恢复的物品会随垃圾桶下一次运行销毁，重复恢复同一份归档不会补回已销毁的物品。
+
 旧式库存可先用 [Paper 存档导出工具](tools/paper-storage-export/build.sh) 转换。用 JDK 25 在临时目录执行 `java -Dpaperclip.patchonly=true -jar /path/to/paper-26.2.jar`，解包 Paper 26.2 及其依赖。将 `versions/26.2/paper-26.2.jar` 与 `libraries/` 内每个 JAR 的绝对路径用冒号连接，填入 `PAPER_EXPORT_CLASSPATH`。执行 `build.sh /path/to/exporter.jar` 构建，或执行 `build.sh --test` 核验历史 ItemMeta 和失败回滚。解包和测试只加载 Paper 的注册表与物品编码器。
 
 将生成的 JAR 装到 Paper 26.2，在本地控制台执行 `sf-export-inventories paper-snapshot normalized-snapshot`。工具保留旧头颅的所有者 UUID 和旧刷怪蛋中的插件 NBT。遇到无法保留的字段会报告文件与槽位，原快照可用于重试。将 `normalized-snapshot` 作为 Horizon 导入脚本的输入。脚本同时归档 `universal-inventories` 和 `Players/*.yml` 中的背包，保留菜单名、背包所有者 UUID、编号和容量。

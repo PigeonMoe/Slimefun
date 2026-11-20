@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use mod_api::{
-    AttachmentCodec, AttachmentType, BlockEntityRef, ComponentId, Compound, Hand, Holder, ITEMS,
-    ItemPlace, ItemResource, ItemStack, LevelRef, MenuReplace, MenuSlotPlace, PlayerRef, Registrar,
-    ResourceHandler, ServerHost, SoundSource, Tag, Text, Transaction,
+    AttachmentCodec, AttachmentType, BlockEntityRef, ComponentId, Compound, Hand, Holder, Host,
+    ITEMS, ItemPlace, ItemResource, ItemStack, LevelRef, MenuReplace, MenuSlotPlace, PlayerRef,
+    Registrar, ResourceHandler, ServerHost, SoundSource, Tag, Text, Transaction,
 };
+use std::collections::BTreeMap;
 
 use crate::{
     items::{ALUMINUM_INGOT, ELECTRIC_MOTOR, HeadTexture, Kind, LEAD_INGOT, item},
@@ -253,8 +254,19 @@ pub(super) fn restore(
         return Ok(());
     }
     crate::storage::validate_inventory_preset(row, TRASH_CAN_BLOCK.id())?;
-    let mut data = existing;
-    for (slot, item) in crate::storage::decode_inventory(host, row)?.unwrap_or_default() {
+    let items = crate::storage::decode_inventory(host, row)?.unwrap_or_default();
+    let data = import_slots(host, existing, items)?;
+    CONTENTS
+        .set(host, holder, data)
+        .map_err(|error| format!("Could not save the trash can inventory ({error:?})."))
+}
+
+fn import_slots(
+    host: &dyn Host,
+    mut data: Compound,
+    items: BTreeMap<u32, ItemStack>,
+) -> Result<Compound, String> {
+    for (slot, item) in items {
         let raw = slot.to_string();
         if !SLOTS.contains(&raw.as_str()) {
             return Err(format!("Unexpected Paper trash can inventory slot {slot}."));
@@ -268,9 +280,7 @@ pub(super) fn restore(
         );
     }
     data.insert(RESTORED.into(), Tag::Byte(1));
-    CONTENTS
-        .set(host, holder, data)
-        .map_err(|error| format!("Could not save the trash can inventory ({error:?})."))
+    Ok(data)
 }
 
 struct TrashInventory {
@@ -433,5 +443,100 @@ mod tests {
             inventory.data(&mut host).unwrap().get(&RESTORED.into()),
             Some(Tag::Byte(1))
         ));
+    }
+
+    #[test]
+    fn paper_trash_restores_only_the_seven_input_slots_and_does_not_refill_after_voiding() {
+        let mut host = FakeHost::new();
+        let pos = [2, 64, 5];
+        let level = host.level.level();
+        host.level.block_entity(pos);
+        let entity = host.block_entity(level, pos).unwrap();
+        let holder = Holder::BlockEntity(pos);
+        let (_, state) = super::super::imported(TRASH_CAN_BLOCK.id(), &toml::Table::new()).unwrap();
+        super::super::write_data(&mut host, pos, state).unwrap();
+        host.registries
+            .resolve_items(
+                ["minecraft:stone", "minecraft:diamond_sword"]
+                    .map(|id| Identifier::parse(id).unwrap()),
+            )
+            .unwrap();
+        let stone = Kind::Vanilla("minecraft:stone").stack(&host, 13).unwrap();
+        let mut sword = Kind::Vanilla("minecraft:diamond_sword")
+            .stack(&host, 1)
+            .unwrap();
+        sword
+            .apply_components(&Compound::from([
+                ("minecraft:damage".into(), Tag::Int(12)),
+                (
+                    "minecraft:custom_data".into(),
+                    Tag::compound([(
+                        "PublicBukkitValues",
+                        Tag::compound([(
+                            "migration_fixture:original",
+                            Tag::String("Paper trash".into()),
+                        )]),
+                    )]),
+                ),
+            ]))
+            .unwrap();
+
+        let inventory = TrashInventory { level, pos, entity };
+        for illegal in [9, 17] {
+            assert_eq!(
+                import_slots(
+                    &host,
+                    Compound::new(),
+                    BTreeMap::from([(10, stone.clone()), (illegal, sword.clone())])
+                )
+                .unwrap_err(),
+                format!("Unexpected Paper trash can inventory slot {illegal}.")
+            );
+            assert!(inventory.stack(&mut host, 0).is_none());
+        }
+        let occupied = Compound::from([("16".into(), Tag::Compound(stone.to_nbt(&host).unwrap()))]);
+        assert!(
+            import_slots(
+                &host,
+                occupied,
+                BTreeMap::from([(10, stone.clone()), (16, sword.clone())])
+            )
+            .unwrap_err()
+            .contains("already contains items")
+        );
+
+        let prepared = import_slots(
+            &host,
+            Compound::new(),
+            BTreeMap::from([(10, stone.clone()), (16, sword.clone())]),
+        )
+        .unwrap();
+        CONTENTS
+            .set(&mut host.attachments, holder, prepared)
+            .unwrap();
+        let saved = host.attachments.to_nbt();
+        host.attachments = mod_api::Attachments::from_nbt(saved);
+        assert_eq!(inventory.stack(&mut host, 0), Some(stone));
+        assert_eq!(inventory.stack(&mut host, 6), Some(sword));
+        assert!((1..6).all(|slot| inventory.stack(&mut host, slot).is_none()));
+
+        clear(&mut host, pos);
+        let archive: toml::Table = r#"
+            paper_inventory = "original snapshot"
+            inventory_preset = "TRASH_CAN_BLOCK"
+            inventory_slots = 2
+            paper_items = [
+                {slot=10, id="minecraft:stone", count=13, data_version=4903, components={}},
+                {slot=16, id="minecraft:diamond_sword", count=1, data_version=4903, components={"minecraft:damage" = "12", "minecraft:custom_data" = '{PublicBukkitValues:{"migration_fixture:original":"Paper trash"}}'}},
+            ]
+        "#
+        .parse()
+        .unwrap();
+        restore(&mut host, pos, &archive).unwrap();
+        assert!((0..7).all(|slot| inventory.stack(&mut host, slot).is_none()));
+        assert_eq!(
+            CONTENTS.get(&mut host.attachments, holder).unwrap(),
+            Compound::from([(RESTORED.into(), Tag::Byte(1))])
+        );
     }
 }
