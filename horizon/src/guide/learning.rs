@@ -211,14 +211,14 @@ impl Learning {
                     1.0,
                 );
                 let title = colored_label(&format!("&b正在解锁“{}”", research_name(topic.id)));
-                let subtitle = colored_label(&format!("&e进度：{percent}%"));
+                let subtitle = progress_bar(percent);
                 let _ = player.title(host, &title, &subtitle, [0, 25, 5]);
                 None
             }
             Ok(true) => {
                 let name = research_name(topic.id);
                 let title = colored_label(&format!("&a已解锁“{name}”"));
-                let subtitle = colored_label(&format!("&e进度：{percent}%"));
+                let subtitle = progress_bar(percent);
                 let _ = player.title(host, &title, &subtitle, [0, COMPLETION_DISPLAY_TICKS as i32, 0]);
                 self.announce_completion(host, player, name);
                 let mut active = self.active.lock().unwrap();
@@ -253,6 +253,16 @@ impl Learning {
         self.rolls.clear();
         self.active.lock().unwrap().clear();
     }
+}
+
+fn progress_bar(percent: u8) -> mod_api::Text {
+    const WIDTH: usize = 20;
+    let filled = usize::from(percent) * WIDTH / 100;
+    colored_label(&format!(
+        "&7进度 &a{}&7{}",
+        "■".repeat(filled),
+        "□".repeat(WIDTH - filled),
+    ))
 }
 
 fn completed_ticks(step: usize) -> Option<u32> {
@@ -482,8 +492,9 @@ mod tests {
         assert_eq!(host.state.1, 4);
         assert_eq!(host.sounds, 5);
         let name = research_name(topic.id);
-        assert_eq!(host.titles[0], (format!("正在解锁“{name}”"), "进度：0%".into()));
-        assert_eq!(host.titles.last().unwrap(), &(format!("已解锁“{name}”"), "进度：100%".into()));
+        assert_eq!(host.titles[0], (format!("正在解锁“{name}”"), format!("进度 {}", "□".repeat(20))));
+        assert_eq!(host.titles[1].1, format!("进度 {}{}", "■".repeat(4), "□".repeat(16)));
+        assert_eq!(host.titles.last().unwrap(), &(format!("已解锁“{name}”"), format!("进度 {}", "■".repeat(20))));
     }
 
     #[test]

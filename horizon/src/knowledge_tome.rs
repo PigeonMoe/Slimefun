@@ -145,7 +145,9 @@ static TOPICS: LazyLock<BTreeMap<String, &'static str>> = LazyLock::new(|| {
 static FLAGS: LazyLock<Vec<Identifier>> = LazyLock::new(|| {
     TOPICS
         .keys()
-        .map(|key| Identifier::parse(key).expect("an authored Slimefun research key"))
+        .map(String::as_str)
+        .chain([research::SKIP_LEGACY_IMPORT])
+        .map(|key| Identifier::parse(key).expect("an authored Slimefun player data key"))
         .collect()
 });
 
@@ -157,7 +159,8 @@ fn owner_flags(host: &dyn ServerHost, uuid: u128) -> Result<BTreeSet<String>, &'
             PlayerFlagReadError::Corrupt => "The original owner's saved research data is damaged.",
             _ => "The original owner's research is unavailable.",
         })?;
-    let imported = if online {
+    let skip_legacy = stored.iter().flatten().any(|id| id.to_string() == research::SKIP_LEGACY_IMPORT);
+    let imported = if online || skip_legacy {
         None
     } else {
         research::legacy_research_flags(host, uuid)?

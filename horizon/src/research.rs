@@ -7,7 +7,7 @@ use mod_api::{
     ServerHost, Tag,
 };
 
-use crate::{guide::research_name, recipes::Research};
+use crate::{guide, guide::research_name, recipes::{self, Research}};
 
 const PERSISTED: &str = "PlayerPersisted";
 
@@ -40,6 +40,7 @@ pub(crate) fn unlock(host: &mut dyn ServerHost, player: PlayerRef, research: &Re
 }
 
 const PENDING: &str = "slimefun:pending_research";
+pub(crate) const SKIP_LEGACY_IMPORT: &str = "slimefun:skip_legacy_research_import";
 const UPDATE_ERROR: &str = "远古工艺无法更新你的研究数据。";
 
 fn saved_data(data: &mut Compound) -> Option<&mut Compound> {
@@ -57,6 +58,52 @@ fn mark_learned(data: &mut Compound, research: &Research) {
         format!("slimefun:{}", research.id).as_str().into(),
         Tag::Byte(1),
     );
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum BulkChange {
+    UnlockAll,
+    Clear,
+}
+
+pub(crate) fn bulk_change(
+    host: &mut dyn ServerHost,
+    player: PlayerRef,
+    change: BulkChange,
+) -> Result<usize, &'static str> {
+    let mut data = player.persistent_data(host).ok_or(UPDATE_ERROR)?;
+    let changed = apply_bulk_change(&mut data, change)?;
+    player.set_persistent_data(host, data).map_err(|_| UPDATE_ERROR)?;
+    Ok(changed)
+}
+
+fn apply_bulk_change(data: &mut Compound, change: BulkChange) -> Result<usize, &'static str> {
+    let saved = saved_data(data).ok_or(UPDATE_ERROR)?;
+    saved.remove(&PENDING.into());
+    let current = recipes::researches()
+        .chain(guide::research_topics())
+        .filter(|topic| !topic.id.is_empty())
+        .map(|topic| topic.id);
+    let mut changed = 0;
+    match change {
+        BulkChange::UnlockAll => {
+            for id in current {
+                let key = format!("slimefun:{id}");
+                changed += usize::from(saved.insert(key.as_str().into(), Tag::Byte(1)) != Some(Tag::Byte(1)));
+            }
+        }
+        BulkChange::Clear => {
+            let legacy = include_str!("knowledge_researches.tsv")
+                .lines()
+                .filter_map(|row| row.split_once('\t').map(|(id, _)| id));
+            for id in current.chain(legacy) {
+                let key = format!("slimefun:{id}");
+                changed += usize::from(saved.remove(&key.as_str().into()) == Some(Tag::Byte(1)));
+            }
+            saved.insert(SKIP_LEGACY_IMPORT.into(), Tag::Byte(1));
+        }
+    }
+    Ok(changed)
 }
 
 fn store_payment(data: &mut Compound, research: &Research, delayed: bool) -> Result<(), String> {
@@ -219,10 +266,13 @@ pub(crate) fn legacy_research_flags(
 /// Import canonical research IDs prepared from a Paper legacy profile when its UUID joins.
 pub(crate) fn import_legacy(host: &mut dyn ServerHost, player: PlayerRef) {
     let uuid = format!("{:032x}", player.uuid());
-    let Ok(Some(text)) = read_legacy(host, &uuid) else {
+    let Some(data) = player.persistent_data(host) else {
         return;
     };
-    let Some(data) = player.persistent_data(host) else {
+    if data.get(&PERSISTED.into()).and_then(|saved| saved.get(SKIP_LEGACY_IMPORT)) == Some(&Tag::Byte(1)) {
+        return;
+    }
+    let Ok(Some(text)) = read_legacy(host, &uuid) else {
         return;
     };
     if let Some(merged) = merge_import(data, &uuid, &text) {
@@ -260,6 +310,24 @@ mod tests {
     use crate::recipes::LUMPS;
 
     const ID: &str = "00000000000000000000000000000001";
+
+    #[test]
+    fn bulk_research_changes_preserve_preferences_and_do_not_resume_a_cancelled_study() {
+        let mut data = Compound::new();
+        store_payment(&mut data, &LUMPS, true).unwrap();
+        let unrelated = "slimefun:research_fireworks";
+        saved_data(&mut data).unwrap().insert(unrelated.into(), Tag::Byte(1));
+        assert!(apply_bulk_change(&mut data, BulkChange::UnlockAll).unwrap() > 200);
+        assert_eq!(apply_bulk_change(&mut data, BulkChange::UnlockAll), Ok(0));
+        assert!(unlocked(&data, &LUMPS));
+        assert!(pending(&data).is_none());
+        assert!(apply_bulk_change(&mut data, BulkChange::Clear).unwrap() > 200);
+        assert!(!unlocked(&data, &LUMPS));
+        assert!(pending(&data).is_none());
+        let saved = data.get(&PERSISTED.into()).unwrap();
+        assert_eq!(saved.get(unrelated), Some(&Tag::Byte(1)));
+        assert_eq!(saved.get(SKIP_LEGACY_IMPORT), Some(&Tag::Byte(1)));
+    }
     const IMPORT: &str = concat!(
         "slimefun-research-import-v1\n",
         "00000000000000000000000000000001\n",

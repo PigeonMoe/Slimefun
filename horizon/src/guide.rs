@@ -592,6 +592,10 @@ impl Guide {
         self.readers.lock().unwrap().remove(&player);
     }
 
+    pub(crate) fn cancel_research_animation(&self, player: PlayerRef) {
+        self.learning.forget(player.uuid());
+    }
+
     pub(crate) fn clear(&self) {
         self.learning.clear();
         self.readers.lock().unwrap().clear();

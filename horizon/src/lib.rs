@@ -896,6 +896,10 @@ impl Hooks for Slimefun {
             Command::new("sf recipe <item:text>"),
             Command::new("slimefun research <key:word>"),
             Command::new("sf research <key:word>"),
+            Command::op("slimefun research all <player:word>", 2),
+            Command::op("sf research all <player:word>", 2),
+            Command::op("slimefun research clear <player:word>", 2),
+            Command::op("sf research clear <player:word>", 2),
             Command::new("slimefun restore-backpack"),
             Command::new("sf restore-backpack"),
             Command::op("slimefun storage", 2),
@@ -1039,6 +1043,31 @@ impl Hooks for Slimefun {
                 _ => return Flow::Continue,
             },
             Some("research") => {
+                if let Some(action @ ("all" | "clear")) = path.next() {
+                    let Some(CommandArgumentValue::String(name)) = event.command.argument("player") else {
+                        return Flow::Continue;
+                    };
+                    let message = if event.source.permission().level() < 2 {
+                        "批量管理研究需要二级管理员权限。".to_owned()
+                    } else if let Some(player) = host.players().player_by_name(name) {
+                        let change = if action == "all" { research::BulkChange::UnlockAll } else { research::BulkChange::Clear };
+                        match research::bulk_change(host, player, change) {
+                            Ok(changed) => {
+                                self.guide.cancel_research_animation(player);
+                                let name = player.name(host).unwrap_or_else(|| name.to_owned());
+                                match change {
+                                    research::BulkChange::UnlockAll => format!("已为 {name} 解锁全部研究，新增 {changed} 项。"),
+                                    research::BulkChange::Clear => format!("已为 {name} 清除研究，共 {changed} 项。"),
+                                }
+                            }
+                            Err(error) => error.to_owned(),
+                        }
+                    } else {
+                        format!("玩家 {name} 当前不在线。")
+                    };
+                    let _ = host.commands().feedback(Text::literal(message));
+                    return Flow::Cancel;
+                }
                 let Some(CommandArgumentValue::String(id)) = event.command.argument("key") else {
                     return Flow::Continue;
                 };
