@@ -248,6 +248,7 @@ pub(crate) fn magic_crafting() -> impl Iterator<Item = &'static CraftingRecipe> 
         .chain(crate::talismans::CRAFTING)
         .chain([&crate::knowledge_tome::CRAFTING])
         .chain([&crate::infused::MAGIC, &crate::zombie_pills::CRAFTING])
+        .chain([&CHRISTMAS_PRESENT_RECIPE])
 }
 
 pub(crate) fn smelting() -> impl Iterator<Item = &'static SmeltingRecipe> {
@@ -376,7 +377,38 @@ const fn seasonal(inputs: [Option<Kind>; 9], output: Kind, count: u32) -> Crafti
     }
 }
 
+const CHRISTMAS_PRESENT_RECIPE: CraftingRecipe = seasonal(
+    [
+        None,
+        Some(vanilla!("name_tag")),
+        None,
+        Some(vanilla!("red_wool")),
+        Some(vanilla!("green_wool")),
+        Some(vanilla!("red_wool")),
+        Some(vanilla!("red_wool")),
+        Some(vanilla!("green_wool")),
+        Some(vanilla!("red_wool")),
+    ],
+    crate::seasonal_gifts::CHRISTMAS_PRESENT,
+    1,
+);
+
 pub(crate) const CRAFTING: &[CraftingRecipe] = &[
+    seasonal(
+        [
+            None,
+            None,
+            None,
+            Some(vanilla!("lime_dye")),
+            Some(vanilla!("egg")),
+            Some(vanilla!("purple_dye")),
+            None,
+            None,
+            None,
+        ],
+        crate::seasonal_gifts::EASTER_EGG,
+        2,
+    ),
     CraftingRecipe {
         inputs: [
             Some(vanilla!("milk_bucket")),

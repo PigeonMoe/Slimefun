@@ -10,6 +10,7 @@ use super::{Page, catalog, colored_label};
 use crate::{random::Rolls, recipes::Research, research};
 
 pub(super) use fireworks::research_rocket;
+pub(crate) use fireworks::launch_random as launch_random_fireworks;
 const PERSISTED: &str = "PlayerPersisted";
 const PROGRESS: [(u32, u8); 6] = [(5, 0), (20, 23), (40, 44), (60, 57), (80, 92), (100, 100)];
 
@@ -228,7 +229,7 @@ impl Learning {
         name: &str,
     ) {
         if self.option(host, player, Preference::Fireworks) == Some(true) {
-            fireworks::launch(host, player, &self.rolls);
+            fireworks::launch_random(host, player, &self.rolls, 1);
         }
         let _ = player.tell(
             host,

@@ -11,26 +11,30 @@ const COLORS: [i32; 17] = [
     0x808000, 0xffa500, 0x800080, 0xff0000, 0xc0c0c0, 0x008080, 0xffffff, 0xffff00,
 ];
 
-pub(super) fn launch(host: &mut dyn ServerHost, player: PlayerRef, rolls: &Rolls) {
+pub(crate) fn launch_random(host: &mut dyn ServerHost, player: PlayerRef, rolls: &Rolls, count: u32) {
     let Some(level) = player.level(host) else {
         return;
     };
-    let Some(mut pos) = player.entity().position(host) else {
+    let Some(position) = player.entity().position(host) else {
         return;
     };
-    let Some((dx, dz, nbt)) = rocket_nbt(|bound| rolls.next(host, level, bound)) else {
+    let Some(dimension) = level.dimension().id(host) else {
         return;
     };
-    pos[0] += f64::from(dx);
-    pos[2] += f64::from(dz);
-    if let Some(dimension) = level.dimension().id(host) {
+    for _ in 0..count {
+        let Some((dx, dz, nbt)) = rocket_nbt(count, |bound| rolls.next(host, level, bound)) else {
+            return;
+        };
+        let mut pos = position;
+        pos[0] += f64::from(dx);
+        pos[2] += f64::from(dz);
         let _ = host.summon(&dimension, ROCKET, pos, nbt);
     }
 }
 
-fn rocket_nbt(mut roll: impl FnMut(u32) -> Option<u32>) -> Option<(i32, i32, Compound)> {
-    let dx = roll(2)? as i32 - 1;
-    let dz = roll(2)? as i32 - 1;
+fn rocket_nbt(radius: u32, mut roll: impl FnMut(u32) -> Option<u32>) -> Option<(i32, i32, Compound)> {
+    let dx = roll(radius * 2)? as i32 - radius as i32;
+    let dz = roll(radius * 2)? as i32 - radius as i32;
     let color = COLORS[roll(COLORS.len() as u32)? as usize];
     let twinkle = roll(2)? != 0;
     let shape = if roll(2)? != 0 {
@@ -142,7 +146,7 @@ mod tests {
 
     #[test]
     fn a_generated_research_rocket_is_ownerless_and_retains_burst_components() {
-        let (dx, dz, nbt) = rocket_nbt(|_| Some(0)).unwrap();
+        let (dx, dz, nbt) = rocket_nbt(1, |_| Some(0)).unwrap();
         assert_eq!((dx, dz), (-1, -1));
         assert_eq!(nbt.get(&"LifeTime".into()), Some(&Tag::Int(20)));
         assert!(!nbt.contains_key(&"Owner".into()));

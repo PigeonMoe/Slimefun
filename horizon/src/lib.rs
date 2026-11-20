@@ -86,6 +86,7 @@ mod rainbow;
 mod random;
 mod recipes;
 mod research;
+mod seasonal_gifts;
 mod smelters_pickaxe;
 mod snacks;
 mod sneak_equipment;
@@ -1094,6 +1095,19 @@ impl Hooks for Slimefun {
             return fertilizer;
         }
         if *event.use_item != TriState::False && let Some(held) = event.click.stack {
+            if seasonal_gifts::open(
+                host,
+                player,
+                event.click.hand,
+                held,
+                Some((event.click.pos, event.click.hit.face)),
+                &self.rolls,
+            ) {
+                self.item_clicks
+                    .record_block_use(host, event.click.player, event.click.hand, held);
+                *event.cancellation_result = InteractionResult::Consume;
+                return Flow::Cancel;
+            }
             if self.use_multi_tool(host, player, event.click.hand, held, Some(event.click.pos)) {
                 *event.cancellation_result = InteractionResult::Consume;
                 return Flow::Cancel;
@@ -1338,6 +1352,14 @@ impl Hooks for Slimefun {
                 event.click.player,
                 event.click.hand,
                 event.click.stack,
+            )
+            || seasonal_gifts::open(
+                host,
+                player,
+                event.click.hand,
+                event.click.stack,
+                None,
+                &self.rolls,
             )
             || self.use_multi_tool(host, player, event.click.hand, event.click.stack, None)
             || self.grapple.use_held(host, player, event.click.hand, event.click.stack)

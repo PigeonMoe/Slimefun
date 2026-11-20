@@ -4,13 +4,13 @@ use std::sync::Mutex;
 
 use mod_api::{Host, LegacyRandom, LevelRef, RandomSource, ServerHost};
 
-/// `CraftWorld.dropItemNaturally` offsets the lower edge of the item from the block origin.
+/// `CraftWorld.dropItemNaturally` offsets the lower edge of the item from its origin.
 pub(crate) fn natural_drop_position(
     host: &mut dyn ServerHost,
     level: LevelRef,
-    pos: [i32; 3],
+    pos: [impl Into<f64>; 3],
 ) -> [f64; 3] {
-    let mut point = pos.map(f64::from);
+    let mut point = pos.map(Into::into);
     if let Some(mut random) = level.random(host) {
         point = point.map(|axis| axis + random.next_double() * 0.5 - 0.25);
         let _ = level.set_random(host, random);

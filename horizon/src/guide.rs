@@ -25,6 +25,7 @@ mod catalog;
 mod learning;
 use catalog::{Entry, GROUPS, Group, group_entries, lookup, named_group_entries};
 use learning::Preference;
+pub(crate) use learning::launch_random_fireworks;
 
 const TITLE: &str = "Slimefun Guide";
 const GUIDE_KEY: &str = "slimefun:slimefun_guide_mode";
