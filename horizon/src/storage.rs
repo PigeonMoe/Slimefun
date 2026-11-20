@@ -486,7 +486,7 @@ fn is_orphan_inventory(row: &toml::Table) -> bool {
     !row.contains_key("metadata") && row.contains_key("paper_inventory")
 }
 
-fn orphan_preset(row: &toml::Table) -> Result<&str, String> {
+fn orphan_preset(row: &toml::Table) -> Result<Option<&str>, String> {
     if !is_orphan_inventory(row)
         || row
             .get("paper_inventory")
@@ -498,14 +498,12 @@ fn orphan_preset(row: &toml::Table) -> Result<&str, String> {
     let id = match row.get("inventory_preset") {
         Some(toml::Value::String(id)) => id,
         Some(_) => return Err("The Paper menu preset is invalid.".into()),
-        None => {
-            return Err("An inventory-only archive must explicitly identify its preset.".into());
-        }
+        None => return Ok(None),
     };
     if !has_restorable_menu(Component::for_item(id)) || crate::auto_crafter::is_machine(id) {
         return Err("This inventory-only Paper menu preset is unsupported.".into());
     }
-    Ok(id)
+    Ok(Some(id))
 }
 
 fn restore_orphan_inventory(
@@ -515,11 +513,16 @@ fn restore_orphan_inventory(
     row: &toml::Table,
     networks: &Mutex<Networks>,
 ) -> Result<String, String> {
-    let id = orphan_preset(row)?;
+    let preset = orphan_preset(row)?;
     let items = decode_archived_slots(host, row, 54)?;
     let mut networks = networks.lock().unwrap();
     host.transaction(|host, _| {
-        let component = networks.installed_menu(host, level, pos, id)?;
+        // Paper uses the registered block ID to select the menu when an older
+        // .sfi has no preset. The block and its saved identity must agree.
+        let (id, component) = networks.installed_menu(host, level, pos, preset)?;
+        if !has_restorable_menu(Some(component)) || crate::auto_crafter::is_machine(&id) {
+            return Err("This inventory-only Paper menu preset is unsupported.".into());
+        }
         let holder = Holder::Chunk(column(pos));
         let mut receipts = ORPHAN_RECEIPTS
             .get_existing(host, holder)
@@ -527,7 +530,7 @@ fn restore_orphan_inventory(
             .unwrap_or_default();
         let [x, y, z] = pos;
         let key = format!("{x},{y},{z}").as_str().into();
-        let receipt = Tag::String(id.into());
+        let receipt = Tag::String(id.as_str().into());
         if let Some(previous) = receipts.get(&key) {
             return if previous == &receipt {
                 Ok(format!(
@@ -538,7 +541,7 @@ fn restore_orphan_inventory(
             };
         }
 
-        crate::network_runtime::restore_installed_menu(host, level, pos, id, component, items)?;
+        crate::network_runtime::restore_installed_menu(host, level, pos, &id, component, items)?;
         receipts.insert(key, receipt);
         ORPHAN_RECEIPTS
             .set(host, holder, receipts)
@@ -853,9 +856,9 @@ mod tests {
     }
 
     #[test]
-    fn orphan_menus_require_an_explicit_stock_preset_and_no_metadata() {
+    fn orphan_menus_reject_unsupported_explicit_presets_and_metadata() {
         let mut row = orphan_gold_pan();
-        assert_eq!(orphan_preset(&row).unwrap(), "ELECTRIC_GOLD_PAN_2");
+        assert_eq!(orphan_preset(&row).unwrap(), Some("ELECTRIC_GOLD_PAN_2"));
         for invalid in [
             true.into(),
             "EXTENSION_MENU".into(),
@@ -865,7 +868,7 @@ mod tests {
             assert!(orphan_preset(&row).is_err());
         }
         row.remove("inventory_preset");
-        assert!(orphan_preset(&row).is_err());
+        assert_eq!(orphan_preset(&row).unwrap(), None);
         let mut row = orphan_gold_pan();
         row.insert("metadata".into(), toml::Value::Table(toml::Table::new()));
         assert!(!is_orphan_inventory(&row));

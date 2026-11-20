@@ -567,8 +567,8 @@ impl Networks {
         host: &mut dyn ServerHost,
         level: LevelRef,
         pos: Position,
-        id: &str,
-    ) -> Result<Component, String> {
+        expected_id: Option<&str>,
+    ) -> Result<(String, Component), String> {
         let error =
             "An inventory-only Paper archive requires a matching, registered Slimefun block.";
         if !level.in_place(host) {
@@ -581,12 +581,14 @@ impl Networks {
         let nodes = self.nodes(host, &dimension)?;
         let node = nodes
             .get(&pos)
-            .filter(|node| node.id == id && node.accepts_block(host, level, pos))
+            .filter(|node| {
+                expected_id.is_none_or(|id| node.id == id) && node.accepts_block(host, level, pos)
+            })
             .ok_or(error)?;
-        if block_data(host, level, pos).is_none_or(|data| data.id != id) {
+        if block_data(host, level, pos).is_none_or(|data| data.id != node.id) {
             return Err(error.into());
         }
-        Ok(node.component)
+        Ok((node.id.clone(), node.component))
     }
 
     #[cfg(test)]

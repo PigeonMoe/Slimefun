@@ -27,6 +27,10 @@ trap 'rm -rf -- "$work"' EXIT
 
 cp "$source_dir/horizon-mod.toml" "$work/"
 cp -R "$source_dir/src" "$work/"
+if [[ "$mode" == test ]]; then
+    mkdir -p "$work/tools/paper-storage-export"
+    cp -R "$source_dir/tools/paper-storage-export/fixtures" "$work/tools/paper-storage-export/"
+fi
 if [[ -f "$source_dir/Cargo.lock" ]]; then
     cp "$source_dir/Cargo.lock" "$work/"
 fi

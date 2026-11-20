@@ -123,7 +123,7 @@ impl ModStateServerHost for OrphanHost {
 }
 
 #[test]
-fn an_orphan_gold_pan_keeps_charge_and_cannot_refill_a_replacement() {
+fn an_orphan_gold_pan_without_a_preset_keeps_charge_and_cannot_refill_a_replacement() {
     mod_api::__private::initialize().unwrap();
     let carrier = Arc::new(Mutex::new(None));
     mod_api::__private::part_tests::install_parts_fixture(&[ModEntry::new(
@@ -136,7 +136,12 @@ fn an_orphan_gold_pan_keeps_charge_and_cannot_refill_a_replacement() {
     let level = host.0.level.level();
     let pos = POSITION;
     let archive = tests::orphan_gold_pan();
-    let id = orphan_preset(&archive).unwrap();
+    let id = orphan_preset(&archive).unwrap().unwrap();
+    let mut legacy = archive.clone();
+    legacy.remove("inventory_preset");
+    let archived_yaml = archive["paper_inventory"].as_str().unwrap();
+    let (_, archived_items) = archived_yaml.split_once('\n').unwrap();
+    legacy.insert("paper_inventory".into(), archived_items.into());
     let material = Identifier::parse("minecraft:gravel").unwrap();
     host.0.registries.resolve_items([material.clone()]).unwrap();
     let stack = ItemStack::new(host.item_key(&material).unwrap(), 1).unwrap();
@@ -147,6 +152,7 @@ fn an_orphan_gold_pan_keeps_charge_and_cannot_refill_a_replacement() {
         .unwrap()
         .bind_fixture_node(&mut host, level, pos, id, &metadata, false);
     assert!(restore_orphan_inventory(&mut host, level, pos, &archive, &networks).is_err());
+    assert!(restore_orphan_inventory(&mut host, level, pos, &legacy, &networks).is_err());
     assert!(host.0.attachments.to_nbt().is_empty());
 
     networks
@@ -168,13 +174,13 @@ fn an_orphan_gold_pan_keeps_charge_and_cannot_refill_a_replacement() {
         .insert("slot".into(), 22.into());
     assert!(restore_orphan_inventory(&mut host, level, pos, &invalid, &networks).is_err());
     let failed = (&mut host as &mut dyn ServerHost).transaction(|host, _| {
-        restore_orphan_inventory(host, level, pos, &archive, &networks).unwrap();
+        restore_orphan_inventory(host, level, pos, &legacy, &networks).unwrap();
         Err::<(), _>("abort after inventory and receipt")
     });
     assert!(failed.is_err());
     assert_eq!(host.0.attachments.to_nbt(), before);
 
-    restore_orphan_inventory(&mut host, level, pos, &archive, &networks).unwrap();
+    restore_orphan_inventory(&mut host, level, pos, &legacy, &networks).unwrap();
     assert_eq!(
         crate::network_runtime::charge(&mut host, level, pos),
         Some(37)

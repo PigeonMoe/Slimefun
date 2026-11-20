@@ -169,7 +169,7 @@ python3 horizon/tools/import-block-storage.py \
 
 `/sf storage restore-chunk minecraft:overworld -1 64 -17` 按位置顺序恢复指定区块已支持的方块。每批最多 32 条，达到当前命令的处理时间后会在完整记录之间暂停。命令会列出拒绝恢复的坐标和原因，也会给出继续使用的偏移量。未移植的方块仍保存在原档案中。
 
-若仅有带明确预设的 `.sfi`，`restore-inventory` 和 `restore-chunk` 可为同一位置已经注册、仍有相同 Slimefun 标记的受支持方块恢复原槽。方块现有的电量、属主和设置保留。普通载体方块无法用这类档案激活。恢复成功后，同一位置的区块记录会阻止再次补入物品，包括拆除后放置同类型机器的情况。
+若仅有 `.sfi`，`restore-inventory` 和 `restore-chunk` 可为同一位置已注册且保存标记一致的受支持 Slimefun 方块恢复原槽。旧档缺少 `preset` 时沿用 Paper 的规则，使用该方块的注册 ID。档案明确给出预设时，预设仍须与方块一致。方块现有的电量、属主和设置保留。恢复成功后，同一位置的区块记录会阻止再次补入物品，包括拆除后放置同类型机器的情况。
 
 垃圾桶可用 `restore-inventory` 或 `restore-chunk` 恢复 Paper 的 10–16 号进料槽。恢复的物品会随垃圾桶下一次运行销毁，重复恢复同一份归档不会补回已销毁的物品。
 
