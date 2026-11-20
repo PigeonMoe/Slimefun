@@ -767,7 +767,7 @@ fn render(
                 } else {
                     menu.set(
                         9 + slot,
-                        entry_icon(host, entry),
+                        entry_icon(host, entry, 1),
                         Some(entry_action(entry, cheat)),
                     );
                 }
@@ -803,7 +803,7 @@ fn render(
                 }
             }
             menu.slots[10] = method_icon(host, entry);
-            menu.slots[16] = entry_icon(host, entry);
+            menu.slots[16] = entry_icon(host, entry, entry.item.count);
         }
         Page::Info => {
             menu.slots[2] = icon(
@@ -863,13 +863,19 @@ fn render(
             for (slot, (group, entry)) in
                 search_matches(query, month, show_hidden, availability).enumerate()
             {
-                let mut item = entry_icon(host, entry);
+                let mut item = entry_icon(host, entry, 1);
                 let group = colored_lore(&format!("&8⇨ &f{}", group.name));
                 if let Some(item) = &mut item {
-                    let _ = item.apply_components(&Compound::from([(
-                        "minecraft:lore".into(),
-                        Tag::List(vec![Tag::String("".into()), group]),
-                    )]));
+                    let lore_key = "minecraft:lore".into();
+                    let mut lore = match item
+                        .components()
+                        .and_then(|patch| patch.as_nbt().get(&lore_key))
+                    {
+                        Some(Tag::List(lines)) => lines.clone(),
+                        _ => Vec::new(),
+                    };
+                    lore.extend([Tag::String("".into()), group]);
+                    let _ = item.apply_components(&Compound::from([(lore_key, Tag::List(lore))]));
                 }
                 menu.set(9 + slot, item, Some(entry_action(entry, cheat)));
             }
@@ -1116,11 +1122,17 @@ fn entry_name(entry: &Entry) -> String {
     }
 }
 
-fn entry_icon(host: &dyn Host, entry: &Entry) -> Option<ItemStack> {
+fn entry_icon(host: &dyn Host, entry: &Entry, count: u32) -> Option<ItemStack> {
+    let mut stack = guide_stack(host, entry.item.kind, count)?;
     if entry.label.is_some() {
-        return icon(host, entry.item.kind.material(), &entry_name(entry), &[]);
+        stack
+            .apply_components(&Compound::from([(
+                "minecraft:custom_name".into(),
+                colored_lore(&entry_name(entry)),
+            )]))
+            .ok()?;
     }
-    guide_stack(host, entry.item.kind, entry.item.count)
+    Some(stack)
 }
 
 fn icon(host: &dyn Host, material: &'static str, name: &str, lore: &[&str]) -> Option<ItemStack> {
@@ -1297,6 +1309,43 @@ mod tests {
     }
 
     #[test]
+    fn rainbow_items_show_one_in_the_guide_and_eight_in_the_altar_recipe() {
+        mod_api::__private::initialize().unwrap();
+        let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
+        let mut host = FakeHost::new();
+        let entry = lookup("RAINBOW_WOOL").unwrap();
+        host.registries
+            .resolve_items([Identifier::parse(entry.item.kind.material()).unwrap()])
+            .unwrap();
+        let search = render(
+            &host,
+            None,
+            &Page::Search("彩虹羊毛".into()),
+            1,
+            false,
+            available(),
+            false,
+        );
+        let (_, listed) = search.actions.iter().zip(&search.slots).find(|(action, _)| {
+            matches!(action, Some(Action::Push(Page::Recipe(result))) if result.id == entry.id)
+        }).unwrap();
+        let listed = listed.as_ref().unwrap();
+        assert_eq!(listed.count(), 1);
+        let recipe = render(&host, None, &Page::Recipe(entry), 1, false, available(), false);
+        let output = recipe.slots[16].as_ref().unwrap();
+        assert_eq!(output.count(), 8);
+        let lore = colored_lore("&d在彩虹的各个颜色之间循环切换！");
+        for stack in [listed, output] {
+            let Tag::List(lines) = stack.components().unwrap().as_nbt()
+                .get(&"minecraft:lore".into()).unwrap()
+            else {
+                panic!("missing lore");
+            };
+            assert!(lines.contains(&lore));
+        }
+    }
+
+    #[test]
     fn chinese_icons_keep_the_original_skin_and_cheat_items_keep_the_original_stack() {
         mod_api::__private::initialize().unwrap();
         let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
@@ -1312,7 +1361,7 @@ mod tests {
         let player = host.player(1).unwrap();
         let entry = lookup("PORTABLE_CRAFTER").unwrap();
         let normal = entry.item.kind.stack(&host, 1).unwrap();
-        let displayed = entry_icon(&host, entry).unwrap();
+        let displayed = entry_icon(&host, entry, 1).unwrap();
         let parts = |stack: ItemStack| stack.components().unwrap().as_nbt().clone();
         let original = parts(normal.clone());
         let displayed = parts(displayed);

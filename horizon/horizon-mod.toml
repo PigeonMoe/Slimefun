@@ -1,6 +1,6 @@
 id = "slimefun"
 name = "远古工艺"
-version = "0.1.0-dev.7"
+version = "0.1.0-dev.8"
 description = "由 PigeonMoe 移植至 Horizon 26.3 的远古工艺服务端模组。"
 authors = ["PigeonMoe", "Slimefun contributors"]
 api = "0.2"

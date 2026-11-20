@@ -36,11 +36,30 @@ fn plain_text(component: &Tag, out: &mut String) {
     }
 }
 
+fn rainbow_lore(line: &str) -> Option<&'static str> {
+    Some(match line {
+        "Cycles through all Colors of the Rainbow!" => "&d在彩虹的各个颜色之间循环切换！",
+        "[Christmas Edition]" => "&a[圣诞节版]",
+        "[Valentine's Day Edition]" => "&5[&d情人节版&5]",
+        "[Halloween Edition]" => "&c[&6万圣节版&c]",
+        _ => return None,
+    })
+}
+
 /// Localize the menu's copy. The stack produced by recipes and stored in
 /// inventories keeps its canonical components for stacking and interoperability.
 pub(in crate::guide) fn item_icon(mut stack: ItemStack, id: &str) -> Option<ItemStack> {
     let name = item_name(id).unwrap_or("远古工艺物品");
-    let translations = ZH_CN["items"][id]["lore"].as_array();
+    let mut translations: Vec<_> = ZH_CN["items"][id]["lore"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| {
+            let mut source = String::new();
+            plain_text(&colored_lore(entry["source"].as_str()?), &mut source);
+            Some((source, entry["target"].as_str()?, false))
+        })
+        .collect();
     let mut lore = Vec::new();
     if let Some(Tag::List(lines)) = stack
         .components()
@@ -49,17 +68,27 @@ pub(in crate::guide) fn item_icon(mut stack: ItemStack, id: &str) -> Option<Item
         for line in lines {
             let mut displayed = String::new();
             plain_text(line, &mut displayed);
-            let translated = translations.into_iter().flatten().find_map(|entry| {
-                let mut source = String::new();
-                plain_text(&colored_lore(entry["source"].as_str()?), &mut source);
-                (source == displayed).then(|| entry["target"].as_str()).flatten()
-            });
-            if let Some(translated) = translated {
-                lore.push(colored_lore(translated));
+            if let Some((_, target, shown)) = translations
+                .iter_mut()
+                .find(|(source, _, _)| source.trim() == displayed.trim())
+            {
+                *shown = true;
+                lore.push(colored_lore(target));
+            } else if let Some(target) = rainbow_lore(&displayed) {
+                lore.push(colored_lore(target));
             } else if !displayed.chars().any(|ch| ch.is_ascii_alphabetic())
                 || displayed.chars().any(|ch| ('\u{4e00}'..='\u{9fff}').contains(&ch))
             {
                 lore.push(line.clone());
+            }
+        }
+    }
+    for (source, target, shown) in translations {
+        // Dynamic templates, such as a spawner's mob type, need a value from the stack.
+        if !shown && !source.contains('<') {
+            let line = colored_lore(target);
+            if !lore.contains(&line) {
+                lore.push(line);
             }
         }
     }

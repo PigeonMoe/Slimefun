@@ -820,7 +820,7 @@ fn set_lore(components: &mut Compound, lines: &[(&str, &str, bool)]) {
 }
 
 const EFFECT_INTERVAL: i64 = 10 * 20;
-const RAINBOW_INTERVAL: i64 = 3 * 20;
+const RAINBOW_INTERVAL: i64 = 5 * 20;
 // Paper uses DyeColor.getColor(), not chat colors or dye firework colors.
 const RAINBOW: [i32; 7] = [
     0xb02e26, 0xf9801d, 0xfed83d, 0x80c71f, 0x3ab3da, 0x8932b8, 0xc74ebd,

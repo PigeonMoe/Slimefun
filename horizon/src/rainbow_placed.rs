@@ -19,7 +19,7 @@ type Pos = [i32; 3];
 type ChunkPos = [i32; 2];
 type Address = (String, Pos);
 
-const INTERVAL: u64 = 10;
+const INTERVAL: u64 = 2 * 20;
 const PANE_PROPERTIES: [&str; 5] = ["north", "east", "south", "west", "waterlogged"];
 
 const MARKERS: AttachmentType<Compound> = AttachmentType {
