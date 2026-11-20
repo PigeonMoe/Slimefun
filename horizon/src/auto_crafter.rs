@@ -1006,7 +1006,7 @@ pub(crate) fn use_at(
             );
         }
         let selected = read(host, pos)?.unwrap_or_default();
-        let candidate = if player.entity().is_crouching(host) == Some(true) {
+        let candidate = if player.entity().is_shift_key_down(host) == Some(true) {
             let place = ItemPlace::PlayerHand {
                 player: player.uuid(),
                 hand: Hand::Main,
