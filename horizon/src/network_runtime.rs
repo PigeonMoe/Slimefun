@@ -682,6 +682,7 @@ impl Networks {
         if old.as_ref().is_some_and(|old| old.id != data.id) {
             return Err("A different Slimefun network node is registered there.".into());
         }
+        let fresh_energy_regulator = component == Component::EnergyRegulator && old.is_none();
         let current = self.nodes(host, &dimension)?;
         let saved_node = current.get(&pos);
         let node = saved_node
@@ -707,6 +708,11 @@ impl Networks {
             }
             Ok::<_, String>(())
         })?;
+        if fresh_energy_regulator
+            && let Some(discovery) = self.discoveries.get_mut(&dimension)
+        {
+            discovery.retire_energy_regulator(pos);
+        }
         if let Some(next) = next {
             self.levels.insert(dimension, Arc::new(next));
         }
@@ -1409,14 +1415,28 @@ pub(crate) fn tick(
             move_android(networks, host, level, &dimension, node, movement);
         }
     }
+    let mut loaded_chunks = BTreeMap::new();
     let groups = networks
         .lock()
         .unwrap()
         .discoveries
         .entry(dimension.clone())
         .or_default()
-        .discover(&active, settings.network_discovery_budget);
+        .discover(&active, settings.network_discovery_budget, |pos| {
+            let column = [pos[0].div_euclid(16), pos[2].div_euclid(16)];
+            *loaded_chunks
+                .entry(column)
+                .or_insert_with(|| level.is_loaded(host, pos))
+        });
     for (start, family, group) in groups {
+        if family == Network::Energy && !active.contains_key(&start) {
+            labels.extend(
+                group
+                    .into_iter()
+                    .map(|pos| (pos, Some(Status::EnergyConflict))),
+            );
+            continue;
+        }
         let (status, conflict) = match family {
             Network::Energy => {
                 let status = if group.iter().all(|pos| active[pos].0.regulator()) {
@@ -2242,7 +2262,7 @@ mod tests {
             ([6, 70, 12], (&output, 0)),
             ([1, 70, 1], (&output, 0)),
         ]);
-        let groups = Discovery::default().discover(&active, 200);
+        let groups = Discovery::default().discover(&active, 200, |_| true);
         assert_eq!(groups.len(), 1);
         assert!(groups[0].1 == Network::Cargo);
         assert_eq!(
@@ -2263,18 +2283,18 @@ mod tests {
         active.insert(target, (&capacitor, 0));
         let mut discovery = Discovery::default();
         for _ in 0..7 {
-            assert_eq!(discovery.discover(&active, 1)[0].2, [root]);
+            assert_eq!(discovery.discover(&active, 1, |_| true)[0].2, [root]);
         }
-        assert_eq!(discovery.discover(&active, 1)[0].2, [root, relay]);
+        assert_eq!(discovery.discover(&active, 1, |_| true)[0].2, [root, relay]);
         active.insert(target, (&capacitor, 17));
         for _ in 0..35 {
-            assert_eq!(discovery.discover(&active, 1)[0].2, [root, relay]);
+            assert_eq!(discovery.discover(&active, 1, |_| true)[0].2, [root, relay]);
         }
-        assert_eq!(discovery.discover(&active, 1)[0].2, [root, relay, target]);
+        assert_eq!(discovery.discover(&active, 1, |_| true)[0].2, [root, relay, target]);
         active.remove(&relay);
-        assert_eq!(discovery.discover(&active, 200)[0].2, [root]);
+        assert_eq!(discovery.discover(&active, 200, |_| true)[0].2, [root]);
         active.insert(relay, (&connector, 0));
-        assert_eq!(discovery.discover(&active, 200)[0].2, [root, relay, target]);
+        assert_eq!(discovery.discover(&active, 200, |_| true)[0].2, [root, relay, target]);
     }
 
     #[test]

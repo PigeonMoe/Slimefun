@@ -18,6 +18,7 @@ type Group = (Position, Network, Vec<Position>);
 pub(super) struct Discovery {
     topology: Topology,
     graphs: BTreeMap<Position, Graph>,
+    energy_order: Vec<Position>,
 }
 
 impl Discovery {
@@ -25,8 +26,9 @@ impl Discovery {
         &mut self,
         active: &BTreeMap<Position, (&Node, u32)>,
         budget: u32,
+        mut is_loaded: impl FnMut(Position) -> bool,
     ) -> Vec<Group> {
-        let topology = active
+        let mut topology: Topology = active
             .iter()
             .filter_map(|(&pos, &(node, _))| {
                 let family = node.family();
@@ -43,16 +45,23 @@ impl Discovery {
                 Some((pos, (family, role)))
             })
             .collect();
+        // An unavailable chunk does not unregister Paper's EnergyNet. Keep
+        // positions already observed there until a loaded block disproves them.
+        for (&pos, &role) in &self.topology {
+            if role.0 == Network::Energy && !topology.contains_key(&pos) && !is_loaded(pos) {
+                topology.insert(pos, role);
+            }
+        }
         self.update(topology);
 
+        let mut groups = self.discover_energy(active, budget);
         let mut claimed = BTreeSet::new();
-        let mut groups = Vec::new();
         for (&pos, &(family, role)) in &self.topology {
-            if role != Role::Regulator || !claimed.insert(pos) {
+            if family != Network::Cargo || role != Role::Regulator || !claimed.insert(pos) {
                 continue;
             }
             let graph = self.graphs.entry(pos).or_insert_with(|| Graph::new(pos));
-            graph.advance(&self.topology, family, budget);
+            graph.advance(&self.topology, pos, family, budget);
             let group = graph
                 .members
                 .iter()
@@ -61,7 +70,72 @@ impl Discovery {
                 .collect();
             groups.push((pos, family, group));
         }
+        groups.sort_unstable_by_key(|(root, _, _)| *root);
         groups
+    }
+
+    fn discover_energy(
+        &mut self,
+        active: &BTreeMap<Position, (&Node, u32)>,
+        budget: u32,
+    ) -> Vec<Group> {
+        let mut unclaimed: BTreeSet<_> = active
+            .keys()
+            .filter_map(|&pos| {
+                (self.topology.get(&pos) == Some(&(Network::Energy, Role::Regulator)))
+                    .then_some(pos)
+            })
+            .collect();
+        if unclaimed.is_empty() {
+            return Vec::new();
+        }
+        let mut conflicts = BTreeMap::<Position, usize>::new();
+        let mut claimed_members = BTreeSet::new();
+        let mut groups: Vec<Group> = Vec::new();
+        let mut added = Vec::new();
+        let mut registered = self.energy_order.iter().copied();
+        while let Some(root) = registered.next().or_else(|| unclaimed.first().copied()) {
+            let graph = self.graphs.entry(root).or_insert_with(|| {
+                added.push(root);
+                Graph::new(root)
+            });
+            let group = if let Some(&group) = conflicts.get(&root) {
+                // A registered network whose root now reports a conflict still
+                // holds its previously discovered positions, but does not tick.
+                group
+            } else {
+                let mut members = Vec::new();
+                if unclaimed.remove(&root) {
+                    graph.advance(&self.topology, root, Network::Energy, budget);
+                    members.extend(graph.members.iter().copied().filter(|pos| {
+                        active.contains_key(pos) && (*pos == root || claimed_members.insert(*pos))
+                    }));
+                }
+                let group = groups.len();
+                groups.push((root, Network::Energy, members));
+                group
+            };
+            // Paper registers positions on queueing, before classification.
+            let reached: Vec<_> = unclaimed.intersection(&graph.seen).copied().collect();
+            for pos in reached {
+                unclaimed.remove(&pos);
+                conflicts.insert(pos, group);
+                groups[group].2.push(pos);
+            }
+        }
+        self.energy_order.extend(added);
+        groups.retain(|(_, _, members)| !members.is_empty());
+        for (_, _, members) in &mut groups {
+            members.sort_unstable();
+        }
+        groups
+    }
+
+    pub(super) fn retire_energy_regulator(&mut self, pos: Position) {
+        if self.topology.get(&pos) == Some(&(Network::Energy, Role::Regulator)) {
+            self.graphs.remove(&pos);
+            self.energy_order.retain(|&root| root != pos);
+        }
     }
 
     fn update(&mut self, topology: Topology) {
@@ -103,6 +177,8 @@ impl Discovery {
             }
             true
         });
+        self.energy_order
+            .retain(|root| self.graphs.contains_key(root));
         self.topology = topology;
     }
 }
@@ -130,7 +206,7 @@ impl Graph {
         }
     }
 
-    fn advance(&mut self, topology: &Topology, family: Network, budget: u32) {
+    fn advance(&mut self, topology: &Topology, root: Position, family: Network, budget: u32) {
         let range = match family {
             Network::Energy => 7,
             Network::Cargo => 6,
@@ -144,7 +220,9 @@ impl Graph {
             let Some(&(kind, role)) = topology.get(&pos) else {
                 continue;
             };
-            if kind != family {
+            if kind != family
+                || (family == Network::Energy && role == Role::Regulator && pos != root)
+            {
                 continue;
             }
             self.members.insert(pos);
@@ -167,5 +245,152 @@ impl Graph {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::networks::Component;
+
+    fn node(id: &str) -> Node {
+        Node {
+            id: id.to_string(),
+            component: Component::for_item(id).unwrap(),
+            channel: 0,
+            passes_unfiltered: true,
+        }
+    }
+
+    #[test]
+    fn a_later_lower_regulator_shows_conflict_and_cannot_extend_the_existing_energy_mesh() {
+        let regulator = node("ENERGY_REGULATOR");
+        let connector = node("ENERGY_CONNECTOR");
+        let capacitor = node("SMALL_CAPACITOR");
+        let root = [12, 70, 0];
+        let relay = [6, 70, 0];
+        let original_cell = [6, 70, 7];
+        let second = [0, 70, 0];
+        let distant_cell = [-6, 70, 0];
+        let mut active = BTreeMap::from([
+            (root, (&regulator, 0)),
+            (relay, (&connector, 0)),
+            (original_cell, (&capacitor, 38)),
+        ]);
+        let mut discovery = Discovery::default();
+        assert_eq!(
+            discovery.discover(&active, 200, |_| true)[0].2,
+            [relay, original_cell, root]
+        );
+
+        active.insert(second, (&regulator, 0));
+        active.insert(distant_cell, (&capacitor, 7));
+        let groups = discovery.discover(&active, 200, |_| true);
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].0, root);
+        assert_eq!(groups[0].2, [second, relay, original_cell, root]);
+
+        active.remove(&root);
+        let groups = discovery.discover(&active, 200, |_| true);
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].0, second);
+        assert_eq!(groups[0].2, [distant_cell, second, relay, original_cell]);
+    }
+
+    #[test]
+    fn queued_but_unclassified_regulator_positions_already_have_an_owner() {
+        let regulator = node("ENERGY_REGULATOR");
+        let root = [5, 70, 0];
+        let new = [0, 70, 0];
+        let mut active = BTreeMap::from([(root, (&regulator, 0))]);
+        let mut discovery = Discovery::default();
+        assert_eq!(discovery.discover(&active, 1, |_| true)[0].2, [root]);
+
+        active.insert(new, (&regulator, 0));
+        let groups = discovery.discover(&active, 1, |_| true);
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].0, root);
+        assert_eq!(groups[0].2, [new, root]);
+    }
+
+    #[test]
+    fn an_unloaded_regulator_keeps_ownership_without_powering_or_reserving_loaded_members() {
+        let regulator = node("ENERGY_REGULATOR");
+        let capacitor = node("SMALL_CAPACITOR");
+        let older = [33, 70, 0];
+        let later = [31, 70, 0];
+        let cell = [30, 70, 0];
+        let mut active = BTreeMap::from([(older, (&regulator, 0)), (cell, (&capacitor, 42))]);
+        let mut discovery = Discovery::default();
+        assert_eq!(
+            discovery.discover(&active, 200, |_| true)[0].2,
+            [cell, older]
+        );
+
+        active.remove(&older);
+        active.insert(later, (&regulator, 0));
+        let groups = discovery.discover(&active, 200, |pos| pos[0].div_euclid(16) != 2);
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].0, older);
+        // The scheduler only emits conflicts for this parked owner's loaded roots.
+        assert_eq!(groups[0].2, [later]);
+
+        active.insert(older, (&regulator, 0));
+        let groups = discovery.discover(&active, 200, |_| true);
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].0, older);
+        assert_eq!(groups[0].2, [cell, later, older]);
+
+        active.remove(&older);
+        let groups = discovery.discover(&active, 200, |_| true);
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].0, later);
+        assert_eq!(groups[0].2, [cell, later]);
+    }
+
+    #[test]
+    fn a_split_releases_rebuilt_roots_but_preserves_other_registered_energy_nets() {
+        let regulator = node("ENERGY_REGULATOR");
+        let connector = node("ENERGY_CONNECTOR");
+        let cell = node("SMALL_CAPACITOR");
+        let first = [14, 70, 0];
+        let second = [0, 70, 0];
+        let near_second = [0, 70, 7];
+        let bridge = [7, 70, 0];
+        let mut active = BTreeMap::from([(first, (&regulator, 0))]);
+        let mut discovery = Discovery::default();
+        discovery.discover(&active, 200, |_| true);
+        active.insert(second, (&regulator, 0));
+        assert_eq!(discovery.discover(&active, 200, |_| true).len(), 2);
+
+        active.insert(bridge, (&connector, 0));
+        let groups = discovery.discover(&active, 200, |_| true);
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].0, first);
+
+        // The dormant second network keeps discovered positions until it ticks.
+        active.insert(near_second, (&regulator, 0));
+        let groups = discovery.discover(&active, 200, |_| true);
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].2, [second, near_second, bridge, first]);
+
+        active.remove(&bridge);
+        active.insert(near_second, (&cell, 0));
+        let groups = discovery.discover(&active, 200, |_| true);
+        assert_eq!(groups.len(), 2);
+        assert_eq!(groups[0].2, [second, near_second]);
+        assert_eq!(groups[1].2, [first]);
+
+        active.insert(bridge, (&connector, 0));
+        let groups = discovery.discover(&active, 200, |_| true);
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].0, second);
+
+        // A registration at the same position can replace a regulator between
+        // discovery rounds. Its fresh marker must not inherit the old age.
+        discovery.retire_energy_regulator(second);
+        let groups = discovery.discover(&active, 200, |_| true);
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].0, first);
     }
 }
