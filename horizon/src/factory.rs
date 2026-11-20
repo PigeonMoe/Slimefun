@@ -1841,6 +1841,28 @@ fn set_pending(data: &mut Compound, pending: Tag, ticks: i32) {
     data.insert(TOTAL.into(), Tag::Int(ticks));
 }
 
+pub(crate) fn geo_mining_resource(
+    host: &mut dyn ServerHost,
+    level: LevelRef,
+    pos: Position,
+) -> Option<Resource> {
+    let data = data_at(
+        host,
+        Storage {
+            level,
+            pos,
+            plain: false,
+        },
+    )?;
+    let results = decode_pending(host, data.get(&PENDING.into())?)?;
+    let [result] = results.as_slice() else {
+        return None;
+    };
+    geo_deposits::MINER_RESOURCES
+        .into_iter()
+        .find(|resource| resource.item().matches(host, result))
+}
+
 fn miner_fits(host: &dyn Host, data: &Compound, output: &ItemStack) -> bool {
     let resource = ItemResource::of(output);
     let limit = max_stack(host, &resource);
@@ -2323,6 +2345,36 @@ mod tests {
         assert_eq!(items[42], Some(salt));
         assert!(items[4].is_some());
         assert!(items.iter().all(Option::is_some));
+    }
+
+    #[test]
+    fn geo_mining_label_reads_the_reserved_slimefun_output() {
+        let mut host = recipe_host(["minecraft:sugar"]);
+        let level = host.level.level();
+        let pos = [1, 64, 1];
+        let storage = Storage {
+            level,
+            pos,
+            plain: false,
+        };
+        assert!(geo_mining_resource(&mut host, level, pos).is_none());
+        let mut data = Compound::new();
+        let resource = Resource::Salt.item().stack(&host, 1).unwrap();
+        let salt = encode_pending(&host, &[resource]).unwrap();
+        set_pending(&mut data, salt, 14);
+        assert!(save(&mut host, storage, data));
+        assert_eq!(
+            geo_mining_resource(&mut host, level, pos),
+            Some(Resource::Salt)
+        );
+
+        // An ordinary sugar stack shares Salt's carrier but isn't a GEO resource.
+        let sugar = Kind::Vanilla("minecraft:sugar").stack(&host, 1).unwrap();
+        let mut data = data_at(&mut host, storage).unwrap();
+        let sugar = encode_pending(&host, &[sugar]).unwrap();
+        set_pending(&mut data, sugar, 14);
+        assert!(save(&mut host, storage, data));
+        assert!(geo_mining_resource(&mut host, level, pos).is_none());
     }
 
     #[test]

@@ -8,6 +8,7 @@ use mod_api::{
 };
 
 use super::Position;
+use crate::geo_deposits::{Mining, Resource};
 
 const HOLOGRAM: &str = "slimefun.network_status";
 static DUST: OnceLock<ParticleKey> = OnceLock::new();
@@ -25,9 +26,27 @@ pub(super) enum Status {
     EnergyConflict,
     Energy { supply: u64, demand: u64 },
     ReactorCooling(u32),
+    GeoIdle,
+    GeoNeedsScan,
+    GeoMining(Resource),
+    GeoFinished,
 }
 
 impl Status {
+    pub(super) fn geo_miner(
+        operation: Option<Resource>,
+        reserve: impl FnOnce() -> Option<Mining>,
+    ) -> Self {
+        if let Some(resource) = operation {
+            return Self::GeoMining(resource);
+        }
+        match reserve() {
+            Some(Mining::Unscanned) => Self::GeoNeedsScan,
+            Some(Mining::Exhausted) => Self::GeoFinished,
+            Some(Mining::Available(_)) | None => Self::GeoIdle,
+        }
+    }
+
     fn label(self) -> (String, Text) {
         match self {
             Self::CargoOnline => (
@@ -40,6 +59,13 @@ impl Status {
             Self::EnergyConflict => {
                 single_label("Multiple Energy Regulators connected", "dark_red")
             }
+            Self::GeoIdle => single_label("Idling...", "gray"),
+            Self::GeoNeedsScan => single_label("GEO-Scan required!", "dark_red"),
+            Self::GeoMining(resource) => (
+                format!("Mining: {}", resource.name()),
+                color("Mining: ", "gray", false).append(color(resource.name(), "white", false)),
+            ),
+            Self::GeoFinished => single_label("Finished", "gray"),
             Self::ReactorCooling(percent) => {
                 let percent = if percent == 100 {
                     "100%".into()
@@ -131,7 +157,35 @@ pub(super) fn reconcile(
     host: &mut dyn ServerHost,
     level: LevelRef,
     dimension: &str,
+    labels: BTreeMap<Position, Option<Status>>,
+) {
+    reconcile_at(host, level, dimension, labels, None);
+}
+
+pub(super) fn geo_miner_placement(
+    host: &mut dyn ServerHost,
+    level: LevelRef,
+    pos: Position,
+    placed: bool,
+) {
+    if let Some(dimension) = level.dimension().id(host) {
+        let label = placed.then_some((pos, Some(Status::GeoIdle)));
+        reconcile_at(
+            host,
+            level,
+            &dimension,
+            label.into_iter().collect(),
+            Some(pos),
+        );
+    }
+}
+
+fn reconcile_at(
+    host: &mut dyn ServerHost,
+    level: LevelRef,
+    dimension: &str,
     mut labels: BTreeMap<Position, Option<Status>>,
+    only: Option<Position>,
 ) {
     let Some(entities) = level.all_entities(host) else {
         return;
@@ -148,11 +202,14 @@ pub(super) fn reconcile(
         }
         let Some(pos) = entity
             .block_position(host)
-            .filter(|&pos| level.is_loaded(host, pos))
+            .filter(|&pos| only.is_none_or(|target| pos == target) && level.is_loaded(host, pos))
         else {
             continue;
         };
         match labels.remove(&pos) {
+            // Paper leaves the previous label when an unstarted recipe could
+            // not fit. Spawn the idle label only if the marker is absent.
+            Some(Some(Status::GeoIdle)) if only.is_none() => {}
             Some(Some(status)) => set_label(host, entity, status),
             Some(None) => {}
             None => {
@@ -201,6 +258,26 @@ fn set_label(host: &mut dyn ServerHost, entity: mod_api::EntityRef, status: Stat
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn geo_label_comes_from_the_committed_operation_before_the_chunk_reserve() {
+        for (reserve, expected, shade) in [
+            (Mining::Unscanned, "GEO-Scan required!", "dark_red"),
+            (Mining::Available(Resource::Uranium), "Idling...", "gray"),
+            (Mining::Exhausted, "Finished", "gray"),
+        ] {
+            let (plain, label) = Status::geo_miner(None, || Some(reserve)).label();
+            assert_eq!(plain, expected);
+            assert_eq!(label.style.color.as_deref(), Some(shade));
+        }
+        let (plain, label) = Status::geo_miner(Some(Resource::Uranium), || {
+            panic!("an active operation precedes the chunk reserve, including its last item")
+        })
+        .label();
+        assert_eq!(plain, "Mining: Small Chunks of Uranium");
+        assert_eq!(label.style.color.as_deref(), Some("gray"));
+        assert_eq!(label.children[0].style.color.as_deref(), Some("white"));
+    }
 
     #[test]
     fn regulator_labels_match_paper_and_keep_coloured_components() {

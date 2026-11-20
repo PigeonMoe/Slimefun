@@ -18,7 +18,7 @@ use crate::{
         animal_machines, assemblers, crop_growth, experience_collector, fluid_pump, reactors,
         tree_growth,
     },
-    geology,
+    geo_deposits, geology,
     items::{item_id, network_item},
     machine::Settings,
     networks::Component,
@@ -298,15 +298,25 @@ impl ItemPart for NetworkPlacement {
             cargo.lore = node.filters_items();
         }
         let android = node.component == Component::Android;
-        let _ = host.transaction(|host, _| {
+        let geo = id == geology::GEO_MINER.id();
+        let mut replaced_geo = false;
+        let placed = host.transaction(|host, _| {
             if android && !crate::android_machine::init(host, level, event.pos, player) {
                 return Err("Could not initialize the Programmable Android.".to_owned());
             }
-            self.0
-                .lock()
-                .unwrap()
-                .register(host, level, event.pos, node, data, false)
+            let mut networks = self.0.lock().unwrap();
+            if !geo && let Some(dimension) = level.dimension().id(host) {
+                replaced_geo = networks.nodes(host, &dimension).is_ok_and(|nodes| {
+                    nodes
+                        .get(&event.pos)
+                        .is_some_and(|node| node.id == geology::GEO_MINER.id())
+                });
+            }
+            networks.register(host, level, event.pos, node, data, false)
         });
+        if placed.is_ok() && (geo || replaced_geo) {
+            network_visuals::geo_miner_placement(host, level, event.pos, geo);
+        }
     }
 }
 
@@ -1361,12 +1371,6 @@ pub(crate) fn tick(
             labels.insert(pos, Some(Status::ReactorCooling(cooling)));
         }
     }
-    if nodes
-        .values()
-        .any(|node| node.regulator() || reactors::reactor(&node.id).is_some())
-    {
-        network_visuals::reconcile(host, level, &dimension, labels);
-    }
     let mut gps_signals = BTreeMap::new();
     for (&pos, &(node, _)) in &active {
         if let Component::GpsTransmitter { .. } = node.component
@@ -1448,6 +1452,12 @@ pub(crate) fn tick(
                 }
                 continue;
             }
+            let geo = node.id == geology::GEO_MINER.id();
+            let previous_mining = if geo {
+                crate::factory::geo_mining_resource(host, level, pos)
+            } else {
+                None
+            };
             let _ = host.transaction(|host, tx| {
                 let mut data = block_data(host, level, pos).ok_or(())?;
                 if node.id == fluid_pump::FLUID_PUMP.id() {
@@ -1478,7 +1488,23 @@ pub(crate) fn tick(
                 }
                 Ok::<_, ()>(())
             });
+            if geo {
+                // Paper keeps the Mining label through the completion tick.
+                // Read a newly started operation only after the outer transaction.
+                let operation = previous_mining
+                    .or_else(|| crate::factory::geo_mining_resource(host, level, pos));
+                let status =
+                    Status::geo_miner(operation, || geo_deposits::mining(host, level, pos).ok());
+                labels.insert(pos, Some(status));
+            }
         }
+    }
+    if nodes.values().any(|node| {
+        node.regulator()
+            || reactors::reactor(&node.id).is_some()
+            || node.id == geology::GEO_MINER.id()
+    }) {
+        network_visuals::reconcile(host, level, &dimension, labels);
     }
     let mut networks = networks.lock().unwrap();
     if gps_signals.is_empty() {
