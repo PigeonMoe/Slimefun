@@ -1482,6 +1482,50 @@ mod tests {
     }
 
     #[test]
+    fn cargo_items_keep_the_paper_lore_and_existing_chinese_on_stacks_and_guide_icons() {
+        use crate::network_recipes::{cargo_lore, network_item};
+
+        mod_api::__private::initialize().unwrap();
+        let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
+        let mut host = FakeHost::new();
+        host.registries
+            .resolve_items([Identifier::parse("minecraft:player_head").unwrap()])
+            .unwrap();
+        for (id, original, translated) in [
+            (
+                "CARGO_MANAGER",
+                "&fCore Component of an Item Transport Network",
+                "&r物品传输网络的核心组件",
+            ),
+            ("CARGO_NODE", "&fCargo Connector Pipe", "&r货运连接管道"),
+            ("CARGO_NODE_INPUT", "&fCargo Input Pipe", "&r货运输入管道"),
+            ("CARGO_NODE_OUTPUT", "&fCargo Output Pipe", "&r货运输出管道"),
+            (
+                "CARGO_NODE_OUTPUT_ADVANCED",
+                "&fCargo Output Pipe",
+                "&r货运输出管道",
+            ),
+        ] {
+            assert_eq!(
+                cargo_lore(id),
+                Some(Tag::List(vec![colored_lore(""), colored_lore(original)])),
+                "{id}"
+            );
+            let stack = network_item(id).unwrap().stack(&host, 1).unwrap();
+            let guide = entry_icon(&host, lookup(id).unwrap(), 1).unwrap();
+            let localized = Tag::List(vec![colored_lore(""), colored_lore(translated)]);
+            for stack in [stack, guide] {
+                let components = stack.components().unwrap();
+                assert_eq!(
+                    components.as_nbt().get(&"minecraft:lore".into()),
+                    Some(&localized),
+                    "{id}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn capacitor_lore_keeps_the_paper_range_tier_and_capacity_on_each_stack() {
         use crate::network_runtime::paper_text;
 

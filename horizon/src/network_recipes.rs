@@ -2,7 +2,10 @@
 
 //! Additional network diagrams and prerequisites from Paper SlimefunItemSetup.
 
+use mod_api::Tag;
+
 use crate::{
+    hologram_projector::colored_lore,
     items::{self, HeadTexture, Kind, item},
     recipes::{CAPACITORS_RESEARCH, CraftingRecipe, POWER_ITEMS, Research, SmeltingRecipe, Stack},
 };
@@ -247,6 +250,17 @@ pub(crate) fn network_item(id: &str) -> Option<Kind> {
     ]
     .into_iter()
     .find(|item| item.id() == id)
+}
+
+pub(crate) fn cargo_lore(id: &str) -> Option<Tag> {
+    let description = match id {
+        "CARGO_MANAGER" => "&fCore Component of an Item Transport Network",
+        "CARGO_NODE" => "&fCargo Connector Pipe",
+        "CARGO_NODE_INPUT" => "&fCargo Input Pipe",
+        "CARGO_NODE_OUTPUT" | "CARGO_NODE_OUTPUT_ADVANCED" => "&fCargo Output Pipe",
+        _ => return None,
+    };
+    Some(Tag::List(vec![colored_lore(""), colored_lore(description)]))
 }
 
 const fn vanilla(id: &'static str) -> Option<Kind> {

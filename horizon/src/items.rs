@@ -180,6 +180,9 @@ impl SlimefunItem {
         if let Some(lore) = crate::energy_gadgets::lore(self.id) {
             components.insert("minecraft:lore".into(), lore);
         }
+        if let Some(lore) = crate::network_recipes::cargo_lore(self.id) {
+            components.insert("minecraft:lore".into(), lore);
+        }
         if let Some(lore) = crate::android_items::lore(self.id) {
             components.insert("minecraft:lore".into(), lore);
         }
