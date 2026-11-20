@@ -386,6 +386,15 @@ SWORD_OF_BEHEADING:
     target: '&r(提高掉落凋灵骷髅头的几率)'
 BLADE_OF_VAMPIRES:
   name: '&c吸血鬼之刀'
+  lore:
+  - source: '&7Life Steal I'
+    target: '&7生命偷取 I'
+  - source: '&fEverytime you attack something'
+    target: '&f每次攻击目标时'
+  - source: '&fyou have a 45% chance to'
+    target: '&f有 45% 的几率'
+  - source: '&frecover 2 Hearts of your Health'
+    target: '&f恢复 2 颗心的生命值'
 SEISMIC_AXE:
   name: '&a地震斧'
   lore:

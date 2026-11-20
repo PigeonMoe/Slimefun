@@ -1386,7 +1386,7 @@ mod tests {
     }
 
     #[test]
-    fn the_guide_retains_item_lore_without_a_paper_translation() {
+    fn vampires_blade_localization_retains_the_paper_style_and_enchantments() {
         mod_api::__private::initialize().unwrap();
         let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
         let mut host = FakeHost::new();
@@ -1401,7 +1401,24 @@ mod tests {
             parts.get(&"minecraft:custom_name".into()),
             Some(&colored_lore("&c吸血鬼之刀")),
         );
-        assert!(parts.get(&"minecraft:lore".into()).is_some());
+        assert_eq!(
+            parts.get(&"minecraft:lore".into()),
+            Some(&Tag::List(vec![
+                colored_lore("&7生命偷取 I"),
+                Tag::String("".into()),
+                colored_lore("&f每次攻击目标时"),
+                colored_lore("&f有 45% 的几率"),
+                colored_lore("&f恢复 2 颗心的生命值"),
+            ])),
+        );
+        assert_eq!(
+            parts.get(&"minecraft:enchantments".into()),
+            Some(&Tag::compound([
+                ("minecraft:fire_aspect", Tag::Int(2)),
+                ("minecraft:unbreaking", Tag::Int(4)),
+                ("minecraft:sharpness", Tag::Int(2)),
+            ])),
+        );
         assert_eq!(icon.components().unwrap().as_nbt(), parts);
     }
 
