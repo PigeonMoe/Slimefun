@@ -1440,6 +1440,48 @@ mod tests {
     }
 
     #[test]
+    fn energy_network_items_keep_the_paper_lore_on_stacks_and_guide_icons() {
+        use crate::items::{ENERGY_CONNECTOR, ENERGY_REGULATOR};
+        use crate::network_runtime::paper_text;
+
+        mod_api::__private::initialize().unwrap();
+        let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
+        let mut host = FakeHost::new();
+        host.registries
+            .resolve_items([Identifier::parse("minecraft:player_head").unwrap()])
+            .unwrap();
+        let descriptions = [
+            (ENERGY_REGULATOR, &["", "&r能源网络的核心部分"][..]),
+            (
+                ENERGY_CONNECTOR,
+                &[
+                    "&7范围: &c6 格",
+                    "",
+                    "&f将它放在机器",
+                    "&f与发电机之间，将它们",
+                    "&f接入你的能源调节器。",
+                ][..],
+            ),
+        ];
+        for (item, expected) in descriptions {
+            let stack = item.stack(&host, 1).unwrap();
+            let guide = entry_icon(&host, lookup(item.id()).unwrap(), 1).unwrap();
+            let wanted: Vec<_> = expected
+                .iter()
+                .map(|line| paper_text(&colored_lore(line)).unwrap())
+                .collect();
+            for stack in [stack, guide] {
+                let parts = stack.components().unwrap();
+                let Some(Tag::List(lore)) = parts.as_nbt().get(&"minecraft:lore".into()) else {
+                    panic!("missing lore on {}", item.id());
+                };
+                let actual: Vec<_> = lore.iter().map(|line| paper_text(line).unwrap()).collect();
+                assert_eq!(actual, wanted, "{}", item.id());
+            }
+        }
+    }
+
+    #[test]
     fn exact_paper_machine_matrices_and_item_sources_are_visible_in_the_guide() {
         const MATERIALS: &[&str] = &[
             "minecraft:gray_stained_glass_pane",

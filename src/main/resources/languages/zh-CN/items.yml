@@ -1689,6 +1689,15 @@ ENERGY_REGULATOR:
     target: '&r能源网络的核心部分'
 ENERGY_CONNECTOR:
   name: '&c能源连接器'
+  lore:
+  - source: '&7Range: &c6 blocks'
+    target: '&7范围: &c6 格'
+  - source: '&fPlace this between machines'
+    target: '&f将它放在机器'
+  - source: '&fand generators to connect them'
+    target: '&f与发电机之间，将它们'
+  - source: '&fto your regulator.'
+    target: '&f接入你的能源调节器。'
 DEBUG_FISH:
   name: '&3这鱼多少钱?'
   lore:

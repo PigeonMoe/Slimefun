@@ -6,8 +6,10 @@ use mod_api::{ItemStack, LevelRef, LightLayer, PlayerRef, ServerHost, Tag, Text}
 
 use crate::{
     factory::charging_bench,
+    hologram_projector::colored_lore,
     items::{
-        COPPER_INGOT, GOLD_6K, REDSTONE_ALLOY, REINFORCED_ALLOY_INGOT, SOLAR_PANEL, item, text,
+        COPPER_INGOT, ENERGY_CONNECTOR, ENERGY_REGULATOR, GOLD_6K, REDSTONE_ALLOY,
+        REINFORCED_ALLOY_INGOT, SOLAR_PANEL, item, text,
     },
     network_recipes::MEDIUM_CAPACITOR,
     network_runtime,
@@ -71,6 +73,27 @@ pub(crate) const CRAFTING: &[CraftingRecipe] = &[
 ];
 
 pub(crate) fn lore(id: &str) -> Option<Tag> {
+    if id == ENERGY_REGULATOR.id() {
+        return Some(Tag::List(vec![
+            colored_lore(""),
+            colored_lore("&fCore Component of an Energy Network"),
+        ]));
+    }
+    if id == ENERGY_CONNECTOR.id() {
+        return Some(Tag::List(
+            [
+                "&7Range: &c6 blocks",
+                "",
+                "&fPlace this between machines",
+                "&fand generators to connect them",
+                "&fto your regulator.",
+            ]
+            .into_iter()
+            .map(colored_lore)
+            .collect(),
+        ));
+    }
+
     let detail = if id == MULTIMETER.id() {
         vec![
             text("Measures the Amount of stored", "white", false),
