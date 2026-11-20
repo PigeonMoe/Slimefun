@@ -105,13 +105,13 @@ const PARACHUTES: Research = Research {
     name: "Parachute",
     cost: 15,
 };
-const GRAPPLING_HOOK: Research = Research {
+pub(crate) const GRAPPLING_RESEARCH: Research = Research {
     id: "grappling_hook",
     name: "Grappling Hook",
     cost: 15,
 };
 
-pub(crate) const RESEARCHES: &[&Research] = &[&JETPACKS, &ARMORED, &PARACHUTES, &GRAPPLING_HOOK];
+pub(crate) const RESEARCHES: &[&Research] = &[&JETPACKS, &ARMORED, &PARACHUTES, &GRAPPLING_RESEARCH];
 
 pub(crate) struct Spec {
     item: Kind,
@@ -290,7 +290,7 @@ pub(crate) const CRAFTING: &[CraftingRecipe] = &[
             kind: CHAIN,
             count: 8,
         },
-        research: &GRAPPLING_HOOK,
+        research: &GRAPPLING_RESEARCH,
     },
 ];
 

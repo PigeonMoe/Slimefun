@@ -53,6 +53,7 @@ mod gold_pan;
 mod gps_controls;
 mod gps_transport;
 mod gps_waypoints;
+mod grappling_hook;
 mod guide;
 mod hand_machine;
 mod heated_pressure;
@@ -126,6 +127,7 @@ struct Slimefun {
     smelters_pickaxes: smelters_pickaxe::SmeltersPickaxes,
     spawners: spawner_repair::Spawners,
     magic_weapons: magic_weapons::Weapons,
+    grapple: grappling_hook::GrapplingHooks,
     beheading: beheading::Beheading,
     ore_tools: ore_tools::OreTools,
     nether_goo: nether_goo::NetherGoo,
@@ -169,6 +171,7 @@ impl Default for Slimefun {
             smelters_pickaxes: smelters_pickaxe::SmeltersPickaxes::default(),
             spawners: spawner_repair::Spawners::default(),
             magic_weapons: magic_weapons::Weapons::default(),
+            grapple: grappling_hook::GrapplingHooks::default(),
             beheading: beheading::Beheading::default(),
             ore_tools: ore_tools::OreTools::default(),
             nether_goo: nether_goo::NetherGoo::default(),
@@ -205,6 +208,7 @@ impl Slimefun {
             self.talismans.configure(&toml::Table::new());
             self.radiation.configure(None);
             self.climbing.configure(None);
+            self.grapple.configure(None);
             self.nether_goo.configure(None);
             self.block_placers.configure(None);
             output_chest::set_enabled(true);
@@ -220,6 +224,7 @@ impl Slimefun {
         };
         self.guide.configure(table.get("guide"), table.get("researches"));
         self.ore_tools.configure(&table);
+        self.grapple.configure(table.get("grappling-hook"));
         self.talismans.configure(&table);
         self.soulbound_rituals.configure(table.get("items"));
         self.teleposition_scroll
@@ -428,7 +433,7 @@ impl Hooks for Slimefun {
         event.configs.push(Config::new(
             "slimefun",
             ConfigKind::Server,
-            &format!("{}{}{}{}{}{}{}{}{}",
+            &format!("{}{}{}{}{}{}{}{}{}{}",
             "double-ores = true\ncrucible-allow-water-in-nether = false\nlegacy-ore-washer = false\nlegacy-dust-washer = false\nlegacy-ore-grinder = true\nelectric-gold-pan-override-output-limit = [false, false, false]\nfreezer-use-vanilla-ratios = [false, false, false]\nfire-breaking-chance = 34\noutput-chest-enabled = true\ndrop-from-golems = true\ngolem-drop-chance = 75\n\n[guide]\nreceive-on-first-join = true\nshow-hidden-item-groups-in-search = false\n\n[researches]\nfree-in-creative-mode = true\nenable-fireworks = true\ndisable-learning-animation = false\n\n[URID]\ncustom-ticker-delay = 10\n\n[networks]\nmax-size = 200\nenable-visualizer = true\ncargo-ticker-delay = 0\n\n[wind-staff]\npower = 4\n\n[book-binder]\nbypass-vanilla-max-level = false\nhas-custom-max-level = false\ncustom-max-level = 15\n\n[solar-generator-4]\nother-dimensions-use-night-energy = false\n\n[portable-teleporter]\nteleportation-cost = 10\n\n[produce-collector]\nrange = 2\n\n[pickaxe-of-vein-mining]\nmax-blocks = 16\n\n[pickaxe-of-the-seeker]\nmax-range = 5\n\n[blade-of-vampires]\nchance = 45\n\n[reinforced-spawner]\nallow-spawn-eggs = true\n\n[ancient-altar]\nstep-delay = 8\n\n[miner-android]\nreduced-block-updates = true\n\n[industrial-miner]\ncan-mine-ancient-debris = false\ncan-mine-deepslate-ores = true\n\n[advanced-industrial-miner]\ncan-mine-ancient-debris = false\ncan-mine-deepslate-ores = true\n",
                 enchantment_machines::default_config(),
                 beheading::DEFAULT_CONFIG,
@@ -437,7 +442,9 @@ impl Hooks for Slimefun {
                 teleposition_scroll::DEFAULT_CONFIG,
                 nether_goo::DEFAULT_CONFIG,
                 talismans::DEFAULT_CONFIG,
-                thermal_machines::JERKY_CONFIG),
+                thermal_machines::JERKY_CONFIG,
+                grappling_hook::DEFAULT_CONFIG,
+            ),
         ));
     }
 
@@ -520,7 +527,40 @@ impl Hooks for Slimefun {
         event: &mut mod_api::ProjectileImpactEvent<'_>,
     ) -> Flow {
         self.magic_weapons.impact(host, event);
+        self.grapple.impact(host, event);
         Flow::Continue
+    }
+
+    fn arrow_contact_post(
+        &self,
+        host: &mut dyn ServerHost,
+        event: &mut mod_api::ArrowContactPostEvent<'_>,
+    ) {
+        self.grapple.contact(host, event);
+    }
+
+    fn entity_join_level(
+        &self,
+        host: &mut dyn ServerHost,
+        event: &mut mod_api::EntityJoinLevelEvent<'_>,
+    ) -> Flow {
+        if grappling_hook::expired_saved_entity(host, event) {
+            Flow::Cancel
+        } else {
+            Flow::Continue
+        }
+    }
+
+    fn player_leash_change_pre(
+        &self,
+        host: &dyn mod_api::Host,
+        event: &mut mod_api::PlayerLeashChangePreEvent<'_>,
+    ) -> Flow {
+        if event.attach && grappling_hook::main_hand_has_hook(host, event.player) {
+            Flow::Cancel
+        } else {
+            Flow::Continue
+        }
     }
 
     fn entity_leave_level(&self, _: &mut dyn ServerHost, event: &mut mod_api::EntityLeaveLevelEvent<'_>) {
@@ -961,11 +1001,19 @@ impl Hooks for Slimefun {
     }
 
     // Region/authorization hooks that veto the player's click run first.
-    #[listener(priority = -100)]
+    #[listener(priority = -100, receive_cancelled)]
     fn right_click_block(&self, host: HostSide<'_>, event: &mut RightClickBlockEvent<'_>) -> Flow {
         let HostSide::Server(host) = host else {
             return Flow::Continue;
         };
+        if let Some(held) = event.click.stack
+            && grappling_hook::GRAPPLING_HOOK.matches(host, held)
+        {
+            self.item_clicks.record_block_use(host, event.click.player, event.click.hand, held);
+        }
+        if event.cancelled {
+            return Flow::Continue;
+        }
         if event.click.stack.is_some_and(|stack| {
             zombie_pills::MAGICAL_ZOMBIE_PILLS.matches(host, stack)
         }) {
@@ -1212,11 +1260,12 @@ impl Hooks for Slimefun {
         };
         if self.guide.right_click(host, player, event.click.stack)
             || self.item_clicks.consume_fallthrough(
-            host,
-            event.click.player,
-            event.click.hand,
-            event.click.stack,
-        )
+                host,
+                event.click.player,
+                event.click.hand,
+                event.click.stack,
+            )
+            || self.grapple.use_held(host, player, event.click.hand, event.click.stack)
             || self.ore_tools.seek(host, player, event.click.hand, event.click.stack, &self.rolls)
             || jet_boots::STEEL_THRUSTER.matches(host, event.click.stack)
             || jetpack::CHAIN.matches(host, event.click.stack)
@@ -1295,6 +1344,7 @@ impl Hooks for Slimefun {
         event: &mut mod_api::PlayerLoggedOutEvent<'_>,
     ) {
         self.item_clicks.logout(event.player);
+        self.grapple.abandon(host, event.player);
         self.jet_boots.forget(host, event.player);
         self.jetpacks.forget(host, event.player);
         self.spawners.forget(event.player);
@@ -1651,6 +1701,7 @@ impl Hooks for Slimefun {
     }
 
     fn player_died(&self, host: &mut dyn ServerHost, event: &mut mod_api::PlayerDiedEvent<'_>) {
+        self.grapple.abandon(host, event.player);
         gps_waypoints::deathpoint(host, event.player);
     }
 
@@ -1667,6 +1718,7 @@ impl Hooks for Slimefun {
         if let HostSide::Server(host) = host {
             let settings = *self.settings.lock().unwrap();
             self.magic_weapons.tick(host, event.level, &self.rolls);
+            self.grapple.tick(host, event.level);
             self.butcher_androids.tick(host, event.level, &self.rolls);
             network_runtime::tick(
                 &self.networks,
@@ -1726,6 +1778,7 @@ impl Hooks for Slimefun {
         self.industrial_miners.unload(host, event.dimension);
         self.butcher_androids.unload(host, event.dimension);
         self.magic_weapons.unload(host, event.dimension);
+        self.grapple.unload(host, event.dimension);
     }
 
     fn scheduled_task(&self, host: &mut dyn ServerHost, event: &mut ScheduledTaskEvent<'_>) {
@@ -1757,6 +1810,7 @@ impl Hooks for Slimefun {
         self.jetpacks.clear();
         self.spawners.clear();
         self.magic_weapons.clear();
+        self.grapple.clear(host);
         self.smelters_pickaxes.clear();
         self.soulbound_rituals.clear();
         self.elevators.clear();

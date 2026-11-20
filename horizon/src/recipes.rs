@@ -138,6 +138,7 @@ pub(crate) fn crafting() -> impl Iterator<Item = &'static CraftingRecipe> {
         .chain([&crate::smelters_pickaxe::CRAFTING, &crate::beheading::CRAFTING])
         .chain(crate::jet_boots::CRAFTING)
         .chain(crate::jetpack::CRAFTING)
+        .chain(crate::grappling_hook::CRAFTING)
         .chain(crate::elemental_staves::CRAFTING)
         .chain([&crate::auto_brewer::CRAFTING])
         .chain([&crate::factory::fluid_pump::CRAFTING])
