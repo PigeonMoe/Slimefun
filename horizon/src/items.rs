@@ -268,6 +268,9 @@ impl SlimefunItem {
         crate::snacks::decorate(self.id, &mut components);
         crate::seasonal_gifts::decorate(self.id, &mut components);
         crate::smelters_pickaxe::decorate(self.id, &mut components);
+        if self.id == crate::seismic_axe::SEISMIC_AXE.id() {
+            components.insert("minecraft:lore".into(), crate::seismic_axe::lore());
+        }
         if self.id == crate::lumber_axe::LUMBER_AXE.id() {
             components.insert("minecraft:lore".into(), crate::lumber_axe::lore());
         }

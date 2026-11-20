@@ -93,6 +93,7 @@ mod sneak_equipment;
 mod spawner_repair;
 mod soulbound_gear;
 mod soulbound_rune;
+mod seismic_axe;
 mod stomper;
 mod storage;
 mod talismans;
@@ -1075,7 +1076,9 @@ impl Hooks for Slimefun {
             return Flow::Continue;
         };
         if let Some(held) = event.click.stack
-            && (grappling_hook::GRAPPLING_HOOK.matches(host, held) || multi_tool::is_tool(host, held))
+            && (grappling_hook::GRAPPLING_HOOK.matches(host, held)
+                || seismic_axe::SEISMIC_AXE.matches(host, held)
+                || multi_tool::is_tool(host, held))
         {
             self.item_clicks.record_block_use(host, event.click.player, event.click.hand, held);
         }
@@ -1088,12 +1091,20 @@ impl Hooks for Slimefun {
             *event.cancellation_result = InteractionResult::Fail;
             return Flow::Cancel;
         }
-        if *event.use_block == TriState::False {
-            return Flow::Continue;
-        }
         let Some(player) = host.player(event.click.player) else {
             return Flow::Continue;
         };
+        // Paper lets an unlocked Seismic Axe also perform the normal axe use.
+        if *event.use_item != TriState::False
+            && let Some(held) = event.click.stack
+            && seismic_axe::SEISMIC_AXE.matches(host, held)
+            && !seismic_axe::activate(host, player, event.click.hand, held, &self.rolls)
+        {
+            *event.use_item = TriState::False;
+        }
+        if *event.use_block == TriState::False {
+            return Flow::Continue;
+        }
         if nether_goo::stop_sign_use(host, player, event) {
             *event.cancellation_result = InteractionResult::Fail;
             return Flow::Cancel;
@@ -1387,6 +1398,12 @@ impl Hooks for Slimefun {
             })
         {
             *event.cancellation_result = InteractionResult::Consume;
+            return Flow::Cancel;
+        }
+        if seismic_axe::SEISMIC_AXE.matches(host, event.click.stack)
+            && !seismic_axe::activate(host, player, event.click.hand, event.click.stack, &self.rolls)
+        {
+            *event.cancellation_result = InteractionResult::Fail;
             return Flow::Cancel;
         }
         if matches!(
