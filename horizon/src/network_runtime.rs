@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use std::{
+    cell::OnceCell,
     collections::{BTreeMap, HashMap},
     fmt::Write,
     sync::{Arc, Mutex},
@@ -1564,6 +1565,7 @@ fn tick_energy(
     let day = time.is_some_and(|time| !(12_300..=23_850).contains(&time))
         && level.is_raining(host) == Some(false)
         && level.is_thundering(host) == Some(false);
+    let normal_environment = OnceCell::new();
     let (status, reactors) = host
         .transaction(|host, tx| {
             let mut available = 0u64;
@@ -1601,7 +1603,11 @@ fn tick_energy(
                         day: sun,
                         night: moon,
                     } => solar_power(
-                        dimension,
+                        *normal_environment.get_or_init(|| {
+                            solar_uses_daylight(dimension, || {
+                                level.dimension_type(host).map(|kind| kind.id)
+                            })
+                        }),
                         day,
                         [sun, moon],
                         solar_night_in_other_dimensions,
@@ -1640,14 +1646,24 @@ fn tick_energy(
     Some(status)
 }
 
+fn solar_uses_daylight(level_id: &str, dimension_type: impl FnOnce() -> Option<String>) -> bool {
+    match level_id {
+        "minecraft:overworld" => true,
+        "minecraft:the_nether" | "minecraft:the_end" => false,
+        // Paper's WorldCreator can give a NORMAL world a separate key while using
+        // the Overworld dimension type. Horizon retains that type on imported worlds.
+        _ => dimension_type().as_deref() == Some("minecraft:overworld"),
+    }
+}
+
 fn solar_power(
-    dimension: &str,
+    normal_environment: bool,
     daytime: bool,
     [sun, moon]: [u32; 2],
     night_in_other_dimensions: bool,
     open_sky: impl FnOnce() -> bool,
 ) -> u32 {
-    if dimension != "minecraft:overworld" {
+    if !normal_environment {
         return if night_in_other_dimensions { moon } else { 0 };
     }
     let output = if daytime { sun } else { moon };
@@ -2091,39 +2107,49 @@ mod tests {
     #[test]
     fn solar_night_option_is_independent_of_sky_light_in_the_other_dimensions() {
         let advanced = [128, 64];
-        assert_eq!(
-            solar_power("minecraft:overworld", false, [32, 0], true, || panic!()),
-            0
-        );
-        for dimension in ["minecraft:the_nether", "minecraft:the_end"] {
-            assert_eq!(
-                solar_power(dimension, true, advanced, false, || panic!()),
-                0
-            );
-            assert_eq!(
-                solar_power(dimension, true, advanced, true, || panic!()),
-                64
-            );
-            assert_eq!(
-                solar_power(dimension, false, advanced, true, || panic!()),
-                64
-            );
+        assert_eq!(solar_power(true, false, [32, 0], true, || panic!()), 0);
+        for dimension in ["minecraft:the_nether", "minecraft:the_end", "import:custom"] {
+            let normal = solar_uses_daylight(dimension, || Some("import:custom".into()));
+            assert!(!normal);
+            assert_eq!(solar_power(normal, true, advanced, false, || panic!()), 0);
+            assert_eq!(solar_power(normal, true, advanced, true, || panic!()), 64);
+            assert_eq!(solar_power(normal, false, advanced, true, || panic!()), 64);
             for day in [2, 8, 32] {
-                assert_eq!(solar_power(dimension, true, [day, 0], true, || panic!()), 0);
+                assert_eq!(solar_power(normal, true, [day, 0], true, || panic!()), 0);
             }
         }
-        assert_eq!(
-            solar_power("minecraft:overworld", true, advanced, true, || true),
-            128
-        );
-        assert_eq!(
-            solar_power("minecraft:overworld", false, advanced, false, || true),
-            64
-        );
-        assert_eq!(
-            solar_power("minecraft:overworld", false, advanced, true, || false),
-            0
-        );
+        assert_eq!(solar_power(true, true, advanced, true, || true), 128);
+        assert_eq!(solar_power(true, false, advanced, false, || true), 64);
+        assert_eq!(solar_power(true, false, advanced, true, || false), 0);
+    }
+
+    #[test]
+    fn solar_power_in_a_named_overworld_type_uses_its_time_and_sky() {
+        let normal = solar_uses_daylight("import:normal", || Some("minecraft:overworld".into()));
+        assert!(normal);
+        assert!(solar_uses_daylight("minecraft:overworld", || panic!()));
+        assert!(!solar_uses_daylight("minecraft:the_nether", || panic!()));
+        assert!(!solar_uses_daylight("minecraft:the_end", || panic!()));
+        let nether = solar_uses_daylight("import:nether", || Some("minecraft:the_nether".into()));
+        assert!(!nether);
+        assert!(!solar_uses_daylight("import:unavailable", || None));
+
+        for (sun, moon) in [(2, 0), (8, 0), (32, 0), (128, 64)] {
+            for other_dimensions in [false, true] {
+                assert_eq!(
+                    solar_power(normal, true, [sun, moon], other_dimensions, || true),
+                    sun
+                );
+                assert_eq!(
+                    solar_power(normal, false, [sun, moon], other_dimensions, || true),
+                    moon
+                );
+                assert_eq!(
+                    solar_power(normal, true, [sun, moon], other_dimensions, || false),
+                    0
+                );
+            }
+        }
     }
 
     #[test]
