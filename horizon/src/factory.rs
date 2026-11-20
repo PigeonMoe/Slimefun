@@ -1352,13 +1352,17 @@ fn fits(host: &dyn Host, data: &Compound, output: &ItemStack) -> bool {
     let limit = max_stack(host, &resource);
     OUTPUT
         .into_iter()
-        .map(|index| match stack_in(host, data, index) {
-            None => limit,
-            Some(stack) if resource.matches(&stack) => limit.saturating_sub(stack.count()),
-            Some(_) => 0,
-        })
+        .map(|index| output_space(limit, &resource, stack_in(host, data, index).as_ref()))
         .sum::<u32>()
         >= output.count()
+}
+
+fn output_space(limit: u32, resource: &ItemResource, stack: Option<&ItemStack>) -> u32 {
+    match stack {
+        None => limit,
+        Some(stack) if resource.matches(stack) => limit.saturating_sub(stack.count()),
+        Some(_) => 0,
+    }
 }
 
 fn fits_all(host: &dyn Host, data: &Compound, outputs: &[ItemStack]) -> bool {
@@ -1858,7 +1862,9 @@ pub(crate) fn tick(
             .iter()
             .enumerate()
             .find_map(|(index, input)| input.as_ref().map(|input| (index, input)))?;
-        return move_input_to_output(host, level, pos, index, bucket).then_some(charge);
+        // Paper clears the entire input even when some of these empty buckets will not fit.
+        return move_input_to_output(host, level, pos, index, bucket, OutputOverflow::Discard)
+            .then_some(charge);
     }
     let saved_result = encode_pending(host, &outputs)?;
     let work_ticks = i32::try_from(work_override.unwrap_or(furnace.work_ticks)).ok()?;
@@ -1968,11 +1974,25 @@ fn charge_items(
                 .then_some(next_charge);
             }
             Some(charging_bench::Action::ReturnFull) => {
-                return move_input_to_output(host, storage.level, storage.pos, slot, &stack)
-                    .then_some(charge);
+                return move_input_to_output(
+                    host,
+                    storage.level,
+                    storage.pos,
+                    slot,
+                    &stack,
+                    OutputOverflow::KeepInput,
+                )
+                .then_some(charge);
             }
             Some(charging_bench::Action::ReturnOther) => {
-                if move_input_to_output(host, storage.level, storage.pos, slot, &stack) {
+                if move_input_to_output(
+                    host,
+                    storage.level,
+                    storage.pos,
+                    slot,
+                    &stack,
+                    OutputOverflow::KeepInput,
+                ) {
                     data = data_at(host, storage)?;
                 }
             }
@@ -1982,24 +2002,53 @@ fn charge_items(
     None
 }
 
+enum OutputOverflow {
+    KeepInput,
+    Discard,
+}
+
 fn move_input_to_output(
     host: &mut dyn ServerHost,
     level: LevelRef,
     pos: Position,
     index: usize,
     stack: &ItemStack,
+    overflow: OutputOverflow,
 ) -> bool {
     let resource = ItemResource::of(stack);
+    let discard = matches!(overflow, OutputOverflow::Discard);
+    let limit = if discard {
+        max_stack(host, &resource)
+    } else {
+        0
+    };
+    if discard && limit == 0 {
+        return false;
+    }
     host.transaction(|host, tx| {
         let mut left = stack.count();
         for output in OUTPUT {
-            left -= place(level, pos, output).insert(host, tx, &resource, left);
+            let destination = place(level, pos, output);
+            let requested = if discard {
+                left.min(output_space(
+                    limit,
+                    &resource,
+                    destination.stack(host).as_ref(),
+                ))
+            } else {
+                left
+            };
+            let inserted = destination.insert(host, tx, &resource, requested);
+            // A refused write must roll back even when actual capacity overflow is discarded.
+            if discard && inserted != requested {
+                return Err(());
+            }
+            left -= inserted;
             if left == 0 {
                 break;
             }
         }
-        // Preserve the input until the output can hold the entire transferred stack.
-        if left == 0
+        if (left == 0 || discard)
             && place(level, pos, index).extract(host, tx, &resource, stack.count()) == stack.count()
         {
             Ok(())
@@ -3612,7 +3661,7 @@ mod tests {
     }
 
     #[test]
-    fn an_exhausted_oil_pump_preserves_empty_buckets_until_output_has_space() {
+    fn an_exhausted_oil_pump_discards_overflow_when_its_oil_result_would_fit() {
         let mut host = recipe_host([
             "minecraft:bucket",
             "minecraft:stone",
@@ -3620,8 +3669,48 @@ mod tests {
         ]);
         let level = host.level.level();
         let pos = [8, 71, -12];
-        let buckets = advanced_processing::EMPTY_BUCKET.stack(&host, 12).unwrap();
-        let full = Kind::Vanilla("minecraft:stone").stack(&host, 64).unwrap();
+        let pump = ElectricMachine::for_item("OIL_PUMP").unwrap();
+        host.registries.item_component(
+            "minecraft:bucket",
+            "minecraft:max_stack_size",
+            Tag::Int(16),
+        );
+        let empty_bucket = advanced_processing::EMPTY_BUCKET;
+        let bucket_of_oil = crate::heated_pressure::BUCKET_OF_OIL;
+        let other = Kind::Vanilla("minecraft:stone").stack(&host, 7);
+        let mut data = Compound::new();
+        let mut slots = vec![
+            empty_bucket.stack(&host, 16),
+            other,
+            bucket_of_oil.stack(&host, 64),
+            empty_bucket.stack(&host, 15),
+        ];
+        for (index, stack) in slots.iter().cloned().enumerate() {
+            assert!(write_stack(&host, &mut data, index, stack));
+        }
+        let plan = |host: &FakeHost, data: &Compound| {
+            find_recipe(
+                host,
+                data,
+                pump,
+                Settings::default(),
+                false,
+                |_| unreachable!(),
+            )
+        };
+        assert!(plan(&host, &data).is_none());
+
+        slots[OUTPUT[0]] = bucket_of_oil.stack(&host, 63);
+        assert!(write_stack(
+            &host,
+            &mut data,
+            OUTPUT[0],
+            slots[OUTPUT[0]].clone()
+        ));
+        let run = plan(&host, &data).unwrap();
+        assert!(bucket_of_oil.matches(&host, &run.outputs[0]));
+        assert_eq!((run.quantity(), pump.work_ticks, pump.cost), (1, 52, 14));
+        let (buckets, _) = run.inputs[INPUT[0]].as_ref().unwrap();
         let items = host
             .level
             .block_entity(pos)
@@ -3629,33 +3718,41 @@ mod tests {
             .items
             .as_mut()
             .unwrap();
-        items.slots[0] = Some(buckets.clone());
-        items.slots[2] = Some(full.clone());
-        items.slots[3] = Some(full.clone());
-        assert!(!move_input_to_output(&mut host, level, pos, 0, &buckets));
+        items.slots = slots.clone();
+        items.limit = 15;
+        let return_buckets = |host: &mut dyn ServerHost| {
+            move_input_to_output(host, level, pos, INPUT[0], buckets, OutputOverflow::Discard)
+        };
+        assert!(!return_buckets(&mut host));
         let items = host.level.block_entity(pos).items.as_mut().unwrap();
-        assert_eq!(items.slots[0], Some(buckets.clone()));
-        assert_eq!(items.slots[2], Some(full));
-        items.slots[3] = None;
-        assert!(move_input_to_output(&mut host, level, pos, 0, &buckets));
-        let items = host.level.block_entity(pos).items.as_ref().unwrap();
-        assert!(items.slots[0].is_none());
-        assert_eq!(items.slots[3], Some(buckets.clone()));
+        assert_eq!(items.slots, slots);
+        items.limit = 64;
+        assert!(!move_input_to_output(
+            &mut host,
+            level,
+            pos,
+            INPUT[0],
+            buckets,
+            OutputOverflow::KeepInput
+        ));
+        let denied = host.transaction(|host, _| {
+            assert!(return_buckets(host));
+            Err::<(), ()>(())
+        });
+        assert_eq!(denied, Err(()));
+        assert_eq!(
+            host.level.block_entity(pos).items.as_ref().unwrap().slots,
+            slots
+        );
 
-        let mut data = Compound::new();
-        assert!(write_stack(&host, &mut data, INPUT[0], Some(buckets)));
-        let pump = ElectricMachine::for_item("OIL_PUMP").unwrap();
-        let run = find_recipe(
-            &host,
-            &data,
-            pump,
-            Settings::default(),
-            false,
-            |_| unreachable!(),
-        )
-        .unwrap();
-        assert!(crate::heated_pressure::BUCKET_OF_OIL.matches(&host, &run.outputs[0]));
-        assert_eq!((run.quantity(), pump.work_ticks, pump.cost), (1, 52, 14));
+        assert!(return_buckets(&mut host));
+        slots[INPUT[0]] = None;
+        slots[OUTPUT[1]] = empty_bucket.stack(&host, 16);
+        assert_eq!(
+            host.level.block_entity(pos).items.as_ref().unwrap().slots,
+            slots
+        );
+
         use crate::networks::Component;
         assert_eq!(
             Component::for_item("OIL_PUMP"),
