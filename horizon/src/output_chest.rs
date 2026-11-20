@@ -1,24 +1,65 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::collections::BTreeSet;
+use std::sync::RwLock;
 
 use mod_api::{
     AttachmentCodec, AttachmentError, AttachmentType, BlockDropsEvent, Compound, Holder, Host,
-    HostTransaction, ITEMS, ItemKey, ItemPart, ItemStack, LevelHost, LevelRef,
-    OnBlockPlacedByEvent, ServerHost, Tag,
+    HostSide, HostTransaction, ITEMS, InteractionResult, ItemKey, ItemPart, ItemStack, LevelHost,
+    LevelRef, OnBlockPlacedByEvent, ServerHost, Tag, Text, UseOnEvent,
 };
 
 use crate::items::OUTPUT_CHEST;
 use crate::machine::deposit_into;
 
-static ENABLED: AtomicBool = AtomicBool::new(true);
-
-pub(crate) fn enabled() -> bool {
-    ENABLED.load(Ordering::Relaxed)
+struct Availability {
+    enabled: bool,
+    disabled_worlds: BTreeSet<String>,
 }
 
-pub(crate) fn set_enabled(enabled: bool) {
-    ENABLED.store(enabled, Ordering::Relaxed);
+impl Availability {
+    const DEFAULT: Self = Self {
+        enabled: true,
+        disabled_worlds: BTreeSet::new(),
+    };
+
+    fn read(config: &toml::Table) -> Self {
+        let enabled = config
+            .get("output-chest-enabled")
+            .and_then(toml::Value::as_bool)
+            .unwrap_or(true);
+        let disabled_worlds = config
+            .get("worlds")
+            .and_then(toml::Value::as_table)
+            .into_iter()
+            .flatten()
+            .filter(|(_, settings)| {
+                settings
+                    .get("output-chest-enabled")
+                    .and_then(toml::Value::as_bool)
+                    == Some(false)
+            })
+            .map(|(world, _)| world.clone())
+            .collect();
+        Self {
+            enabled,
+            disabled_worlds,
+        }
+    }
+
+    fn allows(&self, dimension: &str) -> bool {
+        self.enabled && !self.disabled_worlds.contains(dimension)
+    }
+}
+
+static AVAILABILITY: RwLock<Availability> = RwLock::new(Availability::DEFAULT);
+
+pub(crate) fn configure(config: &toml::Table) {
+    *AVAILABILITY.write().unwrap() = Availability::read(config);
+}
+
+pub(crate) fn enabled(dimension: &str) -> bool {
+    AVAILABILITY.read().unwrap().allows(dimension)
 }
 
 static MARKER: AttachmentType<bool> = AttachmentType {
@@ -46,6 +87,25 @@ pub(crate) struct ChestPlacement;
 
 #[mod_api::horizon_part]
 impl ItemPart for ChestPlacement {
+    fn use_on(&self, host: HostSide<'_>, event: &mut UseOnEvent<'_>) -> Option<InteractionResult> {
+        let HostSide::Server(host) = host else {
+            return None;
+        };
+        if !OUTPUT_CHEST.matches(host, event.stack) {
+            return None;
+        }
+        let player = host.player(event.player)?;
+        let message = if !enabled(host.dimension()) {
+            "The output chest is disabled in this world."
+        } else if !crate::research::can_use(host, player, &crate::recipes::CHEST_RESEARCH) {
+            "Unlock the output chest with /sf research output_chest."
+        } else {
+            return None;
+        };
+        let _ = player.tell(host, Text::literal(message));
+        Some(InteractionResult::Fail)
+    }
+
     fn on_block_placed_by(&self, host: &mut dyn ServerHost, event: &mut OnBlockPlacedByEvent<'_>) {
         if event.placer.is_some() && OUTPUT_CHEST.matches(host, event.stack) {
             let _ = MARKER.set(host, Holder::BlockEntity(event.pos), true);
@@ -171,10 +231,7 @@ fn try_deposit_matching(
     require_empty: bool,
     mut allowed: impl FnMut(&mut dyn ServerHost, [i32; 3]) -> bool,
 ) -> bool {
-    if !enabled() {
-        return false;
-    }
-    if !level.in_place(host) {
+    if !level.in_place(host) || !enabled(host.dimension()) {
         return false;
     }
     let Some(chest) = host.block_key("minecraft:chest") else {
@@ -273,6 +330,29 @@ mod tests {
 
     use crate::items::Kind;
     use mod_api::{Identifier, testing::FakeHost};
+
+    #[test]
+    fn output_chest_world_settings_inherit_the_global_switch() {
+        let config = r#"
+            [worlds."minecraft:the_nether"]
+            output-chest-enabled = false
+
+            [worlds."minecraft:the_end"]
+            output-chest-enabled = true
+        "#;
+        let table = config.parse::<toml::Table>().unwrap();
+        let worlds = Availability::read(&table);
+        assert!(worlds.allows("minecraft:overworld"));
+        assert!(!worlds.allows("minecraft:the_nether"));
+        assert!(worlds.allows("minecraft:the_end"));
+
+        let all_disabled = format!("output-chest-enabled = false\n{config}")
+            .parse::<toml::Table>()
+            .unwrap();
+        let all_disabled = Availability::read(&all_disabled);
+        assert!(!all_disabled.allows("minecraft:overworld"));
+        assert!(!all_disabled.allows("minecraft:the_end"));
+    }
 
     #[test]
     fn full_candidate_rolls_back_before_trying_the_next_chest() {

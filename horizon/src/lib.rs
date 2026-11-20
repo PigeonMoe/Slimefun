@@ -257,7 +257,7 @@ impl Slimefun {
             self.multi_tools.configure(None);
             self.nether_goo.configure(None);
             self.block_placers.configure(None);
-            output_chest::set_enabled(true);
+            output_chest::configure(&toml::Table::new());
             self.crucibles.configure(false);
             self.industrial_miners.configure(None);
             self.solar_helmet.configure(None);
@@ -268,6 +268,7 @@ impl Slimefun {
         let Ok(table) = config.text.parse::<toml::Table>() else {
             return;
         };
+        output_chest::configure(&table);
         self.guide.configure(table.get("guide"), table.get("researches"));
         self.ore_tools.configure(&table);
         self.grapple.configure(table.get("grappling-hook"));
@@ -396,12 +397,6 @@ impl Slimefun {
             && let Ok(value @ 0..=100) = u32::try_from(value)
         {
             settings.fire_breaking_chance = value;
-        }
-        if let Some(value) = table
-            .get("output-chest-enabled")
-            .and_then(toml::Value::as_bool)
-        {
-            output_chest::set_enabled(value);
         }
         if let Some(value) = table.get("drop-from-golems").and_then(toml::Value::as_bool) {
             settings.drop_from_golems = value;

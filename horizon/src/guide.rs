@@ -263,7 +263,10 @@ impl Guide {
 
     fn show(&self, host: &mut dyn ServerHost, player: PlayerRef, mut path: Vec<Page>) {
         let month = host.server_local_minute()[1];
-        if matches!(path.last(), Some(Page::Group(group, _)) if !group.in_season(month)) {
+        let allow_output_chest = crate::output_chest::enabled(host.dimension());
+        if matches!(path.last(), Some(Page::Group(group, _)) if !group.in_season(month))
+            || matches!(path.last(), Some(Page::Recipe(entry)) if !visible(entry, allow_output_chest))
+        {
             path = vec![Page::Main];
         }
         let Some(page) = path.last() else {
@@ -396,6 +399,12 @@ impl Guide {
                 path.pop();
             }
             Action::Research(topic) => {
+                if topic.id == crate::recipes::CHEST_RESEARCH.id
+                    && !crate::output_chest::enabled(host.dimension())
+                {
+                    self.show(host, player, path);
+                    return;
+                }
                 if !learned(host, player, topic) && !self.learning.start(host, player, topic, &path)
                 {
                     return;
@@ -476,6 +485,10 @@ fn learned(host: &dyn Host, player: PlayerRef, topic: &Research) -> bool {
         .is_some_and(|data| research::unlocked(data, topic))
 }
 
+fn visible(entry: &Entry, allow_output_chest: bool) -> bool {
+    allow_output_chest || entry.item.kind != crate::items::OUTPUT_CHEST
+}
+
 fn render(
     host: &dyn Host,
     saved: Option<&Compound>,
@@ -483,6 +496,8 @@ fn render(
     month: i32,
     show_hidden: bool,
 ) -> Menu {
+    let allow_output_chest = crate::output_chest::enabled(host.dimension());
+    let visible_entry = |entry: &&Entry| visible(entry, allow_output_chest);
     let mut menu = Menu {
         slots: vec![None; 54],
         actions: std::array::from_fn(|_| None),
@@ -520,13 +535,17 @@ fn render(
             for (slot, group) in GROUPS
                 .iter()
                 .filter(|group| group.in_season(month))
-                .filter(|group| group_entries(group).next().is_some())
+                .filter(|group| group_entries(group).any(|entry| visible_entry(&entry)))
                 .enumerate()
             {
                 let locked_parent = group
                     .parent
                     .and_then(|key| GROUPS.iter().find(|parent| parent.key == key))
-                    .filter(|parent| !group_entries(parent).all(|entry| unlocked(saved, entry)));
+                    .filter(|parent| {
+                        !group_entries(parent)
+                            .filter(visible_entry)
+                            .all(|entry| unlocked(saved, entry))
+                    });
                 let name = format!("&{}{}", color_code(group.color), group.name);
                 let shown = if let Some(parent) = locked_parent {
                     icon(
@@ -553,8 +572,9 @@ fn render(
             }
         }
         Page::Group(group, page) => {
-            let entries: Vec<_> = group_entries(group).collect();
+            let entries: Vec<_> = group_entries(group).filter(visible_entry).collect();
             let pages = entries.len().div_ceil(DISCOVERY_SLOTS).max(1);
+            let page = (*page).min(pages);
             for (slot, entry) in entries
                 .into_iter()
                 .skip((page - 1) * DISCOVERY_SLOTS)
@@ -581,7 +601,7 @@ fn render(
                     );
                 }
             }
-            pagination(host, &mut menu, group, *page, pages);
+            pagination(host, &mut menu, group, page, pages);
         }
         Page::Recipe(entry) => {
             for (index, (slot, input)) in INGREDIENT_SLOTS
@@ -589,7 +609,9 @@ fn render(
                 .zip(entry.ingredients)
                 .enumerate()
             {
-                let linked = input.and_then(|stack| lookup(stack.kind.id()));
+                let linked = input
+                    .and_then(|stack| lookup(stack.kind.id()))
+                    .filter(visible_entry);
                 if let Some(locked) = linked.filter(|entry| !unlocked(saved, entry)) {
                     menu.set(
                         slot,
@@ -667,7 +689,9 @@ fn render(
             }
         }
         Page::Search(query) => {
-            for (slot, (group, entry)) in search_matches(query, month, show_hidden).enumerate() {
+            for (slot, (group, entry)) in
+                search_matches(query, month, show_hidden, allow_output_chest).enumerate()
+            {
                 let mut item = entry_icon(host, entry);
                 let group = colored_lore(&format!("&8⇨ &f{}", group.name));
                 if let Some(item) = &mut item {
@@ -722,12 +746,14 @@ fn search_matches(
     query: &str,
     month: i32,
     show_hidden: bool,
+    allow_output_chest: bool,
 ) -> impl Iterator<Item = (&'static Group, &'static Entry)> {
     let query = strip_colors(query).to_lowercase();
     GROUPS
         .iter()
         .filter(move |group| show_hidden || group.in_season(month))
         .flat_map(|group| named_group_entries(group).map(move |(id, entry)| (group, id, entry)))
+        .filter(move |(_, _, entry)| visible(entry, allow_output_chest))
         .filter_map(move |(group, id, entry)| {
             (id.to_ascii_lowercase().contains(&query)
                 || strip_colors(&entry_name(entry))
@@ -1145,10 +1171,14 @@ mod tests {
     fn paper_search_accepts_display_names_and_ids_and_limits_the_first_35() {
         let craft = lookup("ENHANCED_CRAFTING_TABLE").unwrap();
         for query in ["§aENHANCED_crafting_TABLE", "enhanced crafting table"] {
-            assert!(search_matches(query, 1, false).any(|(_, entry)| std::ptr::eq(entry, craft)));
+            assert!(
+                search_matches(query, 1, false, true).any(|(_, entry)| std::ptr::eq(entry, craft))
+            );
         }
-        assert_eq!(search_matches("", 1, false).count(), 35);
-        assert_eq!(search_matches("does not exist", 1, false).count(), 0);
+        assert_eq!(search_matches("", 1, false, true).count(), 35);
+        assert_eq!(search_matches("does not exist", 1, false, true).count(), 0);
+        assert!(search_matches("output_chest", 1, false, true).count() > 0);
+        assert_eq!(search_matches("output_chest", 1, false, false).count(), 0);
         assert_eq!(search_title("§bCoal"), "Searching for: Coal");
         assert_eq!(
             search_title("012345678901234567890"),
@@ -1182,9 +1212,9 @@ mod tests {
         ] {
             assert!(!groups(11, true).contains(&key));
             assert!(groups(month, false).contains(&key));
-            assert!(!search_matches(query, 11, false).any(|(group, _)| group.key == key));
-            assert!(search_matches(query, month, false).any(|(group, _)| group.key == key));
-            assert!(search_matches(query, 11, true).any(|(group, _)| group.key == key));
+            assert!(!search_matches(query, 11, false, true).any(|(group, _)| group.key == key));
+            assert!(search_matches(query, month, false, true).any(|(group, _)| group.key == key));
+            assert!(search_matches(query, 11, true, true).any(|(group, _)| group.key == key));
         }
         let guide = Guide::default();
         let config: toml::Table = "[guide]\nshow-hidden-item-groups-in-search = true"

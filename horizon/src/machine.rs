@@ -495,7 +495,9 @@ impl Machine {
                         _ => crafting().find(matches_inputs),
                     }
                     .ok_or(Refusal::MissingRecipe)?;
-                    if recipe.output.kind == OUTPUT_CHEST && !output_chest::enabled() {
+                    if recipe.output.kind == OUTPUT_CHEST
+                        && !output_chest::enabled(host.dimension())
+                    {
                         return Err(Refusal::Disabled);
                     }
                     let untagged_forge_output = matches!(self, Self::ArmorCrafting)

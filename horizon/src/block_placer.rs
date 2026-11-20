@@ -287,7 +287,7 @@ fn placeable_custom(id: &str) -> Option<CustomBlock> {
         return Some(CustomBlock::ReinforcedSpawner);
     }
     if id == OUTPUT_CHEST.id() {
-        return crate::output_chest::enabled().then_some(CustomBlock::OutputChest);
+        return Some(CustomBlock::OutputChest);
     }
     if let Some(kind) = crate::ancient_altar::paper_device(id) {
         return Some(CustomBlock::Altar(kind));
@@ -409,6 +409,11 @@ impl Placers {
         {
             let custom = match item_id(event.stack) {
                 Some(id) => match placeable_custom(&id) {
+                    Some(CustomBlock::OutputChest)
+                        if !crate::output_chest::enabled(event.dimension) =>
+                    {
+                        return Flow::Cancel;
+                    }
                     Some(custom) => Some(custom),
                     None => return Flow::Cancel,
                 },
@@ -478,6 +483,11 @@ impl Placers {
 
 impl Attempt {
     fn place(self, host: &mut dyn ServerHost, networks: &Mutex<Networks>) {
+        if self.custom == Some(CustomBlock::OutputChest)
+            && !crate::output_chest::enabled(host.dimension())
+        {
+            return;
+        }
         let Some(expected) = empty(host, self.level, self.target) else {
             return;
         };

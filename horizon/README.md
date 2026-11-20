@@ -137,9 +137,9 @@ python3 horizon/tools/import-research.py probe-horizon-catalog.json \
 3. 简易冶炼炉从上到下使用木栅栏、发射器和火。发射器两侧用红砖。它处理单种粉末配方，每次耗掉火。常规冶炼炉改用下界砖栅栏和下界砖，支持更多输入组合与合金。两种炉都能将铅粉冶炼成铅锭。
 4. 研究输出箱，并在增强工作台使用五个铅锭、漏斗和箱子制作。玩家拆除带标记的输出箱时，服务端会在原本的箱子掉落上恢复 Slimefun ID。
 
-四项设置保存在该 Horizon 存档的 `slimefun-server.toml`。默认值为 `double-ores = true`、`legacy-ore-washer = false`、`fire-breaking-chance = 34` 和 `output-chest-enabled = true`。最后一项控制该存档中的输出箱配方和产物路由，维度级覆盖仍待补齐。
+四项设置保存在该 Horizon 存档的 `slimefun-server.toml`。默认值为 `double-ores = true`、`legacy-ore-washer = false`、`fire-breaking-chance = 34` 和 `output-chest-enabled = true`。如需在下界禁用输出箱，在文件末尾加入 `[worlds."minecraft:the_nether"]` 和 `output-chest-enabled = false`。禁用后输出箱从该维度的指南中隐藏，玩家和方块放置器无法放置新的输出箱，机器会跳过已放置的输出箱。恢复 Paper 存档时仍保留原箱与标记。
 
-冶炼炉点火室自动复燃、非玩家移除导致的输出箱标识恢复及其他配方行为仍待移植。开发版以本地 Fork 构建和原版代码为校验基线，真实客户端的整条生产路线仍需验收。
+常规冶炼炉的发射器下方可安装点火室，用其中的打火石维持火焰。非玩家移除导致的输出箱标识恢复及其他配方行为仍待验证。
 
 ### 下界淘金盘
 
