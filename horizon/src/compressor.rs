@@ -4,12 +4,15 @@ use std::collections::BTreeMap;
 use std::sync::Mutex;
 
 use mod_api::{
-    BlockEntityRef, BossBarColor, BossBarRef, HostTransaction, ItemStack, LevelRef, PlayerRef,
-    ScheduledTaskEvent, ServerHost, SoundSource, TaskId, Text,
+    BlockEntityRef, BossBarColor, BossBarRef, Host, HostTransaction, ItemStack, LevelRef, PlayerRef,
+    ScheduledTaskEvent, ServerHost, SoundSource, Tag, TaskId, Text,
 };
 
+use crate::guide::strip_colors;
 use crate::machine::{Dispenser, Refusal, deposit_stack};
+use crate::network_runtime::paper_text;
 use crate::output_chest;
+use crate::random::Rolls;
 
 const STEPS: &[(u32, &str)] = &[
     (0, "minecraft:block.piston.extend"),
@@ -25,6 +28,7 @@ const PROGRESS_STEP: i64 = 4;
 pub(crate) struct DelayedCrafts {
     tasks: Mutex<BTreeMap<TaskId, Action>>,
     progress: Mutex<BTreeMap<TaskId, CraftProgress>>,
+    progress_colors: Rolls,
 }
 
 struct CraftProgress {
@@ -87,7 +91,7 @@ impl DelayedCrafts {
             .map(|&(delay, sound)| (delay, Action::Sound(player, sound)));
         self.queue(
             host,
-            (player, dispenser.level, "压缩机压缩中"),
+            (player, dispenser.level, "压缩中"),
             actions,
             (MACHINE_TICKS, Action::Output(output)),
         )
@@ -119,7 +123,7 @@ impl DelayedCrafts {
         };
         self.queue(
             host,
-            (player, dispenser.level, "压力舱压缩中"),
+            (player, dispenser.level, "压缩中"),
             steps,
             (MACHINE_TICKS, Action::Output(output)),
         )
@@ -151,7 +155,7 @@ impl DelayedCrafts {
         };
         self.queue(
             host,
-            (player, dispenser.level, "魔法工作台合成中"),
+            (player, dispenser.level, "合成中"),
             steps,
             (MACHINE_TICKS, Action::Output(output)),
         )
@@ -178,7 +182,7 @@ impl DelayedCrafts {
         ];
         self.queue(
             host,
-            (player, dispenser.level, "盔甲锻造台锻造中"),
+            (player, dispenser.level, "锻造中"),
             sounds.map(|(delay, sound)| (delay, Action::BlockSound(dispenser, sound))),
             (MACHINE_TICKS, Action::Output(output)),
         )
@@ -229,6 +233,12 @@ impl DelayedCrafts {
         finish: (u32, Action),
     ) -> Result<(), Refusal> {
         let duration = finish.0 as i32;
+        let title = match &finish.1 {
+            Action::Output(output) => {
+                product_name(host, &output.stack).append(Text::literal(format!(" {title}")))
+            }
+            _ => Text::literal(title),
+        };
         let mut scheduled = Vec::new();
         for (delay, action) in actions.into_iter().chain([finish]) {
             let Ok(id) = host.schedule_task(delay, 0) else {
@@ -244,10 +254,14 @@ impl DelayedCrafts {
         if let Some(started) = level.game_time(host)
             && let Ok(Some(bar)) = host.create_boss_bar(
                 &format!("{PROGRESS_BAR_PREFIX}{}", completion.0),
-                Text::literal(title),
+                title,
             )
         {
-            bar.set_color(host, BossBarColor::Yellow);
+            let color = self
+                .progress_colors
+                .next(host, level, BossBarColor::ALL.len() as u32)
+                .map_or(BossBarColor::White, |index| BossBarColor::ALL[index as usize]);
+            bar.set_color(host, color);
             if bar.set_max(host, duration) && bar.add_player(host, player) {
                 self.progress.lock().unwrap().insert(completion, CraftProgress {
                     bar,
@@ -397,7 +411,31 @@ impl DelayedCrafts {
             craft.bar.remove(host);
         }
         self.tasks.lock().unwrap().clear();
+        self.progress_colors.clear();
     }
+}
+
+fn product_name(host: &dyn Host, stack: &ItemStack) -> Text {
+    let patch = stack.components().map(|components| components.as_nbt());
+    let default = host.item_default_component(stack.item(), "minecraft:item_name");
+    let names = ["minecraft:custom_name", "minecraft:item_name"]
+        .into_iter()
+        .filter_map(|key| patch?.get(&key.into()))
+        .chain(default.as_ref());
+    for name in names {
+        if let Some(Tag::String(key)) = name.get("translate") {
+            return Text::translate(key.to_string_lossy(), Vec::new());
+        }
+        if let Some(label) = paper_text(name).map(|name| strip_colors(&name))
+            && !label.is_empty()
+        {
+            return Text::literal(label);
+        }
+    }
+
+    let id = stack.item().id(host);
+    let kind = if host.block_key(&id).is_some() { "block" } else { "item" };
+    Text::translate(format!("{kind}.{}", id.replace([':', '/'], ".")), Vec::new())
 }
 
 fn pressure_step(host: &mut dyn ServerHost, level: LevelRef, position: [i32; 3], finish: bool) {

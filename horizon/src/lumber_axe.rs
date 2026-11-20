@@ -275,10 +275,8 @@ mod tests {
                 .unwrap()
                 .as_nbt()
                 .get(&"minecraft:lore".into()),
-            Some(&Tag::List(vec![crate::items::text(
-                "Cuts down the whole Tree...",
-                "green",
-                true
+            Some(&Tag::List(vec![crate::hologram_projector::colored_lore(
+                "&a&o砍倒整棵树木...",
             )])),
         );
     }

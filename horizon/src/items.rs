@@ -354,7 +354,7 @@ impl SlimefunItem {
                     Tag::List(vec![
                         string(""),
                         Tag::compound([
-                            ("text", string("Restores ")),
+                            ("text", string("恢复 ")),
                             ("color", string("gray")),
                             ("italic", Tag::Byte(1)),
                             (
@@ -365,7 +365,7 @@ impl SlimefunItem {
                                         "aqua",
                                         true,
                                     ),
-                                    text(" Hunger", "gray", true),
+                                    text(" 点饥饿值", "gray", true),
                                 ]),
                             ),
                         ]),
@@ -373,6 +373,7 @@ impl SlimefunItem {
                 );
             }
         }
+        crate::guide::localize_item_components(self.id, &mut components);
         components
     }
 }
@@ -665,6 +666,15 @@ mod tests {
         assert!(!MAGIC_LUMP_1.matches(&host, &vanilla));
         assert!(!MAGIC_LUMP_1.matches(&host, &ender));
         assert!(!Kind::Vanilla("minecraft:gold_nugget").matches(&host, &lump));
+
+        let mut previous = lump.clone();
+        previous
+            .apply_components(&Compound::from([(
+                "minecraft:custom_name".into(),
+                text("Magical Lump", "yellow", false),
+            )]))
+            .unwrap();
+        assert!(MAGIC_LUMP_1.matches(&host, &previous));
 
         let mut wrong_material = Kind::Vanilla("minecraft:sugar").stack(&host, 1).unwrap();
         wrong_material

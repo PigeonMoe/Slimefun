@@ -242,21 +242,21 @@ fn spawner_item(host: &dyn Host, species: &str, repaired: bool) -> Option<ItemSt
         BROKEN_SPAWNER
     };
     let mut stack = kind.stack(host, 1)?;
-    stack
-        .apply_components(&Compound::from([
-            (
-                "minecraft:lore".into(),
-                spawner_lore(&mob_label(species), !repaired),
-            ),
-            (
-                BLOCK_DATA.into(),
-                Tag::compound([
-                    ("id", Tag::String("minecraft:mob_spawner".into())),
-                    ("SpawnData", spawn_data(species)),
-                ]),
-            ),
-        ]))
-        .ok()?;
+    let mut components = Compound::from([
+        (
+            "minecraft:lore".into(),
+            spawner_lore(&mob_label(species), !repaired),
+        ),
+        (
+            BLOCK_DATA.into(),
+            Tag::compound([
+                ("id", Tag::String("minecraft:mob_spawner".into())),
+                ("SpawnData", spawn_data(species)),
+            ]),
+        ),
+    ]);
+    crate::guide::localize_item_components(kind.id(), &mut components);
+    stack.apply_components(&components).ok()?;
     Some(stack)
 }
 

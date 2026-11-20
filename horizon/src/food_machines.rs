@@ -562,13 +562,21 @@ mod tests {
             let food = &fabricated.outputs[0];
             assert!(produce.food.matches(&host, food));
             assert_eq!(food.count(), 2);
+            let parts = food.components().unwrap().as_nbt();
             assert_eq!(
-                food.components()
-                    .unwrap()
-                    .as_nbt()
-                    .get(&"minecraft:lore".into()),
-                lore(produce.food.id()).as_ref(),
+                parts.get(&"minecraft:custom_name".into()),
+                Some(&crate::hologram_projector::colored_lore("&a有机食物")),
             );
+            let Some(Tag::List(lines)) = parts.get(&"minecraft:lore".into()) else {
+                panic!("missing ingredient description");
+            };
+            assert!(crate::network_runtime::paper_text(&lines[0]).unwrap().contains("内含"));
+            if produce.food == WHEAT.food {
+                assert_eq!(
+                    lines[0],
+                    crate::hologram_projector::colored_lore("&7内含 &9小麦"),
+                );
+            }
             let composted = next(&host, comp, &[None, Some(food.clone())]).unwrap();
             assert_eq!(composted.work_ticks, 6);
             assert_eq!((composted.consumed[0].0, composted.consumed[0].2), (1, 1));

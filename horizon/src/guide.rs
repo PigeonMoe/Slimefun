@@ -29,6 +29,7 @@ mod locale;
 use catalog::{Entry, GROUPS, Group, group_entries, lookup, named_group_entries};
 use learning::Preference;
 pub(crate) use learning::launch_random_fireworks;
+pub(crate) use locale::localize_item_components;
 pub(crate) use locale::research_name;
 
 const TITLE: &str = "远古工艺之书";
@@ -1371,6 +1372,10 @@ mod tests {
         let profile = &"minecraft:profile".into();
         assert!(original.get(profile).is_some());
         assert_eq!(displayed.get(profile), original.get(profile));
+        assert_eq!(
+            original.get(&"minecraft:custom_name".into()),
+            Some(&colored_lore("&6便携工作台")),
+        );
         assert_eq!(
             displayed.get(&"minecraft:custom_name".into()),
             Some(&colored_lore(locale::item_name(entry.id).unwrap())),
