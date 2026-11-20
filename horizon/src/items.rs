@@ -41,6 +41,21 @@ pub(crate) struct HeadTexture {
     pub value: &'static str,
 }
 
+impl HeadTexture {
+    pub(crate) fn component(&self) -> Tag {
+        Tag::compound([
+            ("id", Tag::IntArray(self.profile.into())),
+            (
+                "properties",
+                Tag::List(vec![Tag::compound([
+                    ("name", string("textures")),
+                    ("value", string(self.value)),
+                ])]),
+            ),
+        ])
+    }
+}
+
 impl Kind {
     pub fn id(self) -> &'static str {
         match self {
@@ -305,19 +320,7 @@ impl SlimefunItem {
             );
         }
         if let Some(texture) = &self.texture {
-            components.insert(
-                "minecraft:profile".into(),
-                Tag::compound([
-                    ("id", Tag::IntArray(texture.profile.into())),
-                    (
-                        "properties",
-                        Tag::List(vec![Tag::compound([
-                            ("name", string("textures")),
-                            ("value", string(texture.value)),
-                        ])]),
-                    ),
-                ]),
-            );
+            components.insert("minecraft:profile".into(), texture.component());
         }
         if let Some(juice) = &self.juice {
             components.insert(

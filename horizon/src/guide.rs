@@ -9,15 +9,15 @@ use std::{
 };
 
 use mod_api::{
-    Compound, Host, HostTransaction, ItemPlace, ItemResource, ItemStack, MenuClickedEvent,
-    MenuClosedEvent, MenuReplace, PlayerRef, ServerHost, SoundSource, Tag, Text,
+    ComponentId, Compound, Hand, Host, HostTransaction, ItemPlace, ItemResource, ItemStack, MenuClickedEvent,
+    MenuClosedEvent, MenuReplace, PermissionLevel, PlayerRef, ServerHost, SoundSource, Tag, Text,
     text::{TextClick, TextStyle},
 };
 
 use crate::{
     availability,
     hologram_projector::{colored_label, colored_lore},
-    items::Kind,
+    items::{HeadTexture, Kind},
     recipes::Research,
     research,
     ticker_policy::Tickers,
@@ -25,11 +25,18 @@ use crate::{
 
 mod catalog;
 mod learning;
+mod locale;
 use catalog::{Entry, GROUPS, Group, group_entries, lookup, named_group_entries};
 use learning::Preference;
 pub(crate) use learning::launch_random_fireworks;
+pub(crate) use locale::research_name;
 
-const TITLE: &str = "Slimefun Guide";
+const TITLE: &str = "远古工艺之书";
+const BOOK_LORE: &[&str] = &[
+    "",
+    "&e右键 &8⇨ &7浏览物品",
+    "&e潜行并右键 &8⇨ &7打开设置与关于",
+];
 const GUIDE_KEY: &str = "slimefun:slimefun_guide_mode";
 const SURVIVAL: &str = "SURVIVAL_MODE";
 const DISCOVERY_SLOTS: usize = 36;
@@ -39,12 +46,8 @@ fn book(host: &dyn Host) -> Option<ItemStack> {
     let mut item = icon(
         host,
         "minecraft:enchanted_book",
-        "&aSlimefun Guide &7(Chest GUI)",
-        &[
-            "",
-            "&eRight Click &8⇨ &7Browse Items",
-            "&eShift + Right Click &8⇨ &7Open Settings / Credits",
-        ],
+        "&a远古工艺之书",
+        BOOK_LORE,
     )?;
     item.apply_components(&Compound::from([(
         "minecraft:custom_data".into(),
@@ -76,6 +79,34 @@ fn book_mode(host: &dyn Host, item: &ItemStack) -> Option<&'static str> {
 
 fn is_book(host: &dyn Host, item: &ItemStack) -> bool {
     book_mode(host, item) == Some(SURVIVAL)
+}
+
+fn rename_old_book(host: &mut dyn ServerHost, player: PlayerRef, hand: Hand, stack: &ItemStack) {
+    let name = stack
+        .components()
+        .and_then(|parts| parts.as_nbt().get(&"minecraft:custom_name".into()));
+    if name != Some(&colored_lore("&aSlimefun Guide &7(Chest GUI)")) {
+        return;
+    }
+    let held = ItemPlace::PlayerHand { player: player.uuid(), hand };
+    if held.stack(host).as_ref() != Some(stack) {
+        return;
+    }
+    let slot = match hand {
+        Hand::Main => player
+            .selected_slot(host)
+            .and_then(|slot| u32::try_from(slot).ok())
+            .filter(|slot| *slot < 9),
+        Hand::Off => Some(40),
+    };
+    let Some(slot) = slot else { return };
+    let mut updated = stack.clone();
+    if updated.apply_components(&Compound::from([
+        ("minecraft:custom_name".into(), colored_lore("&a远古工艺之书")),
+        ("minecraft:lore".into(), Tag::List(BOOK_LORE.iter().map(|line| colored_lore(line)).collect())),
+    ])).is_ok() {
+        let _ = player.set_inventory_slot(host, slot, Some(updated));
+    }
 }
 
 pub(crate) fn is_guide_book(host: &dyn Host, item: &ItemStack) -> bool {
@@ -113,21 +144,57 @@ pub(crate) fn give(host: &mut dyn ServerHost, player: PlayerRef) {
     let _ = host.transaction(|host, tx| {
         (0..36)
             .any(|slot| {
-                ItemPlace::PlayerSlot {
-                    player: player.uuid(),
-                    slot,
-                }
-                .insert(host, tx, &resource, 1)
-                    == 1
+                ItemPlace::PlayerSlot { player: player.uuid(), slot }
+                    .insert(host, tx, &resource, 1) == 1
             })
             .then_some(())
             .ok_or(())
     });
 }
 
+fn give_cheat_item(host: &mut dyn ServerHost, player: PlayerRef, stack: &ItemStack, full_stack: bool) -> bool {
+    let resource = ItemResource::of(stack);
+    let key = ComponentId::new("minecraft:max_stack_size").expect("built-in item component");
+    let limit = match resource.value(host, &key) {
+        Some(Tag::Int(max @ 1..=99)) => max as u32,
+        _ => host.max_stack_size(resource.item()).unwrap_or(1),
+    };
+    let count = if full_stack { limit } else { 1 };
+    host.transaction(|host, tx| {
+        let mut remaining = count;
+        for slot in 0..36 {
+            let place = ItemPlace::PlayerSlot {
+                player: player.uuid(),
+                slot,
+            };
+            let room = match place.stack(host) {
+                Some(existing) if resource.matches(&existing) => limit.saturating_sub(existing.count()),
+                Some(_) => 0,
+                None => limit,
+            };
+            let amount = room.min(remaining);
+            if amount != 0 {
+                remaining -= place.insert(host, tx, &resource, amount);
+            }
+            if remaining == 0 {
+                break;
+            }
+        }
+        (remaining < count).then_some(()).ok_or(())
+    })
+    .is_ok()
+}
+
+fn can_cheat(host: &dyn Host, player: PlayerRef) -> bool {
+    player
+        .permission_level(host)
+        .is_some_and(|level| level >= PermissionLevel::Gamemasters.level())
+}
+
 #[derive(Clone)]
 enum Page {
     Main,
+    Cheat,
     Group(&'static Group, usize),
     Recipe(&'static Entry),
     Info,
@@ -141,6 +208,9 @@ enum Action {
     Back,
     Research(&'static Research),
     TogglePreference(Preference),
+    EnterCheat,
+    LeaveCheat,
+    Grant(&'static Entry),
     SearchPrompt,
     Link(&'static str),
 }
@@ -156,7 +226,7 @@ struct View {
 struct Reader {
     history: Vec<Page>,
     view: Option<View>,
-    waiting_for_search: bool,
+    waiting_for_search: Option<Vec<Page>>,
 }
 
 pub(crate) struct Guide {
@@ -246,27 +316,33 @@ impl Guide {
     }
 
     pub(crate) fn chat(&self, host: &mut dyn ServerHost, player: u128, query: &str) -> bool {
-        let waiting = self
+        let path = self
             .readers
             .lock()
             .unwrap()
             .get_mut(&player)
-            .is_some_and(|reader| std::mem::take(&mut reader.waiting_for_search));
-        if waiting && let Some(player) = host.player(player) {
-            self.search(host, player, query);
+            .and_then(|reader| reader.waiting_for_search.take());
+        if let Some(mut path) = path {
+            if let Some(player) = host.player(player) {
+                path.push(Page::Search(Arc::from(query)));
+                self.show(host, player, path);
+            }
+            return true;
         }
-        waiting
+        false
     }
 
     pub(crate) fn right_click(
         &self,
         host: &mut dyn ServerHost,
         player: PlayerRef,
+        hand: Hand,
         stack: &ItemStack,
     ) -> bool {
         if !is_book(host, stack) {
             return false;
         }
+        rename_old_book(host, player, hand, stack);
         let mut path = self.last_path(player.uuid());
         if player.entity().is_shift_key_down(host) == Some(true) {
             path.push(Page::Info);
@@ -280,12 +356,17 @@ impl Guide {
             availability::Denied::World.tell(host, player);
             return;
         }
+        let cheat = matches!(path.first(), Some(Page::Cheat));
+        if cheat && !can_cheat(host, player) {
+            let _ = player.tell(host, colored_label("&c只有二级及以上管理员可以使用作弊模式。"));
+            return;
+        }
         let month = host.server_local_minute()[1];
         let availability = Availability::for_dimension(host.dimension());
         if matches!(path.last(), Some(Page::Group(group, _)) if !group.in_season(month))
             || matches!(path.last(), Some(Page::Recipe(entry)) if !availability.allows_search(entry))
         {
-            path = vec![Page::Main];
+            path.truncate(1);
         }
         let Some(page) = path.last() else {
             return;
@@ -299,18 +380,18 @@ impl Guide {
             month,
             show_hidden,
             availability,
+            cheat,
         );
         if matches!(page, Page::Info) {
             let options = [Preference::Fireworks, Preference::Animation]
                 .into_iter()
                 .filter_map(|option| Some((option, self.learning.option(host, player, option)?)));
             for (slot, (option, enabled)) in (19..).zip(options) {
-                let (material, label, description, setting) = match option {
+                let (material, label, description) = match option {
                     Preference::Fireworks => (
                         "minecraft:firework_rocket",
-                        "Fireworks",
-                        &["&7will see fireworks upon researching an item."][..],
-                        "fireworks",
+                        "研究烟花",
+                        "&7在解锁研究时燃放烟花。",
                     ),
                     Preference::Animation => (
                         if enabled {
@@ -318,25 +399,29 @@ impl Guide {
                         } else {
                             "minecraft:paper"
                         },
-                        "Learning Animation",
-                        &[
-                            "&7will see information about your pondering in chat",
-                            "&7upon researching an item.",
-                        ][..],
-                        "learning animation",
+                        "解锁动画",
+                        "&7在屏幕中央显示解锁进度。",
                     ),
                 };
-                let text = if enabled { "&aYes" } else { "&4No" };
-                let verb = if enabled { "disable" } else { "enable" };
-                let title = format!("&b{label}: {text}");
-                let click = format!("&eClick to {verb} your {setting}");
-                let mut lore = vec!["", "&7You can now toggle whether you"];
-                lore.extend_from_slice(description);
-                lore.extend(["", click.as_str()]);
+                let text = if enabled { "&a开启" } else { "&4关闭" };
+                let click = if enabled { "&e点击关闭" } else { "&e点击开启" };
+                let title = format!("&b{label}：{text}");
                 menu.set(
                     slot,
-                    icon(host, material, &title, &lore),
+                    icon(host, material, &title, &["", description, "", click]),
                     Some(Action::TogglePreference(option)),
+                );
+            }
+            if can_cheat(host, player) {
+                menu.set(
+                    23,
+                    icon(
+                        host,
+                        "minecraft:command_block",
+                        "&c作弊模式",
+                        &["&7点击领取物品，潜行点击领取一组。", "&7仅二级及以上管理员可用。"],
+                    ),
+                    Some(Action::EnterCheat),
                 );
             }
         }
@@ -347,19 +432,20 @@ impl Guide {
                 icon(
                     host,
                     "minecraft:enchanted_book",
-                    "&7⇦ Back",
+                    "&7⇦ 返回",
                     &[
                         "",
-                        "&fLeft Click: &7Go back to previous Page",
-                        "&fShift + left Click: &7Go back to Main Menu",
+                        "&f左键：&7返回上一页",
+                        "&f潜行并左键：&7返回主页",
                     ],
                 ),
                 Some(Action::Back),
             );
         }
         let title = match page {
-            Page::Info => Text::literal("Settings & Info"),
+            Page::Info => Text::literal("设置与关于"),
             Page::Search(query) => Text::literal(search_title(query)),
+            _ if cheat => Text::literal("远古工艺之书 · 作弊模式"),
             _ => Text::literal(TITLE),
         };
         if let Ok(Some(window)) =
@@ -369,13 +455,15 @@ impl Guide {
             let len = path.len() - usize::from(settings);
             let mut readers = self.readers.lock().unwrap();
             let reader = readers.entry(player.uuid()).or_default();
-            reader.history = path[..len].to_vec();
+            if !cheat {
+                reader.history = path[..len].to_vec();
+            }
             reader.view = Some(View {
                 window,
                 path,
                 actions: menu.actions,
             });
-            reader.waiting_for_search = false;
+            reader.waiting_for_search = None;
             drop(readers);
             let (sound, volume, pitch) = if settings {
                 ("minecraft:block.note_block.harp", 0.7, 0.7)
@@ -411,6 +499,11 @@ impl Guide {
             return;
         };
         let mut path = view.path;
+        if matches!(path.first(), Some(Page::Cheat)) && !can_cheat(host, player) {
+            host.close_menu(event.uuid);
+            let _ = player.tell(host, colored_label("&c只有二级及以上管理员可以使用作弊模式。"));
+            return;
+        }
         match action {
             Action::Push(page) => path.push(page),
             Action::Replace(page) => {
@@ -439,6 +532,25 @@ impl Guide {
             Action::TogglePreference(option) => {
                 self.learning.toggle(host, player, option);
             }
+            Action::EnterCheat => path = vec![Page::Cheat],
+            Action::LeaveCheat => path = self.last_path(player.uuid()),
+            Action::Grant(entry) => {
+                if !availability::world_enabled(host.dimension())
+                    || !Availability::for_dimension(host.dimension()).allows(entry)
+                {
+                    return;
+                }
+                if !matches!(entry.item.kind, Kind::Slimefun(_)) {
+                    let _ = player.tell(host, colored_label("&c多方块结构需要手动搭建。"));
+                    return;
+                }
+                if let Some(stack) = entry.item.kind.stack(host, 1) {
+                    if !give_cheat_item(host, player, &stack, event.mode == 1) {
+                        let _ = player.tell(host, colored_label("&c背包已满。"));
+                    }
+                }
+                return;
+            }
             Action::SearchPrompt => {
                 host.close_menu(event.uuid);
                 self.readers
@@ -446,8 +558,8 @@ impl Guide {
                     .unwrap()
                     .entry(event.uuid)
                     .or_default()
-                    .waiting_for_search = true;
-                let _ = player.tell(host, colored_label("&bWhat would you like to search for?"));
+                    .waiting_for_search = Some(path);
+                let _ = player.tell(host, colored_label("&b请在聊天栏输入要搜索的物品。"));
                 return;
             }
             Action::Link(url) => {
@@ -545,6 +657,7 @@ fn render(
     month: i32,
     show_hidden: bool,
     availability: Availability<'_>,
+    cheat: bool,
 ) -> Menu {
     let visible_entry = |entry: &&Entry| availability.allows(entry);
     let mut menu = Menu {
@@ -565,22 +678,26 @@ fn render(
         }
         menu.set(
             1,
-            icon(host, "minecraft:comparator", "&eSettings & Info", &[]),
-            Some(Action::Push(Page::Info)),
+            if cheat {
+                icon(host, "minecraft:enchanted_book", "&e返回生存指南", &[])
+            } else {
+                icon(host, "minecraft:comparator", "&e设置与关于", &[])
+            },
+            Some(if cheat { Action::LeaveCheat } else { Action::Push(Page::Info) }),
         );
         menu.set(
             7,
             icon(
                 host,
                 "minecraft:name_tag",
-                "&7Search...",
-                &["", "&7⇨ &bClick to search for an item"],
+                "&7搜索……",
+                &["", "&7⇨ &b点击搜索物品"],
             ),
             Some(Action::SearchPrompt),
         );
     }
     match screen {
-        Page::Main => {
+        Page::Main | Page::Cheat => {
             for (slot, group) in GROUPS
                 .iter()
                 .filter(|group| group.in_season(month))
@@ -591,6 +708,7 @@ fn render(
                     .parent
                     .and_then(|key| GROUPS.iter().find(|parent| parent.key == key))
                     .filter(|parent| {
+                        !cheat &&
                         !group_entries(parent)
                             .filter(visible_entry)
                             .all(|entry| unlocked(saved, entry))
@@ -600,16 +718,16 @@ fn render(
                     icon(
                         host,
                         "minecraft:barrier",
-                        &format!("&4Locked &7- &f{}", group.name),
+                        &format!("&4未解锁 &7- &f{}", group.name),
                         &[
                             "",
-                            "&fComplete these categories first:",
+                            "&f请先完成下列分类的研究：",
                             "",
                             &format!("&7{}", parent.name),
                         ],
                     )
                 } else {
-                    icon(host, group.icon, &name, &[])
+                    group_icon(host, group, &name)
                 };
                 menu.set(
                     9 + slot,
@@ -630,15 +748,15 @@ fn render(
                 .take(DISCOVERY_SLOTS)
                 .enumerate()
             {
-                if let Some(topic) = entry.research.filter(|_| !unlocked(saved, entry)) {
-                    let cost = format!("&7Cost: &b{} Level(s)", topic.cost);
+                if let Some(topic) = entry.research.filter(|_| !cheat && !unlocked(saved, entry)) {
+                    let cost = format!("&7需要 &b{} 级经验", topic.cost);
                     menu.set(
                         9 + slot,
                         icon(
                             host,
                             "minecraft:barrier",
                             &entry_name(entry),
-                            &["&4&lLocked", "", "&a> Click to unlock", "", &cost],
+                            &["&4&l未解锁", "", "&a点击解锁", "", &cost],
                         ),
                         Some(Action::Research(topic)),
                     );
@@ -646,7 +764,7 @@ fn render(
                     menu.set(
                         9 + slot,
                         entry_icon(host, entry),
-                        Some(Action::Push(Page::Recipe(entry))),
+                        Some(entry_action(entry, cheat)),
                     );
                 }
             }
@@ -668,7 +786,7 @@ fn render(
                             host,
                             "minecraft:barrier",
                             &entry_name(locked),
-                            &["&4&lLocked"],
+                            &["&4&l未解锁"],
                         ),
                         None,
                     );
@@ -687,21 +805,21 @@ fn render(
             menu.slots[2] = icon(
                 host,
                 "minecraft:knowledge_book",
-                "&cSlimefun4 Contributors",
+                "&cPigeonMoe 移植团队",
                 &[
                     "",
-                    "&7Slimefun is an open-source project",
-                    "&7maintained by a community of people.",
+                    "&7远古工艺由 PigeonMoe 移植至 Horizon。",
+                    "&7感谢原版开发者和社区贡献者。",
                 ],
             );
             let game = format!("&fMinecraft: &a{}", host.game_version());
-            let plugin = format!("&fSlimefun: &a{}", env!("CARGO_PKG_VERSION"));
+            let plugin = format!("&f远古工艺：&a{}", env!("CARGO_PKG_VERSION"));
             menu.slots[4] = icon(
                 host,
                 "minecraft:writable_book",
-                "&aInstalled versions",
+                "&a已安装版本",
                 &[
-                    "&7&oThese are very important when reporting bugs!",
+                    "&7&o反馈问题时请附上版本信息。",
                     "",
                     &game,
                     &plugin,
@@ -711,23 +829,23 @@ fn render(
                 (
                     6,
                     "minecraft:comparator",
-                    "&eSource Code",
-                    "https://github.com/Slimefun/Slimefun4",
-                    "&7⇨ &eClick to go to GitHub",
+                    "&ePigeonMoe 源码与贡献者",
+                    "https://github.com/PigeonMoe/Slimefun/tree/Horizon",
+                    "&7⇨ &e点击打开移植仓库",
                 ),
                 (
                     8,
                     "minecraft:knowledge_book",
-                    "&3Slimefun4 Wiki",
+                    "&3远古工艺原版文档",
                     "https://github.com/Slimefun/Slimefun4/wiki",
-                    "&7⇨ &eClick to go to the official Slimefun Wiki",
+                    "&7⇨ &e点击查看原版文档",
                 ),
                 (
                     47,
                     "minecraft:bookshelf",
-                    "&3Addons for Slimefun4",
+                    "&3远古工艺原版附属",
                     "https://github.com/Slimefun/Slimefun4/wiki/Addons",
-                    "&7⇨ &eClick to see all available addons for Slimefun4",
+                    "&7⇨ &e点击查看原版附属列表",
                 ),
             ] {
                 menu.set(
@@ -749,7 +867,7 @@ fn render(
                         Tag::List(vec![Tag::String("".into()), group]),
                     )]));
                 }
-                menu.set(9 + slot, item, Some(Action::Push(Page::Recipe(entry))));
+                menu.set(9 + slot, item, Some(entry_action(entry, cheat)));
             }
         }
     }
@@ -788,7 +906,7 @@ fn search_title(query: &str) -> String {
             .collect();
         plain.push_str("...");
     }
-    format!("Searching for: {plain}")
+    format!("搜索：{plain}")
 }
 
 fn search_matches(
@@ -798,13 +916,20 @@ fn search_matches(
     availability: Availability<'_>,
 ) -> impl Iterator<Item = (&'static Group, &'static Entry)> {
     let query = strip_colors(query).to_lowercase();
+    let id_query = query.replace(' ', "_");
     GROUPS
         .iter()
         .filter(move |group| show_hidden || group.in_season(month))
         .flat_map(|group| named_group_entries(group).map(move |(id, entry)| (group, id, entry)))
         .filter(move |(_, _, entry)| availability.allows_search(entry))
         .filter_map(move |(group, id, entry)| {
-            (id.to_ascii_lowercase().contains(&query)
+            (id.to_ascii_lowercase().contains(&id_query)
+                || strip_colors(entry.label.unwrap_or_else(|| match entry.item.kind {
+                    Kind::Slimefun(item) => item.name,
+                    Kind::Vanilla(_) | Kind::Potion(_) => entry.id,
+                }))
+                    .to_lowercase()
+                    .contains(&query)
                 || strip_colors(&entry_name(entry))
                     .to_lowercase()
                     .contains(&query))
@@ -829,10 +954,10 @@ fn pagination(host: &dyn Host, menu: &mut Menu, group: &'static Group, page: usi
     for (slot, label, next) in [
         (
             46,
-            "&f⇦ Previous Page",
+            "&f⇦ 上一页",
             page.checked_sub(1).filter(|page| *page > 0),
         ),
-        (52, "&fNext Page ⇨", (page < pages).then_some(page + 1)),
+        (52, "&f下一页 ⇨", (page < pages).then_some(page + 1)),
     ] {
         if let Some(next) = next {
             menu.set(
@@ -849,11 +974,80 @@ fn pagination(host: &dyn Host, menu: &mut Menu, group: &'static Group, page: usi
     }
 }
 
+fn entry_action(entry: &'static Entry, cheat: bool) -> Action {
+    if cheat {
+        Action::Grant(entry)
+    } else {
+        Action::Push(Page::Recipe(entry))
+    }
+}
+
+fn guide_stack(host: &dyn Host, kind: Kind, count: u32) -> Option<ItemStack> {
+    let stack = kind.stack(host, count)?;
+    match kind {
+        Kind::Slimefun(item) => locale::item_icon(stack, item.id),
+        _ => Some(stack),
+    }
+}
+
+// The Paper categories use these actual item templates and seasonal head skins.
+const CHRISTMAS_ICON: HeadTexture = HeadTexture {
+    profile: [696803316, -1167118050, -1409946767, -1076270746],
+    value: "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHA6Ly90ZXh0dXJlcy5taW5lY3JhZnQubmV0L3RleHR1cmUvMjE1YmEzMWNkZTI2NzFiOGYxNzZkZTZhOWZmZDAwODAzNWYwNTkwZDYzZWUyNDBiZTZlODkyMWNkMjAzN2E0NSJ9fX0=",
+};
+
+const VALENTINES_ICON: HeadTexture = HeadTexture {
+    profile: [-1545001755, -1935133338, -1537546858, 312205723],
+    value: "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHA6Ly90ZXh0dXJlcy5taW5lY3JhZnQubmV0L3RleHR1cmUvNTVkODk0MzFkMTRiZmVmMjA2MDQ2MWI0YTM1NjU2MTRkYzUxMTE1YzAwMWZhZTI1MDhlODY4NGJjMGFlNmE4MCJ9fX0=",
+};
+
+fn group_icon(host: &dyn Host, group: &Group, name: &str) -> Option<ItemStack> {
+    let paper_item = match group.key {
+        "weapons" => "BLADE_OF_VAMPIRES",
+        "tools" => "SMELTERS_PICKAXE",
+        "usefulItems" => "MEDIUM_BACKPACK",
+        "resources" => "SYNTHETIC_SAPPHIRE",
+        "food" => "FORTUNE_COOKIE",
+        "armor" => "DAMASCUS_STEEL_CHESTPLATE",
+        "magicalResources" => "ENDER_RUNE",
+        "magicalGadgets" => "INFUSED_ELYTRA",
+        "magicalArmor" => "ENDER_HELMET",
+        "misc" => "CAN",
+        "technicalComponents" => "HEATING_COIL",
+        "technicalGadgets" => "STEEL_JETPACK",
+        "gps" => "GPS_TRANSMITTER",
+        "electricity" => "NUCLEAR_REACTOR",
+        "androids" => "PROGRAMMABLE_ANDROID",
+        "cargo" => "CARGO_MANAGER",
+        "easter" => "EASTER_EGG",
+        _ => "",
+    };
+    if let Some(mut stack) = lookup(paper_item).and_then(|entry| entry.item.kind.stack(host, 1)) {
+        stack.apply_components(&Compound::from([
+            ("minecraft:custom_name".into(), colored_lore(name)),
+            ("minecraft:lore".into(), Tag::List(vec![])),
+        ])).ok()?;
+        return Some(stack);
+    }
+    let mut stack = icon(host, group.icon, name, &[])?;
+    let seasonal = match group.key {
+        "christmas" => Some(&CHRISTMAS_ICON),
+        "valentinesDay" => Some(&VALENTINES_ICON),
+        _ => None,
+    };
+    if let Some(texture) = seasonal {
+        stack
+            .apply_components(&Compound::from([("minecraft:profile".into(), texture.component())]))
+            .ok()?;
+    }
+    Some(stack)
+}
+
 fn method_icon(host: &dyn Host, entry: &Entry) -> Option<ItemStack> {
     let method = entry.recipe_type;
     if matches!(method.icon, Kind::Vanilla(_)) {
         let lore = if entry.label.is_some() {
-            &["", "&a&oBuild it in the World"][..]
+            &["", "&a&o请在世界中搭建"][..]
         } else {
             method.lore
         };
@@ -864,7 +1058,7 @@ fn method_icon(host: &dyn Host, entry: &Entry) -> Option<ItemStack> {
             lore,
         );
     }
-    let mut stack = method.icon.stack(host, 1)?;
+    let mut stack = guide_stack(host, method.icon, 1)?;
     if !method.lore.is_empty() {
         let mut lore = stack
             .components()
@@ -891,24 +1085,12 @@ fn ingredient_icon(
     index: usize,
     item: crate::recipes::Stack,
 ) -> Option<ItemStack> {
-    let mut stack = item.kind.stack(host, item.count)?;
+    let mut stack = guide_stack(host, item.kind, item.count)?;
     if let Some(visual) = entry.visuals.iter().find(|visual| visual.slot == index) {
         let mut parts =
             Compound::from([("minecraft:custom_name".into(), colored_lore(visual.label))]);
         if let Some(profile) = &visual.profile {
-            parts.insert(
-                "minecraft:profile".into(),
-                Tag::compound([
-                    ("id", Tag::IntArray(profile.profile.to_vec())),
-                    (
-                        "properties",
-                        Tag::List(vec![Tag::compound([
-                            ("name", Tag::String("textures".into())),
-                            ("value", Tag::String(profile.value.into())),
-                        ])]),
-                    ),
-                ]),
-            );
+            parts.insert("minecraft:profile".into(), profile.component());
         }
         stack.apply_components(&parts).ok()?;
     }
@@ -916,6 +1098,9 @@ fn ingredient_icon(
 }
 
 fn entry_name(entry: &Entry) -> String {
+    if let Some(name) = locale::item_name(entry.id) {
+        return name.to_owned();
+    }
     match entry.label {
         Some(label) => label.to_owned(),
         None => match entry.item.kind {
@@ -928,10 +1113,10 @@ fn entry_name(entry: &Entry) -> String {
 }
 
 fn entry_icon(host: &dyn Host, entry: &Entry) -> Option<ItemStack> {
-    if let Some(label) = entry.label {
-        return icon(host, entry.item.kind.material(), label, &[]);
+    if entry.label.is_some() {
+        return icon(host, entry.item.kind.material(), &entry_name(entry), &[]);
     }
-    entry.item.kind.stack(host, entry.item.count)
+    guide_stack(host, entry.item.kind, entry.item.count)
 }
 
 fn icon(host: &dyn Host, material: &'static str, name: &str, lore: &[&str]) -> Option<ItemStack> {
@@ -950,6 +1135,7 @@ fn icon(host: &dyn Host, material: &'static str, name: &str, lore: &[&str]) -> O
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mod_api::prelude::ItemsHost;
     use mod_api::{Identifier, prelude::PlayersHost, testing::FakeHost};
 
     #[test]
@@ -1068,7 +1254,7 @@ mod tests {
             .iter()
             .find(|group| group.key == "basicMachines")
             .unwrap();
-        let menu = render(&host, None, &Page::Group(basic, 1), 1, false, available());
+        let menu = render(&host, None, &Page::Group(basic, 1), 1, false, available(), false);
         assert_eq!(menu.slots.len(), 54);
         let craft = lookup("ENHANCED_CRAFTING_TABLE").unwrap();
         assert!(menu.actions.iter().any(|action| matches!(
@@ -1088,12 +1274,13 @@ mod tests {
             1,
             false,
             available(),
+            false,
         );
         let grind = lookup("GRIND_STONE").unwrap();
         assert!(menu.actions.iter().any(|action| matches!(
             action, Some(Action::Push(Page::Recipe(entry))) if std::ptr::eq(*entry, grind)
         )));
-        let recipe = render(&host, None, &Page::Recipe(craft), 1, false, available());
+        let recipe = render(&host, None, &Page::Recipe(craft), 1, false, available(), false);
         let shown = |slot: usize| {
             recipe.slots[slot]
                 .as_ref()
@@ -1103,6 +1290,46 @@ mod tests {
         assert_eq!(shown(13).as_deref(), Some("minecraft:crafting_table"));
         assert_eq!(shown(16).as_deref(), Some("minecraft:crafting_table"));
         assert_eq!(shown(22).as_deref(), Some("minecraft:dispenser"));
+    }
+
+    #[test]
+    fn chinese_icons_keep_the_original_skin_and_cheat_items_keep_the_original_stack() {
+        mod_api::__private::initialize().unwrap();
+        let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
+        let mut host = FakeHost::new();
+        host.registries
+            .resolve_items(
+                ["minecraft:player_head", "minecraft:stone"]
+                    .map(|material| Identifier::parse(material).unwrap()),
+            )
+            .unwrap();
+        let level = host.level.level();
+        host.players.join(1, 100, level);
+        let player = host.player(1).unwrap();
+        let entry = lookup("PORTABLE_CRAFTER").unwrap();
+        let normal = entry.item.kind.stack(&host, 1).unwrap();
+        let displayed = entry_icon(&host, entry).unwrap();
+        let parts = |stack: ItemStack| stack.components().unwrap().as_nbt().clone();
+        let original = parts(normal.clone());
+        let displayed = parts(displayed);
+        let profile = &"minecraft:profile".into();
+        assert!(original.get(profile).is_some());
+        assert_eq!(displayed.get(profile), original.get(profile));
+        assert_eq!(
+            displayed.get(&"minecraft:custom_name".into()),
+            Some(&colored_lore(locale::item_name(entry.id).unwrap())),
+        );
+        assert!(search_matches("便携工作台", 1, false, available())
+            .any(|(_, result)| result.id == entry.id));
+        assert!(matches!(entry_action(entry, true), Action::Grant(item) if item.id == entry.id));
+
+        let stone = Kind::Vanilla("minecraft:stone").stack(&host, 64).unwrap();
+        host.players.get_mut(1).unwrap().slots.insert(0, stone);
+        assert!(give_cheat_item(&mut host, player, &normal, true));
+        let inventory = host.players.get(1).unwrap();
+        assert!(inventory.given.is_empty());
+        assert!(ItemResource::of(&normal).matches(&inventory.slots[&1]));
+        assert_eq!(inventory.slots[&1].count(), host.max_stack_size(normal.item()).unwrap());
     }
 
     #[test]
@@ -1137,7 +1364,7 @@ mod tests {
             .resolve_items(MATERIALS.iter().map(|id| Identifier::parse(id).unwrap()))
             .unwrap();
         let table = lookup("TABLE_SAW").unwrap();
-        let menu = render(&host, None, &Page::Recipe(table), 1, false, available());
+        let menu = render(&host, None, &Page::Recipe(table), 1, false, available(), false);
         for (slot, material) in [
             (12, "smooth_stone_slab"),
             (13, "stonecutter"),
@@ -1165,7 +1392,7 @@ mod tests {
         ] {
             let miner = lookup(id).unwrap();
             assert_eq!(miner.research.unwrap().cost, cost);
-            let shown = render(&host, None, &Page::Recipe(miner), 1, false, available());
+            let shown = render(&host, None, &Page::Recipe(miner), 1, false, available(), false);
             assert_eq!(
                 shown.slots[13].as_ref().unwrap().item().id(&host),
                 "minecraft:chest"
@@ -1180,7 +1407,7 @@ mod tests {
                 let parts = shown.slots[slot].as_ref().unwrap().components().unwrap();
                 assert_eq!(
                     parts.as_nbt().get(&"minecraft:custom_name".into()),
-                    Some(&colored_lore("Piston (facing up)"))
+                    Some(&colored_lore("活塞（朝上）"))
                 );
             }
         }
@@ -1189,26 +1416,26 @@ mod tests {
             assert_eq!(food.item.count, 2);
             assert_eq!(food.ingredients[0].unwrap().kind, crate::food_machines::CAN);
             assert_eq!(food.ingredients[1].unwrap().kind, row.crop);
-            assert_eq!(food.recipe_type.name, "Food Fabricator");
+            assert_eq!(food.recipe_type.name, "食物加工机");
             assert_eq!(food.research.unwrap().id, "organic_food");
             let fertilizer = lookup(row.fertilizer.id()).unwrap();
             assert_eq!(fertilizer.item.count, 2);
             assert_eq!(fertilizer.ingredients[0].unwrap().kind, row.food);
-            assert_eq!(fertilizer.recipe_type.name, "Food Composter");
+            assert_eq!(fertilizer.recipe_type.name, "食物堆肥机");
             assert_eq!(fertilizer.research.unwrap().id, "organic_fertilizer");
         }
         let tin = lookup("TIN_DUST").unwrap();
-        assert_eq!(tin.recipe_type.name, "Ore Washer");
+        assert_eq!(tin.recipe_type.name, "洗矿机");
         assert_eq!(tin.ingredients[0].unwrap().kind, crate::items::SIFTED_ORE);
         let sifted = lookup("SIFTED_ORE").unwrap();
-        assert_eq!(sifted.recipe_type.name, "Gold Pan");
+        assert_eq!(sifted.recipe_type.name, "淘金盘");
         assert_eq!(
             sifted.ingredients[0].unwrap().kind.material(),
             "minecraft:gravel"
         );
         assert_eq!(sifted.research.unwrap().id, "ore_washer");
         let circuit = lookup("BASIC_CIRCUIT_BOARD").unwrap();
-        let shown = render(&host, None, &Page::Recipe(circuit), 1, false, available());
+        let shown = render(&host, None, &Page::Recipe(circuit), 1, false, available(), false);
         let head = shown.slots[13].as_ref().unwrap();
         assert_eq!(head.item().id(&host), "minecraft:player_head");
         assert!(
@@ -1251,10 +1478,10 @@ mod tests {
             .count(),
             0
         );
-        assert_eq!(search_title("§bCoal"), "Searching for: Coal");
+        assert_eq!(search_title("§bCoal"), "搜索：Coal");
         assert_eq!(
             search_title("012345678901234567890"),
-            "Searching for: 0123456789012345..."
+            "搜索：0123456789012345..."
         );
     }
 
@@ -1304,7 +1531,7 @@ mod tests {
             )
             .unwrap();
         let groups = |month, show_hidden| {
-            render(&host, None, &Page::Main, month, show_hidden, available())
+            render(&host, None, &Page::Main, month, show_hidden, available(), false)
                 .actions
                 .into_iter()
                 .filter_map(|action| match action {
@@ -1353,7 +1580,7 @@ mod tests {
                     path: history,
                     actions: std::array::from_fn(|_| None),
                 }),
-                waiting_for_search: false,
+                waiting_for_search: None,
             },
         );
         guide.closed(&MenuClosedEvent { uuid: 7, window: 2 });

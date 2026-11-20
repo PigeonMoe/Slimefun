@@ -7,7 +7,7 @@ use mod_api::{
     ServerHost, Tag,
 };
 
-use crate::recipes::Research;
+use crate::{guide::research_name, recipes::Research};
 
 const PERSISTED: &str = "PlayerPersisted";
 
@@ -34,13 +34,13 @@ pub(crate) fn unlocked_persisted(data: &Compound, research: &Research) -> bool {
 pub(crate) fn unlock(host: &mut dyn ServerHost, player: PlayerRef, research: &Research) -> String {
     let free = player.game_mode(host) == Some(GameMode::Creative);
     match begin(host, player, research, free, false) {
-        Ok(()) => format!("Researched {}.", research.name),
+        Ok(()) => format!("已解锁“{}”。", research_name(research.id)),
         Err(message) => message,
     }
 }
 
 const PENDING: &str = "slimefun:pending_research";
-const UPDATE_ERROR: &str = "Slimefun could not update your research data.";
+const UPDATE_ERROR: &str = "远古工艺无法更新你的研究数据。";
 
 fn saved_data(data: &mut Compound) -> Option<&mut Compound> {
     let Tag::Compound(saved) = data
@@ -61,11 +61,11 @@ fn mark_learned(data: &mut Compound, research: &Research) {
 
 fn store_payment(data: &mut Compound, research: &Research, delayed: bool) -> Result<(), String> {
     if unlocked(data, research) {
-        return Err(format!("Already researched {}.", research.name));
+        return Err(format!("已解锁“{}”。", research_name(research.id)));
     }
     let saved = saved_data(data).ok_or(UPDATE_ERROR)?;
     if saved.contains_key(&PENDING.into()) {
-        return Err("Finish your current research first.".into());
+        return Err("请先完成当前研究。".into());
     }
     if delayed {
         saved.insert(
@@ -92,18 +92,18 @@ pub(crate) fn begin(
 ) -> Result<(), String> {
     let mut data = player
         .persistent_data(host)
-        .ok_or("Slimefun could not read your research data.")?;
+        .ok_or("远古工艺无法读取你的研究数据。")?;
     store_payment(&mut data, research, delayed)?;
     let experience = if free {
         None
     } else {
         let experience = player
             .experience(host)
-            .ok_or("Slimefun could not read your experience.")?;
+            .ok_or("远古工艺无法读取你的经验。")?;
         if experience.level < research.cost {
             return Err(format!(
-                "{} costs {} experience levels.",
-                research.name, research.cost
+                "解锁“{}”需要 {} 级经验。",
+                research_name(research.id), research.cost
             ));
         }
         Some(experience.level - research.cost)

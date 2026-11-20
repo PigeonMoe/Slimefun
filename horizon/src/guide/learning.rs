@@ -6,13 +6,14 @@ use std::{collections::BTreeMap, sync::Mutex};
 
 use mod_api::{Compound, GameMode, Host, Identifier, PlayerRef, ServerHost, SoundSource, Tag};
 
-use super::{Page, catalog, colored_label};
+use super::{Page, catalog, colored_label, research_name};
 use crate::{random::Rolls, recipes::Research, research};
 
 pub(super) use fireworks::research_rocket;
 pub(crate) use fireworks::launch_random as launch_random_fireworks;
 const PERSISTED: &str = "PlayerPersisted";
 const PROGRESS: [(u32, u8); 6] = [(5, 0), (20, 23), (40, 44), (60, 57), (80, 92), (100, 100)];
+const COMPLETION_DISPLAY_TICKS: u32 = 20;
 
 #[derive(Clone, Copy)]
 pub(super) enum Preference {
@@ -130,7 +131,7 @@ impl Learning {
             return false;
         }
         if !delayed {
-            self.announce_completion(host, player, topic.name);
+            self.announce_completion(host, player, research_name(topic.id));
             return true;
         }
         self.active.lock().unwrap().insert(
@@ -142,10 +143,7 @@ impl Learning {
                 return_path: Some(path.to_vec()),
             },
         );
-        let _ = player.tell(
-            host,
-            colored_label("&7The Ancient Spirits whisper mysterious words into your ear!"),
-        );
+        host.close_menu(player.uuid());
         false
     }
 
@@ -180,6 +178,13 @@ impl Learning {
         let (topic, step, percent) = {
             let mut active = self.active.lock().unwrap();
             let study = active.get_mut(&uuid)?;
+            if study.step == PROGRESS.len() {
+                study.elapsed += 1;
+                if study.elapsed >= PROGRESS[PROGRESS.len() - 1].0 + COMPLETION_DISPLAY_TICKS {
+                    return active.remove(&uuid)?.return_path;
+                }
+                return None;
+            }
             let (deadline, percent) = PROGRESS[study.step];
             study.elapsed = (study.elapsed + 1).min(deadline);
             if study.elapsed < deadline {
@@ -205,19 +210,22 @@ impl Learning {
                     0.7,
                     1.0,
                 );
-                let _ = player.tell(
-                    host,
-                    colored_label(&format!(
-                        "&7You start to wonder about &b{} &e({percent}%)",
-                        topic.name,
-                    )),
-                );
+                let title = colored_label(&format!("&b正在解锁“{}”", research_name(topic.id)));
+                let subtitle = colored_label(&format!("&e进度：{percent}%"));
+                let _ = player.title(host, &title, &subtitle, [0, 25, 5]);
                 None
             }
             Ok(true) => {
-                let study = self.active.lock().unwrap().remove(&uuid);
-                self.announce_completion(host, player, topic.name);
-                study?.return_path
+                let name = research_name(topic.id);
+                let title = colored_label(&format!("&a已解锁“{name}”"));
+                let subtitle = colored_label(&format!("&e进度：{percent}%"));
+                let _ = player.title(host, &title, &subtitle, [0, COMPLETION_DISPLAY_TICKS as i32, 0]);
+                self.announce_completion(host, player, name);
+                let mut active = self.active.lock().unwrap();
+                if let Some(study) = active.get_mut(&uuid) {
+                    study.step = PROGRESS.len();
+                }
+                None
             }
         }
     }
@@ -233,7 +241,7 @@ impl Learning {
         }
         let _ = player.tell(
             host,
-            colored_label(&format!("&bYou have unlocked &7\"{name}\"")),
+            colored_label(&format!("&b已解锁“{name}”")),
         );
     }
 
@@ -293,10 +301,11 @@ mod tests {
         BackendMutRef, BackendRef, PlayerDataRefusal, PlayerExperience, Text, TextFormError,
         TransactionSeal,
         prelude::{
-            ModStateServerHost, PlayersBackend, PlayersBackendMut, PlayersClientBackend,
+            MenusServerHost, ModStateServerHost, PlayersBackend, PlayersBackendMut, PlayersClientBackend,
             PlayersHost,
         },
         testing::{FakeHost, FakeJournal},
+        text::TextContent,
     };
 
     struct StudyHost {
@@ -305,6 +314,8 @@ mod tests {
         deny_experience_write: bool,
         sounds: usize,
         messages: usize,
+        titles: Vec<(String, String)>,
+        permission: u8,
     }
 
     impl Host for StudyHost {
@@ -320,14 +331,21 @@ mod tests {
     }
 
     mod_api::impl_host_areas!(StudyHost);
-    mod_api::impl_server_host_areas!(StudyHost, except(mod_state));
+    mod_api::impl_server_host_areas!(StudyHost, except(mod_state, menus));
     mod_api::impl_backend_areas!(StudyHost, except(players));
     mod_api::impl_backend_mut_areas!(StudyHost, except(players));
     impl mod_api::Backend for StudyHost {}
     impl mod_api::BackendMut for StudyHost {}
     impl PlayersClientBackend for StudyHost {}
+    impl MenusServerHost for StudyHost {
+        fn close_menu(&mut self, _: u128) {}
+    }
 
     impl PlayersBackend for StudyHost {
+        fn player_permission_level(&self, _: PlayerRef) -> Option<u8> {
+            Some(self.permission)
+        }
+
         fn player_game_mode(&self, _: PlayerRef) -> Option<GameMode> {
             Some(GameMode::Survival)
         }
@@ -375,6 +393,19 @@ mod tests {
             Ok(true)
         }
 
+        fn player_title(
+            &mut self, _: PlayerRef, title: &Text, subtitle: &Text, _: [i32; 3],
+        ) -> Result<bool, TextFormError> {
+            fn line(text: &Text) -> String {
+                text.children.iter().filter_map(|child| match &child.content {
+                    TextContent::Literal(text) => Some(text.as_str()),
+                    _ => None,
+                }).collect()
+            }
+            self.titles.push((line(title), line(subtitle)));
+            Ok(true)
+        }
+
         fn player_play_sound(
             &mut self,
             _: PlayerRef,
@@ -402,6 +433,8 @@ mod tests {
 
     #[test]
     fn failed_payment_rolls_back_and_resume_only_finishes_the_already_paid_research() {
+        mod_api::__private::initialize().unwrap();
+        let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
         let mut identity = FakeHost::new();
         identity.join(1, 100);
         let player = identity.player(1).unwrap();
@@ -412,7 +445,12 @@ mod tests {
             deny_experience_write: true,
             sounds: 0,
             messages: 0,
+            titles: vec![],
+            permission: 1,
         };
+        assert!(!super::super::can_cheat(&host, player));
+        host.permission = 2;
+        assert!(super::super::can_cheat(&host, player));
 
         let guide = Learning::default();
         assert!(!guide.start(&mut host, player, topic, &[Page::Main]));
@@ -443,6 +481,9 @@ mod tests {
         assert_eq!(research::pending(&host.state.0), None);
         assert_eq!(host.state.1, 4);
         assert_eq!(host.sounds, 5);
+        let name = research_name(topic.id);
+        assert_eq!(host.titles[0], (format!("正在解锁“{name}”"), "进度：0%".into()));
+        assert_eq!(host.titles.last().unwrap(), &(format!("已解锁“{name}”"), "进度：100%".into()));
     }
 
     #[test]

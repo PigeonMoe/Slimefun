@@ -28,48 +28,48 @@ impl RecipeType {
 }
 
 pub(super) const ENHANCED_CRAFTING: RecipeType =
-    RecipeType::plain("minecraft:crafting_table", "Enhanced Crafting Table");
-const MAGIC_WORKBENCH: RecipeType = RecipeType::plain("minecraft:bookshelf", "Magic Workbench");
-const ARMOR_FORGE: RecipeType = RecipeType::plain("minecraft:anvil", "Armor Forge");
-const ANCIENT_ALTAR: RecipeType = RecipeType::plain("minecraft:enchanting_table", "Ancient Altar");
-const SMELTERY: RecipeType = RecipeType::plain("minecraft:furnace", "Smeltery");
-const MULTIBLOCK: RecipeType = RecipeType::plain("minecraft:bricks", "MultiBlock");
+    RecipeType::plain("minecraft:crafting_table", "增强型工作台");
+const MAGIC_WORKBENCH: RecipeType = RecipeType::plain("minecraft:crafting_table", "魔法工作台");
+const ARMOR_FORGE: RecipeType = RecipeType::plain("minecraft:anvil", "盔甲锻造台");
+const ANCIENT_ALTAR: RecipeType = RecipeType::plain("minecraft:enchanting_table", "古代祭坛");
+const SMELTERY: RecipeType = RecipeType::plain("minecraft:furnace", "冶炼炉");
+const MULTIBLOCK: RecipeType = RecipeType::plain("minecraft:bricks", "多方块结构");
 
 const WASHER: RecipeType = RecipeType {
-    lore: &["", "&a&oWash it in an Ore Washer"],
-    ..RecipeType::plain("minecraft:cauldron", "Ore Washer")
+    lore: &["", "&a&o使用洗矿机清洗"],
+    ..RecipeType::plain("minecraft:cauldron", "洗矿机")
 };
 const GOLD_PAN: RecipeType = RecipeType {
     icon: items::GOLD_PAN,
-    name: "Gold Pan",
-    lore: &["", "&a&oUse a Gold Pan on Gravel to obtain this Item"],
+    name: "淘金盘",
+    lore: &["", "&a&o对砂砾使用淘金盘即可获得"],
 };
 const MOB_DROP: RecipeType = RecipeType {
-    lore: &["", "&rKill the specified Mob to obtain this Item"],
-    ..RecipeType::plain("minecraft:iron_sword", "Mob Drop")
+    lore: &["", "&r击杀指定生物即可获得"],
+    ..RecipeType::plain("minecraft:iron_sword", "生物掉落")
 };
 const BARTER_DROP: RecipeType = RecipeType {
     lore: &[
         "",
-        "&aBarter with piglins for a chance",
-        "&ato obtain this item",
+        "&a与猪灵交易",
+        "&a有概率获得此物品",
     ],
     ..RecipeType::plain("minecraft:gold_ingot", "Barter Drop")
 };
 const FOOD_FABRICATOR: RecipeType = RecipeType {
     icon: food_machines::FOOD_FABRICATOR,
-    name: "Food Fabricator",
+    name: "食物加工机",
     lore: &[],
 };
 const FOOD_COMPOSTER: RecipeType = RecipeType {
     icon: food_machines::FOOD_COMPOSTER,
-    name: "Food Composter",
+    name: "食物堆肥机",
     lore: &[],
 };
 
 const IRON_GOLEM: &[IngredientVisual] = &[IngredientVisual {
     slot: 4,
-    label: "&aIron Golem",
+    label: "&a铁傀儡",
     profile: Some(items::HeadTexture {
         profile: [669471756, -955559616, -1944180456, -1177071508],
         value: "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHA6Ly90ZXh0dXJlcy5taW5lY3JhZnQubmV0L3RleHR1cmUvODkwOTFkNzllYTBmNTllZjdlZjk0ZDdiYmE2ZTVmMTdmMmY3ZDQ1NzJjNDRmOTBmNzZjNDgxOWE3MTQifX19",
@@ -78,7 +78,7 @@ const IRON_GOLEM: &[IngredientVisual] = &[IngredientVisual {
 
 const PIGLIN: &[IngredientVisual] = &[IngredientVisual {
     slot: 4,
-    label: "&fPiglin",
+    label: "&f猪灵",
     profile: Some(items::HeadTexture {
         profile: [1031950828, 1086148763, -1932514438, -1171656326],
         value: "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHA6Ly90ZXh0dXJlcy5taW5lY3JhZnQubmV0L3RleHR1cmUvMjg4MmFmMTI5NGE3NDAyM2U2OTE5YTMxZDFhMDI3MzEwZjJlMTQyYWZiNDY2N2QyMzBkMTU1ZTdmMjFkYmI0MSJ9fX0=",
@@ -94,12 +94,12 @@ pub(super) struct IngredientVisual {
 const FACED_PISTONS: &[IngredientVisual] = &[
     IngredientVisual {
         slot: 3,
-        label: "Piston (facing up)",
+        label: "活塞（朝上）",
         profile: None,
     },
     IngredientVisual {
         slot: 5,
-        label: "Piston (facing up)",
+        label: "活塞（朝上）",
         profile: None,
     },
 ];
@@ -153,15 +153,15 @@ macro_rules! group {
 
 // ItemGroup sorts by the configured tier, then preserves first registration order.
 pub(super) const GROUPS: &[Group] = &[
-    group!("weapons", "Weapons", "golden_sword"),
-    group!("usefulItems", "Useful Items", "player_head"),
-    group!("basicMachines", "Basic Machines", "crafting_table"),
-    group!("tools", "Tools", "diamond_pickaxe"),
-    group!("resources", "Resources", "lapis_lazuli"),
-    group!("food", "Food", "cookie"),
+    group!("weapons", "武器", "golden_sword"),
+    group!("usefulItems", "实用物品", "player_head"),
+    group!("basicMachines", "基础机器", "crafting_table"),
+    group!("tools", "工具", "diamond_pickaxe"),
+    group!("resources", "资源", "lapis_lazuli"),
+    group!("food", "食物", "cookie"),
     group!(
         "birthday",
-        "TheBusyBiscuit's Birthday &7(26th October)",
+        "原作者生日 &7（10 月 26 日）",
         "firework_rocket",
         "green",
         None
@@ -169,7 +169,7 @@ pub(super) const GROUPS: &[Group] = &[
     .seasonal(10),
     group!(
         "christmas",
-        "Christmas &7(December only)",
+        "圣诞节 &7（12 月）",
         "player_head",
         "green",
         None
@@ -177,64 +177,64 @@ pub(super) const GROUPS: &[Group] = &[
     .seasonal(12),
     group!(
         "halloween",
-        "Halloween &7(31st October)",
+        "万圣节 &7（10 月 31 日）",
         "jack_o_lantern",
         "gold",
         None
     )
     .seasonal(10),
-    group!("magicalResources", "Magical Items", "firework_star"),
-    group!("magicalArmor", "Magical Armor", "diamond_helmet"),
-    group!("misc", "Miscellaneous", "player_head"),
-    group!("armor", "Armor", "chainmail_chestplate"),
-    group!("technicalComponents", "Technical Components", "blaze_rod"),
-    group!("easter", "Easter &7(April)", "player_head", "gold", None).seasonal(4),
+    group!("magicalResources", "魔法物品", "firework_star"),
+    group!("magicalArmor", "魔法防具", "diamond_helmet"),
+    group!("misc", "杂项用品", "player_head"),
+    group!("armor", "防具", "chainmail_chestplate"),
+    group!("technicalComponents", "科技零件", "blaze_rod"),
+    group!("easter", "复活节 &7（4 月）", "player_head", "gold", None).seasonal(4),
     group!(
         "valentinesDay",
-        "Valentine's Day &7(14th February)",
+        "情人节 &7（2 月 14 日）",
         "player_head",
         "light_purple",
         None
     )
     .seasonal(2),
-    group!("magicalGadgets", "Magical Gadgets", "elytra"),
+    group!("magicalGadgets", "魔法道具", "elytra"),
     group!(
         "technicalGadgets",
-        "Technical Gadgets",
+        "科技工具",
         "leather_chestplate"
     ),
-    group!("talismans", "Talismans - &aTier I", "emerald"),
+    group!("talismans", "护身符 &a（一级）", "emerald"),
     group!(
         "ender_talismans",
-        "Talismans - &aTier II",
+        "护身符 &a（二级）",
         "emerald",
         "gray",
         Some("talismans")
     ),
     group!(
         "gps",
-        "GPS-based Machines",
+        "定位设备",
         "player_head",
         "aqua",
         Some("basicMachines")
     ),
     group!(
         "electricity",
-        "Energy and Electricity",
+        "能源与电力",
         "player_head",
         "aqua",
         Some("basicMachines")
     ),
     group!(
         "androids",
-        "Programmable Androids",
+        "可编程机器人",
         "player_head",
         "red",
         Some("basicMachines")
     ),
     group!(
         "cargo",
-        "Cargo Management",
+        "货物管理",
         "player_head",
         "red",
         Some("basicMachines")
@@ -321,28 +321,28 @@ fn multiblocks(entries: &mut BTreeMap<String, Entry>) {
     for (id, name, icon, ingredients, research) in [
         (
             "ENHANCED_CRAFTING_TABLE",
-            "Enhanced Crafting Table",
+            "增强型工作台",
             "minecraft:crafting_table",
             &[(4, "minecraft:crafting_table"), (7, "minecraft:dispenser")][..],
             None,
         ),
         (
             "GRIND_STONE",
-            "Grind Stone",
+            "磨石",
             "minecraft:dispenser",
             &[(4, "minecraft:oak_fence"), (7, "minecraft:dispenser")],
             Some(&GRIND_STONE),
         ),
         (
             "ARMOR_FORGE",
-            "Armor Forge",
+            "盔甲锻造台",
             "minecraft:anvil",
             &[(4, "minecraft:anvil"), (7, "minecraft:dispenser")],
             Some(&armor_forge::FORGE_RESEARCH),
         ),
         (
             "ORE_CRUSHER",
-            "Ore Crusher",
+            "矿石粉碎机",
             "minecraft:dispenser",
             &[
                 (4, "minecraft:nether_brick_fence"),
@@ -354,7 +354,7 @@ fn multiblocks(entries: &mut BTreeMap<String, Entry>) {
         ),
         (
             "COMPRESSOR",
-            "Compressor",
+            "压缩机",
             "minecraft:piston",
             &[
                 (4, "minecraft:nether_brick_fence"),
@@ -366,7 +366,7 @@ fn multiblocks(entries: &mut BTreeMap<String, Entry>) {
         ),
         (
             "MAKESHIFT_SMELTERY",
-            "Makeshift Smeltery",
+            "简易冶炼炉",
             "minecraft:blast_furnace",
             &[
                 (1, "minecraft:oak_fence"),
@@ -379,7 +379,7 @@ fn multiblocks(entries: &mut BTreeMap<String, Entry>) {
         ),
         (
             "SMELTERY",
-            "Smeltery",
+            "冶炼炉",
             "minecraft:furnace",
             &[
                 (1, "minecraft:nether_brick_fence"),
@@ -392,7 +392,7 @@ fn multiblocks(entries: &mut BTreeMap<String, Entry>) {
         ),
         (
             "PRESSURE_CHAMBER",
-            "Pressure Chamber",
+            "压力舱",
             "minecraft:glass",
             &[
                 (0, "minecraft:smooth_stone_slab"),
@@ -409,7 +409,7 @@ fn multiblocks(entries: &mut BTreeMap<String, Entry>) {
         ),
         (
             "MAGIC_WORKBENCH",
-            "Magic Workbench",
+            "魔法工作台",
             "minecraft:crafting_table",
             &[
                 (6, "minecraft:bookshelf"),
@@ -420,7 +420,7 @@ fn multiblocks(entries: &mut BTreeMap<String, Entry>) {
         ),
         (
             "ORE_WASHER",
-            "Ore Washer",
+            "洗矿机",
             "minecraft:cauldron",
             &[
                 (1, "minecraft:dispenser"),
@@ -431,7 +431,7 @@ fn multiblocks(entries: &mut BTreeMap<String, Entry>) {
         ),
         (
             "TABLE_SAW",
-            "Table Saw",
+            "台锯",
             "minecraft:stonecutter",
             &[
                 (3, "minecraft:smooth_stone_slab"),
@@ -443,14 +443,14 @@ fn multiblocks(entries: &mut BTreeMap<String, Entry>) {
         ),
         (
             "AUTOMATED_PANNING_MACHINE",
-            "Automated Panning Machine",
+            "自动淘金机",
             "minecraft:bowl",
             &[(4, "minecraft:oak_trapdoor"), (7, "minecraft:cauldron")],
             Some(&recipes::AUTOMATED_PANNING_MACHINE),
         ),
         (
             "INDUSTRIAL_MINER",
-            "Industrial Miner",
+            "工业采矿机",
             "minecraft:golden_pickaxe",
             &[
                 (3, "minecraft:piston"),
@@ -464,7 +464,7 @@ fn multiblocks(entries: &mut BTreeMap<String, Entry>) {
         ),
         (
             "ADVANCED_INDUSTRIAL_MINER",
-            "Advanced Industrial Miner",
+            "高级工业采矿机",
             "minecraft:diamond_pickaxe",
             &[
                 (3, "minecraft:piston"),
@@ -478,7 +478,7 @@ fn multiblocks(entries: &mut BTreeMap<String, Entry>) {
         ),
         (
             "JUICER",
-            "Juicer",
+            "榨汁机",
             "minecraft:glass_bottle",
             &[
                 (1, "minecraft:glass"),
@@ -586,16 +586,16 @@ fn build() -> BTreeMap<String, Entry> {
             });
     }
     for (material, name, recipes) in [
-        ("minecraft:grindstone", "Grind Stone", recipes::GRINDING),
-        ("minecraft:iron_bars", "Ore Crusher", recipes::CRUSHING),
+        ("minecraft:dispenser", "磨石", recipes::GRINDING),
+        ("minecraft:dispenser", "矿石粉碎机", recipes::CRUSHING),
         (
-            "minecraft:nether_brick_fence",
-            "Compressor",
+            "minecraft:piston",
+            "压缩机",
             recipes::COMPRESSING,
         ),
-        ("minecraft:cauldron", "Pressure Chamber", recipes::PRESSING),
-        ("minecraft:glass_bottle", "Juicer", recipes::JUICING),
-        ("minecraft:cauldron", "Ore Washer", recipes::WASHING),
+        ("minecraft:glass", "压力舱", recipes::PRESSING),
+        ("minecraft:glass_bottle", "榨汁机", recipes::JUICING),
+        ("minecraft:cauldron", "洗矿机", recipes::WASHING),
     ] {
         for recipe in recipes {
             if matches!(recipe.output.kind, Kind::Slimefun(_)) {

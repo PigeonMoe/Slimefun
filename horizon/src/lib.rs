@@ -980,10 +980,10 @@ impl Hooks for Slimefun {
                         self.guide.search(host, *player, query);
                     }
                     (CommandSource::Player { .. }, _) => {
-                        let _ = host.commands().feedback(Text::literal("Usage: /sf search <SearchTerm>"));
+                        let _ = host.commands().feedback(Text::literal("用法：/sf search <关键词>"));
                     }
                     _ => {
-                        let _ = host.commands().feedback(Text::literal("Only players can use this command."));
+                        let _ = host.commands().feedback(Text::literal("只有玩家可以使用此命令。"));
                     }
                 }
                 return Flow::Cancel;
@@ -996,7 +996,7 @@ impl Hooks for Slimefun {
                         self.guide.open(host, player);
                     }
                 } else {
-                    let _ = host.commands().feedback(Text::literal("Only players can use this command."));
+                    let _ = host.commands().feedback(Text::literal("只有玩家可以使用此命令。"));
                 }
                 return Flow::Cancel;
             }
@@ -1021,7 +1021,7 @@ impl Hooks for Slimefun {
             Some("status") => {
                 let tickers = ticker_policy::Tickers::current();
                 vec![format!(
-                    "Slimefun Horizon development | Grind Stone {} | Enhanced Crafting Table {} | Ore Crusher {} | Compressor {} | Pressure Chamber {} | Juicer {} | Ore Washer {} dusts and {} recipes | Smeltery {} recipes | Research {}",
+                    "远古工艺 Horizon 移植版｜磨石 {}｜增强型工作台 {}｜矿石粉碎机 {}｜压缩机 {}｜压力舱 {}｜榨汁机 {}｜洗矿机 {} 种矿粉、{} 个配方｜冶炼炉 {} 个配方｜研究 {} 项",
                     GRINDING.len(),
                     crafting().filter(|recipe| availability::recipe_registered(tickers, recipe.output.kind)).count(),
                     CRUSHING.len() + DOUBLING.len(),
@@ -1049,12 +1049,12 @@ impl Hooks for Slimefun {
                 };
                 let Some(research) = available().find(|research| research.id.eq_ignore_ascii_case(id)) else {
                     let ids = available().map(|research| research.id).collect::<Vec<_>>().join(", ");
-                    let _ = host.commands().feedback(Text::literal(format!("Available research includes {ids}.")));
+                    let _ = host.commands().feedback(Text::literal(format!("可解锁的研究编号：{ids}")));
                     return Flow::Cancel;
                 };
                 match *event.source {
                     CommandSource::Player { player, .. } => vec![research::unlock(host, player, research)],
-                    _ => vec!["A player must unlock their own research.".into()],
+                    _ => vec!["研究必须由玩家本人解锁。".into()],
                 }
             }
             None => vec![
@@ -1161,7 +1161,7 @@ impl Hooks for Slimefun {
                 return Flow::Cancel;
             }
             self.climbing.use_on(host, player, event, &self.rolls);
-            if self.guide.right_click(host, player, held) {
+            if self.guide.right_click(host, player, event.click.hand, held) {
                 *event.cancellation_result = InteractionResult::Consume;
                 return Flow::Cancel;
             }
@@ -1415,7 +1415,7 @@ impl Hooks for Slimefun {
             *event.cancellation_result = InteractionResult::Fail;
             return Flow::Cancel;
         }
-        if self.guide.right_click(host, player, event.click.stack)
+        if self.guide.right_click(host, player, event.click.hand, event.click.stack)
             || self.item_clicks.consume_fallthrough(
                 host,
                 event.click.player,

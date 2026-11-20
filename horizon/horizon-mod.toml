@@ -1,8 +1,8 @@
 id = "slimefun"
-name = "Slimefun"
-version = "0.1.0-dev.5"
-description = "PigeonMoe's Slimefun server mod for Horizon 26.3. Development build of the Paper machines, energy, cargo and inventory port."
-authors = ["Slimefun contributors", "PigeonMoe"]
+name = "远古工艺"
+version = "0.1.0-dev.6"
+description = "由 PigeonMoe 移植至 Horizon 26.3 的远古工艺服务端模组。"
+authors = ["PigeonMoe", "Slimefun contributors"]
 api = "0.2"
 side = "server"
 capabilities = ["registries"]

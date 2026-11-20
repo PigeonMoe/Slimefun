@@ -1,5 +1,5 @@
-title = "Slimefun"
-description = "查看 Horizon 移植预览的功能状态。"
+title = "远古工艺"
+description = "查看 PigeonMoe 的 Horizon 移植版运行状态。"
 
 [[actions]]
 id = "status"
