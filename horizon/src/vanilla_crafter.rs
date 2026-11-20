@@ -6,8 +6,7 @@ use std::{
 };
 
 use mod_api::{
-    GameRuleValue, Host, Identifier, Ingredient, ItemResource, ItemStack, LevelRef, PlayerRef,
-    Recipe, RecipeInput,
+    Host, Identifier, Ingredient, ItemResource, ItemStack, LevelRef, Recipe, RecipeInput,
 };
 
 const CRAFTING: &str = "minecraft:crafting";
@@ -155,35 +154,18 @@ pub(super) fn find(host: &dyn Host, id: &str) -> Option<Arc<VanillaRecipe>> {
     recipes(host).get(id).cloned()
 }
 
-pub(super) fn limited(host: &dyn Host, level: LevelRef) -> Result<bool, &'static str> {
-    match level.game_rule(host, "minecraft:limited_crafting") {
-        Ok(Some(GameRuleValue::Bool(enabled))) => Ok(enabled),
-        Ok(None) => Ok(false),
-        _ => Err("The world's limited crafting rule could not be read."),
-    }
-}
-
-pub(super) fn candidates(
-    host: &dyn Host,
-    level: LevelRef,
-    player: PlayerRef,
-    sample: &ItemStack,
-) -> Result<Vec<String>, &'static str> {
-    let limited = limited(host, level)?;
-    let all = recipes(host);
-    Ok(choices(all.values(), sample, |id| {
-        !limited || player.has_discovered_recipe(host, id) == Some(true)
-    }))
+pub(super) fn candidates(host: &dyn Host, sample: &ItemStack) -> Vec<String> {
+    // Paper reads the server recipe registry without using the player's recipe book.
+    choices(recipes(host).values(), sample)
 }
 
 fn choices<'a>(
     recipes: impl Iterator<Item = &'a Arc<VanillaRecipe>>,
     sample: &ItemStack,
-    allowed: impl Fn(&str) -> bool,
 ) -> Vec<String> {
     let result = ItemResource::of(sample);
     recipes
-        .filter(|recipe| result.matches(&recipe.output) && allowed(&recipe.id))
+        .filter(|recipe| result.matches(&recipe.output))
         .map(|recipe| recipe.id.clone())
         .collect()
 }
@@ -215,7 +197,7 @@ mod tests {
     }
 
     #[test]
-    fn selection_checks_result_components_and_recipe_discovery() {
+    fn selection_checks_result_components_across_the_server_recipe_list() {
         let mut host = FakeHost::new();
         let stick = Identifier::parse("minecraft:stick").unwrap();
         host.registries.resolve_items([stick.clone()]).unwrap();
@@ -242,11 +224,7 @@ mod tests {
             make("demo:b", plain.clone()),
             make("demo:c", renamed.clone()),
         ];
-        assert_eq!(choices(list.iter(), &plain, |_| true), ["demo:a", "demo:b"]);
-        assert_eq!(
-            choices(list.iter(), &plain, |id| id == "demo:b"),
-            ["demo:b"]
-        );
-        assert_eq!(choices(list.iter(), &renamed, |_| true), ["demo:c"]);
+        assert_eq!(choices(list.iter(), &plain), ["demo:a", "demo:b"]);
+        assert_eq!(choices(list.iter(), &renamed), ["demo:c"]);
     }
 }

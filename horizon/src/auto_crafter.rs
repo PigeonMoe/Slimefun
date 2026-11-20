@@ -571,13 +571,13 @@ fn leftover(host: &dyn Host, payment: &Payment) -> Result<Option<ItemStack>, ()>
     container.stack(host, payment.amount).map(Some).ok_or(())
 }
 
-fn insert_all(
+fn insert_stack(
     host: &mut dyn ServerHost,
     tx: &Transaction,
     storage: &Inventory,
     size: usize,
     stack: &ItemStack,
-) -> Result<(), ()> {
+) -> Result<u32, ()> {
     let resource = ItemResource::of(stack);
     let mut left = stack.count();
     for occupied in [true, false] {
@@ -587,12 +587,12 @@ fn insert_all(
                     .checked_sub(storage.insert(host, tx, slot, &resource, left))
                     .ok_or(())?;
                 if left == 0 {
-                    return Ok(());
+                    return Ok(0);
                 }
             }
         }
     }
-    Err(())
+    Ok(left)
 }
 
 pub(crate) fn stage(
@@ -682,10 +682,9 @@ fn run(
             return Err(());
         }
     }
-    if !allows(host, &output, false) {
+    if !allows(host, &output, false) || insert_stack(host, tx, storage, size, &output)? != 0 {
         return Err(());
     }
-    insert_all(host, tx, storage, size, &output)?;
     // Paper returns these specific containers for all Auto-Crafters, even if
     // a datapack's crafting remainder list declares something different.
     for payment in &plan.used {
@@ -693,7 +692,8 @@ fn run(
             if !allows(host, &stack, false) {
                 return Err(());
             }
-            insert_all(host, tx, storage, size, &stack)?;
+            // Once the result fits, Paper puts back whatever remainder fits.
+            insert_stack(host, tx, storage, size, &stack)?;
         }
     }
     Ok(())
@@ -874,28 +874,23 @@ fn chosen_key<'a>(saved: &'a Selection, candidate: Option<&'a Pages>) -> Option<
 fn check_candidate(
     host: &mut dyn ServerHost,
     player: PlayerRef,
-    level: LevelRef,
     recipe: &RecipeView<'_>,
-    key: &str,
 ) -> Result<(), &'static str> {
     match recipe {
-        RecipeView::Slimefun(recipe) if crate::availability::use_paper_item_denial(
-            host.dimension(), crate::availability::paper_id(recipe.output.kind),
-        ).is_some() => Err("This item is unavailable for a new Auto-Crafter selection."),
+        RecipeView::Slimefun(recipe)
+            if crate::availability::use_paper_item_denial(
+                host.dimension(),
+                crate::availability::paper_id(recipe.output.kind),
+            )
+            .is_some() =>
+        {
+            Err("This item is unavailable for a new Auto-Crafter selection.")
+        }
         RecipeView::Slimefun(recipe)
             if !recipe.research.id.is_empty()
                 && !research::can_use(host, player, recipe.research) =>
         {
             Err("Unlock this recipe in your Slimefun research before selecting it.")
-        }
-        RecipeView::Vanilla(_) => {
-            if vanilla::limited(host, level)?
-                && player.has_discovered_recipe(host, key) != Some(true)
-            {
-                Err("Unlock this recipe in your recipe book before selecting it.")
-            } else {
-                Ok(())
-            }
         }
         _ => Ok(()),
     }
@@ -915,7 +910,7 @@ fn present(
     let recipe = selected_recipe(host, variant, selected)
         .ok_or("The selected Auto-Crafter recipe is unavailable.")?;
     if candidate.is_some() {
-        check_candidate(host, player, level, &recipe, selected)?;
+        check_candidate(host, player, &recipe)?;
     }
     let body = host
         .block_entity(level, pos)
@@ -958,15 +953,9 @@ fn present(
     Ok(())
 }
 
-fn candidates(
-    host: &dyn Host,
-    player: PlayerRef,
-    level: LevelRef,
-    variant: Variant,
-    item: &ItemStack,
-) -> Result<Pages, &'static str> {
+fn candidates(host: &dyn Host, variant: Variant, item: &ItemStack) -> Result<Pages, &'static str> {
     let recipes = match variant {
-        Variant::Vanilla => vanilla::candidates(host, level, player, item)?,
+        Variant::Vanilla => vanilla::candidates(host, item),
         _ => vec![
             item_id(item)
                 .filter(|id| {
@@ -1026,7 +1015,7 @@ pub(crate) fn use_at(
                 .then(|| place.stack(host))
                 .flatten()
                 .ok_or("Hold the desired crafting result to select its recipe.")?;
-            Some(candidates(host, player, level, variant, &item)?)
+            Some(candidates(host, variant, &item)?)
         } else {
             None
         };
@@ -1100,7 +1089,7 @@ fn apply_click(
         let selected = candidate.active();
         let recipe = selected_recipe(host, viewer.variant, selected)
             .ok_or("The selected Auto-Crafter recipe is unavailable.")?;
-        check_candidate(host, player, viewer.level, &recipe, selected)?;
+        check_candidate(host, player, &recipe)?;
         saved.recipe = Some(selected.to_owned());
         store(host, viewer.pos, saved.clone())?;
         tell(host, player, "The Auto-Crafter recipe was set.");
@@ -1218,7 +1207,7 @@ mod tests {
     }
 
     #[test]
-    fn a_real_container_rolls_back_payment_and_output_if_the_remainder_does_not_fit() {
+    fn full_container_skips_and_denied_remainder_rolls_back_the_craft() {
         let mut host = FakeHost::new();
         let water = Kind::Vanilla("minecraft:water_bucket");
         let bucket = Kind::Vanilla("minecraft:bucket");
@@ -1239,7 +1228,7 @@ mod tests {
             },
             research: &RESEARCH,
         };
-        for (size, output_allowed) in [(2, true), (3, false), (3, true)] {
+        for (size, denied_remainder) in [(1, false), (2, false), (3, true), (3, false)] {
             let container = host
                 .level
                 .block_entity(chest)
@@ -1257,7 +1246,9 @@ mod tests {
                     level,
                     &storage,
                     RecipeView::Slimefun(&recipe),
-                    |_, _, from_chest| output_allowed || from_chest,
+                    |host, stack, from_chest| {
+                        !denied_remainder || from_chest || stack.item().id(host) != bucket.id()
+                    },
                 )
             });
             let contents = host
@@ -1267,17 +1258,93 @@ mod tests {
                 .items
                 .as_ref()
                 .unwrap();
-            if size == 2 || !output_allowed {
+            if size == 1 || denied_remainder {
                 assert_eq!(result, Err(()));
                 assert_eq!(contents.count(water.id()), 1);
                 assert!(contents.slots[1..].iter().all(Option::is_none));
             } else {
                 assert_eq!(result, Ok(()));
                 assert_eq!(contents.count(output.id()), 2);
-                assert_eq!(contents.count(bucket.id()), 1);
+                assert_eq!(contents.count(bucket.id()), u32::from(size == 3));
                 assert_eq!(contents.count(water.id()), 0);
             }
         }
+    }
+
+    #[test]
+    fn honey_block_uses_the_last_chest_slot_even_if_no_bottles_fit() {
+        let mut host = FakeHost::new();
+        let honey = Kind::Vanilla("minecraft:honey_bottle");
+        let output = Kind::Vanilla("minecraft:honey_block");
+        let bottle = Kind::Vanilla("minecraft:glass_bottle");
+        let filler = Kind::Vanilla("minecraft:cobblestone");
+        host.registries
+            .resolve_items(
+                [honey, output, bottle, filler].map(|item| Identifier::parse(item.id()).unwrap()),
+            )
+            .unwrap();
+        host.registries
+            .item_component(honey.id(), "minecraft:max_stack_size", Tag::Int(16));
+        let level = host.level.level();
+        let chest = [0, 65, 0];
+        // The fake host has no recipe matcher. Use the stock recipe's four
+        // material inputs and output to exercise the shared inventory operation.
+        let recipe = CraftingRecipe {
+            inputs: [
+                Some(honey),
+                Some(honey),
+                None,
+                Some(honey),
+                Some(honey),
+                None,
+                None,
+                None,
+                None,
+            ],
+            output: Stack {
+                kind: output,
+                count: 1,
+            },
+            research: &RESEARCH,
+        };
+        let mut before = vec![filler.stack(&host, 64); 27];
+        before[0] = honey.stack(&host, 5);
+        before[26] = None;
+        host.level
+            .block_entity(chest)
+            .with_items(27)
+            .items
+            .as_mut()
+            .unwrap()
+            .slots = before.clone();
+
+        assert_eq!(
+            host.transaction(|host, tx| {
+                let storage = level.capability(host, &ITEMS, chest, None).unwrap();
+                run(
+                    host,
+                    tx,
+                    level,
+                    &storage,
+                    RecipeView::Slimefun(&recipe),
+                    |_, _, _| true,
+                )
+            }),
+            Ok(())
+        );
+
+        let mut expected = before;
+        expected[0] = honey.stack(&host, 1);
+        expected[26] = output.stack(&host, 1);
+        let contents = host
+            .level
+            .block_entity_at(chest)
+            .unwrap()
+            .items
+            .as_ref()
+            .unwrap();
+        assert_eq!(contents.count(bottle.id()), 0);
+        assert_eq!(contents.slots, expected);
     }
 
     #[test]
