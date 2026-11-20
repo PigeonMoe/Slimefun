@@ -143,7 +143,7 @@ python3 horizon/tools/import-block-storage.py \
 
 `/sf storage restore-inventory minecraft:overworld -1 64 -17` 可恢复已移植的电力机器、货运输入节点和高级货运输出节点的菜单库存。电炉系列和高温压力舱都使用 Paper 的原始输入槽 19、20 与输出槽 24、25。反应堆与反应堆访问端口在原来的 19、28、37 槽恢复燃料，25、34、43 槽恢复冷却剂，40 槽恢复副产物。菜单会根据恢复后的运行模式和连接重新生成按钮。命令保留物品数量，使用每件物品的 DataVersion 升级组件。任何一个槽位无效时整份菜单均不写入。带旧式 `type` 或 `meta` 字段的物品保留在原始档案中，`inspect` 会标明需先由 Paper 重新保存的槽位。
 
-`/sf storage restore-chunk minecraft:overworld -1 64 -17` 按位置顺序恢复指定区块已支持的方块，每批 32 条。命令会列出拒绝恢复的坐标和原因。剩余批次可使用输出中的偏移量继续，未移植的方块仍保存在原档案中。
+`/sf storage restore-chunk minecraft:overworld -1 64 -17` 按位置顺序恢复指定区块已支持的方块。每批最多 32 条，达到当前命令的处理时间后会在完整记录之间暂停。命令会列出拒绝恢复的坐标和原因，也会给出继续使用的偏移量。未移植的方块仍保存在原档案中。
 
 旧式库存可先用 [Paper 存档导出工具](tools/paper-storage-export/build.sh) 转换。用 JDK 25 在临时目录执行 `java -Dpaperclip.patchonly=true -jar /path/to/paper-26.2.jar`，解包 Paper 26.2 及其依赖。将 `versions/26.2/paper-26.2.jar` 与 `libraries/` 内每个 JAR 的绝对路径用冒号连接，填入 `PAPER_EXPORT_CLASSPATH`。执行 `build.sh /path/to/exporter.jar` 构建，或执行 `build.sh --test` 核验历史 ItemMeta 和失败回滚。解包和测试只加载 Paper 的注册表与物品编码器。
 

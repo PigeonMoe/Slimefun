@@ -522,6 +522,8 @@ fn restore_chunk(
     networks: &Mutex<Networks>,
 ) -> Result<Vec<String>, String> {
     const BATCH: usize = 32;
+    const BATCH_MILLIS: u64 = 25;
+    let started = host.server_monotonic_millis();
     let chunk = column(pos);
     if !level.in_place(host) || host.chunk(level, chunk).is_none() {
         return Err("Load the restore chunk in the active dimension first.".into());
@@ -556,9 +558,15 @@ fn restore_chunk(
     if offset >= total {
         return Err("The restore offset is past the last supported block in this chunk.".into());
     }
-    let end = total.min(offset + BATCH);
+    let limit = total.min(offset + BATCH);
+    let mut end = offset;
     let mut failures = Vec::new();
-    for &(pos, row, id) in &targets[offset..end] {
+    for &(pos, row, id) in &targets[offset..limit] {
+        // Finish each record before pausing and return the next untouched offset.
+        // The command shares the server's short Wasm hook deadline.
+        if end != offset && host.server_monotonic_millis().saturating_sub(started) >= BATCH_MILLIS {
+            break;
+        }
         let unsupported_menu = !has_restorable_menu(Component::for_item(id))
             && row
                 .get("inventory_slots")
@@ -585,6 +593,7 @@ fn restore_chunk(
             let [x, y, z] = pos;
             failures.push(format!("{x} {y} {z} ({id}) | {error}"));
         }
+        end += 1;
     }
     let restored = end - offset - failures.len();
     let mut lines = vec![format!(
