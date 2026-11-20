@@ -237,6 +237,7 @@ impl SlimefunItem {
         crate::magic_eye::decorate(self.id, &mut components);
         crate::climbing_pick::decorate(self.id, &mut components);
         crate::grappling_hook::decorate(self.id, &mut components);
+        crate::multi_tool::decorate(self.id, &mut components);
         crate::knowledge_tome::decorate(self.id, &mut components);
         if self.id == GOLD_24K_BLOCK.id() {
             components.insert(

@@ -294,21 +294,32 @@ pub(crate) fn use_staff(
         let _ = player.tell(host, text);
         return true;
     }
+    use_wind(host, player, power, mode != GameMode::Creative);
+    true
+}
+
+pub(crate) fn use_wind(
+    host: &mut dyn ServerHost,
+    player: PlayerRef,
+    power: impl FnOnce() -> u32,
+    spend_food: bool,
+) {
+    let entity = player.entity();
     let Some(food) = player.food(host) else {
-        return true;
+        return;
     };
-    let Some(cost) = wind_cost(food.level, mode == GameMode::Creative) else {
+    let Some(cost) = wind_cost(food.level, !spend_food) else {
         let mut text = Text::literal("You are too hungry to do that!");
         text.style.color = Some("red".into());
         let _ = player.tell(host, text);
-        return true;
+        return;
     };
     let Some(view) = entity.view_vector(host) else {
-        return true;
+        return;
     };
     let power = f64::from(power());
     if !entity.set_velocity(host, view.map(|axis| axis * power)) {
-        return true;
+        return;
     }
     if cost != 0 {
         let _ = player.set_food_level(host, food.level - cost);
@@ -326,7 +337,6 @@ pub(crate) fn use_staff(
         let _ = level.level_event(host, 2000, pos, 1);
     }
     let _ = entity.reset_fall_distance(host);
-    true
 }
 
 #[cfg(test)]

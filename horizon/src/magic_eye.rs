@@ -110,12 +110,17 @@ pub(crate) fn use_held(host: &mut dyn ServerHost, player: PlayerRef, stack: &Ite
         );
         return true;
     }
+    shoot(host, player);
+    true
+}
+
+pub(crate) fn shoot(host: &mut dyn ServerHost, player: PlayerRef) {
     let living = LivingRef::new(player.entity());
     if !has_full_armor(host, |slot| living.equipment(host, slot)) {
-        return true;
+        return;
     }
     let Some(pearl) = PEARL.stack(host, 1) else {
-        return true;
+        return;
     };
     let kind = Identifier::parse(PEARL.id()).expect("vanilla ender pearl identifier");
     // Paper CraftLivingEntity.launchProjectile(EnderPearl) calls shootFromRotation
@@ -128,7 +133,6 @@ pub(crate) fn use_held(host: &mut dyn ServerHost, player: PlayerRef, stack: &Ite
         1.0,
         1.0,
     );
-    true
 }
 
 #[cfg(test)]

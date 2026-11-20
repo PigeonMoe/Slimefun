@@ -63,15 +63,12 @@ pub(crate) const CRAFTING: CraftingRecipe = CraftingRecipe {
 
 fn rechargeable(id: &str) -> Option<(&'static str, f32)> {
     Some(match id {
-        "DURALUMIN_MULTI_TOOL" => ("minecraft:shears", 20.0),
-        "SOLDER_MULTI_TOOL" => ("minecraft:shears", 30.0),
-        "BILLON_MULTI_TOOL" => ("minecraft:shears", 40.0),
-        "STEEL_MULTI_TOOL" => ("minecraft:shears", 50.0),
-        "DAMASCUS_STEEL_MULTI_TOOL" => ("minecraft:shears", 60.0),
-        "REINFORCED_ALLOY_MULTI_TOOL" => ("minecraft:shears", 75.0),
-        "CARBONADO_MULTI_TOOL" => ("minecraft:shears", 100.0),
         "PORTABLE_TELEPORTER" => ("minecraft:compass", 50.0),
-        _ => return crate::jet_boots::charge_spec(id).or_else(|| crate::jetpack::charge_spec(id)),
+        _ => {
+            return crate::jet_boots::charge_spec(id)
+                .or_else(|| crate::jetpack::charge_spec(id))
+                .or_else(|| crate::multi_tool::charge_spec(id));
+        }
     })
 }
 
@@ -83,7 +80,7 @@ pub(crate) enum Action {
 
 // A migrated literal may be an NBT string, a component with "extra", or
 // a list of components. Resolve none of the dynamic text forms.
-fn literal(tag: &Tag, output: &mut String, depth: u32) -> Option<()> {
+pub(crate) fn literal(tag: &Tag, output: &mut String, depth: u32) -> Option<()> {
     if depth > 32 {
         return None;
     }

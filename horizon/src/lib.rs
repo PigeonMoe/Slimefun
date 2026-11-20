@@ -73,6 +73,7 @@ mod machine;
 mod magic_eye;
 mod magic_weapons;
 mod medical;
+mod multi_tool;
 mod nether_goo;
 mod network_recipes;
 mod network_runtime;
@@ -128,6 +129,7 @@ struct Slimefun {
     spawners: spawner_repair::Spawners,
     magic_weapons: magic_weapons::Weapons,
     grapple: grappling_hook::GrapplingHooks,
+    multi_tools: multi_tool::MultiTools,
     beheading: beheading::Beheading,
     ore_tools: ore_tools::OreTools,
     nether_goo: nether_goo::NetherGoo,
@@ -172,6 +174,7 @@ impl Default for Slimefun {
             spawners: spawner_repair::Spawners::default(),
             magic_weapons: magic_weapons::Weapons::default(),
             grapple: grappling_hook::GrapplingHooks::default(),
+            multi_tools: multi_tool::MultiTools::default(),
             beheading: beheading::Beheading::default(),
             ore_tools: ore_tools::OreTools::default(),
             nether_goo: nether_goo::NetherGoo::default(),
@@ -197,6 +200,45 @@ impl Default for Slimefun {
 }
 
 impl Slimefun {
+    fn use_multi_tool(
+        &self,
+        host: &mut dyn ServerHost,
+        player: mod_api::PlayerRef,
+        hand: mod_api::Hand,
+        stack: &mod_api::ItemStack,
+        block: Option<[i32; 3]>,
+    ) -> bool {
+        use multi_tool::Mode;
+
+        if !multi_tool::is_tool(host, stack) {
+            return false;
+        }
+        let Some((mode, charged)) = self.multi_tools.use_held(host, player, hand, stack) else {
+            return true;
+        };
+        match mode {
+            Mode::Crafter => portable_crafter::open(host, player),
+            Mode::Eye => magic_eye::shoot(host, player),
+            Mode::Wind => elemental_staves::use_wind(
+                host, player, || self.settings.lock().unwrap().wind_power, false,
+            ),
+            Mode::Grapple if block.is_none() => {
+                self.grapple.launch(host, player, hand, &charged);
+            }
+            Mode::GoldPan | Mode::NetherPan => {
+                if let Some(pos) = block
+                    && let Some(level) = player.level(host)
+                {
+                    let _permitted = multi_tool::PanUse::new(player, level, pos);
+                    let pan = &gold_pan::PANS[usize::from(mode == Mode::NetherPan)];
+                    pan.use_on(host, player, level, pos, &self.rolls, false);
+                }
+            }
+            Mode::Grapple => {}
+        }
+        true
+    }
+
     fn read_config(&self, config: &ConfigFile, fresh: bool) {
         if config.mod_id != "slimefun" || config.file != "slimefun-server.toml" {
             return;
@@ -209,6 +251,7 @@ impl Slimefun {
             self.radiation.configure(None);
             self.climbing.configure(None);
             self.grapple.configure(None);
+            self.multi_tools.configure(None);
             self.nether_goo.configure(None);
             self.block_placers.configure(None);
             output_chest::set_enabled(true);
@@ -225,6 +268,7 @@ impl Slimefun {
         self.guide.configure(table.get("guide"), table.get("researches"));
         self.ore_tools.configure(&table);
         self.grapple.configure(table.get("grappling-hook"));
+        self.multi_tools.configure(table.get("multi-tool"));
         self.talismans.configure(&table);
         self.soulbound_rituals.configure(table.get("items"));
         self.teleposition_scroll
@@ -468,6 +512,12 @@ impl Hooks for Slimefun {
         let Some(level) = player.entity().level(host) else {
             return Flow::Continue;
         };
+        if !multi_tool::is_pan_break(player, level, event.pos)
+            && multi_tool::main_hand_has_tool(host, player)
+        {
+            multi_tool::refuse_shears(host, player);
+            return Flow::Cancel;
+        }
         if let Some(android) = android_machine::data(host, level, event.pos)
             && android.owner != player.uuid()
             && !player
@@ -605,6 +655,13 @@ impl Hooks for Slimefun {
             nether_goo::interact(host, event).or_else(|| zombie_pills::interact(host, event))
         {
             return Some(result);
+        }
+        if matches!(event.kind, "minecraft:sheep" | "minecraft:snow_golem" | "minecraft:mooshroom")
+            && event.stack.is_some_and(|stack| multi_tool::is_tool(host, stack))
+            && let Some(player) = host.players().acting_player()
+        {
+            multi_tool::refuse_shears(host, player);
+            return Some(InteractionResult::Consume);
         }
         (matches!(event.kind, "minecraft:cow" | "minecraft:mooshroom")
             && event.stack.is_some_and(|held| jet_boots::STEEL_THRUSTER.matches(host, held)))
@@ -1007,7 +1064,7 @@ impl Hooks for Slimefun {
             return Flow::Continue;
         };
         if let Some(held) = event.click.stack
-            && grappling_hook::GRAPPLING_HOOK.matches(host, held)
+            && (grappling_hook::GRAPPLING_HOOK.matches(host, held) || multi_tool::is_tool(host, held))
         {
             self.item_clicks.record_block_use(host, event.click.player, event.click.hand, held);
         }
@@ -1035,6 +1092,10 @@ impl Hooks for Slimefun {
             return fertilizer;
         }
         if *event.use_item != TriState::False && let Some(held) = event.click.stack {
+            if self.use_multi_tool(host, player, event.click.hand, held, Some(event.click.pos)) {
+                *event.cancellation_result = InteractionResult::Consume;
+                return Flow::Cancel;
+            }
             self.climbing.use_on(host, player, event, &self.rolls);
             if self.guide.right_click(host, player, held) {
                 *event.cancellation_result = InteractionResult::Consume;
@@ -1210,7 +1271,7 @@ impl Hooks for Slimefun {
                 .iter()
                 .find(|pan| pan.item.matches(host, stack))
         {
-            pan.use_on(host, player, level, event.click.pos, &self.rolls);
+            pan.use_on(host, player, level, event.click.pos, &self.rolls, true);
             *event.cancellation_result = InteractionResult::Consume;
             return Flow::Cancel;
         }
@@ -1265,6 +1326,7 @@ impl Hooks for Slimefun {
                 event.click.hand,
                 event.click.stack,
             )
+            || self.use_multi_tool(host, player, event.click.hand, event.click.stack, None)
             || self.grapple.use_held(host, player, event.click.hand, event.click.stack)
             || self.ore_tools.seek(host, player, event.click.hand, event.click.stack, &self.rolls)
             || jet_boots::STEEL_THRUSTER.matches(host, event.click.stack)

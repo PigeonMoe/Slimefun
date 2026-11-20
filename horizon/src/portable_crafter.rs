@@ -56,6 +56,11 @@ pub(crate) fn use_held(host: &mut dyn ServerHost, player: PlayerRef, stack: &Ite
     if !PORTABLE_CRAFTER.matches(host, stack) || !research::can_use(host, player, &RESEARCH) {
         return false;
     }
+    open(host, player);
+    true
+}
+
+pub(crate) fn open(host: &mut dyn ServerHost, player: PlayerRef) {
     if player.open_crafting_menu(host).is_some()
         && let Some(level) = player.entity().level(host)
         && let Some(at) = player.entity().position(host)
@@ -69,5 +74,4 @@ pub(crate) fn use_held(host: &mut dyn ServerHost, player: PlayerRef, stack: &Ite
             1.0,
         );
     }
-    true
 }

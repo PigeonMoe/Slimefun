@@ -42,6 +42,7 @@ impl Pan {
         level: LevelRef,
         pos: [i32; 3],
         rolls: &Rolls,
+        require_research: bool,
     ) {
         let Some(state) = level.block_state(host, pos) else {
             return;
@@ -49,7 +50,7 @@ impl Pan {
         let Some(sound) = self.target_sound(&state.block().id(host)) else {
             return;
         };
-        if !research::can_use(host, player, self.research) {
+        if require_research && !research::can_use(host, player, self.research) {
             let text = format!(
                 "Unlock {} with /sf research {}.",
                 self.research.name, self.research.id,

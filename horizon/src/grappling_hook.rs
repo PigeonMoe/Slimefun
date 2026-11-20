@@ -140,20 +140,20 @@ impl GrapplingHooks {
         if !GRAPPLING_HOOK.matches(host, stack) {
             return false;
         }
-        self.launch(host, player, hand, stack);
+        if research::can_use(host, player, &GRAPPLING_RESEARCH) {
+            self.launch(host, player, hand, stack);
+        }
         true
     }
 
-    fn launch(
+    pub(crate) fn launch(
         &self,
         host: &mut dyn ServerHost,
         player: PlayerRef,
         hand: Hand,
         stack: &ItemStack,
     ) -> Option<()> {
-        if self.shots.lock().unwrap().contains_key(&player.uuid())
-            || !research::can_use(host, player, &GRAPPLING_RESEARCH)
-        {
+        if self.shots.lock().unwrap().contains_key(&player.uuid()) {
             return None;
         }
         let mode = player.game_mode(host)?;
@@ -209,7 +209,9 @@ impl GrapplingHooks {
             return None;
         };
         let config = *self.config.lock().unwrap();
-        let spent = config.consume && mode != GameMode::Creative;
+        let spent = config.consume
+            && mode != GameMode::Creative
+            && stack.item().id(host) == "minecraft:lead";
         let tether = Tether {
             arrow,
             bat,
