@@ -5,3 +5,46 @@ description = "查看 PigeonMoe 的 Horizon 移植版运行状态。"
 id = "status"
 label = "查看状态"
 command = "slimefun status"
+
+[config]
+file = "config/slimefun-server.toml"
+world_override = true
+note = "保存后，远古工艺会自动重新读取配置。"
+
+[[config.fields]]
+id = "double_ores"
+key = "double-ores"
+label = "矿石加工双倍产出"
+kind = "boolean"
+
+[[config.fields]]
+id = "output_chest"
+key = "output-chest-enabled"
+label = "启用物品输出箱"
+kind = "boolean"
+
+[[config.fields]]
+id = "starter_guide"
+key = "guide.receive-on-first-join"
+label = "首次进服发放工艺书"
+kind = "boolean"
+
+[[config.fields]]
+id = "creative_research"
+key = "researches.free-in-creative-mode"
+label = "创造模式免费解锁研究"
+kind = "boolean"
+
+[[config.fields]]
+id = "research_fireworks"
+key = "researches.enable-fireworks"
+label = "研究解锁烟花"
+kind = "boolean"
+
+[[config.fields]]
+id = "network_size"
+key = "networks.max-size"
+label = "物品网络大小上限"
+kind = "integer"
+min = 1
+max = 10000
