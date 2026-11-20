@@ -480,16 +480,14 @@ enum InventoryKind {
     Assembler(&'static crate::factory::assemblers::Assembler),
     Factory { smeltery: bool },
     HeatedPressure,
-    Smelter(&'static str),
+    Smelter,
     Brewer,
 }
 
 impl InventoryKind {
     fn from_block(id: &str) -> Option<Self> {
         Some(match id {
-            "minecraft:furnace" => Self::Smelter("minecraft:smelting"),
-            "minecraft:blast_furnace" => Self::Smelter("minecraft:blasting"),
-            "minecraft:smoker" => Self::Smelter("minecraft:smoking"),
+            "minecraft:furnace" | "minecraft:blast_furnace" | "minecraft:smoker" => Self::Smelter,
             "minecraft:brewing_stand" => Self::Brewer,
             "minecraft:chest" | "minecraft:trapped_chest" => Self::Chest,
             "minecraft:barrel"
@@ -511,7 +509,7 @@ impl InventoryKind {
             Self::InputOnly => 0..0,
             Self::Assembler(_) => 0..0,
             Self::Factory { .. } | Self::HeatedPressure => 2..4.min(size),
-            Self::Smelter(_) => 2..3.min(size),
+            Self::Smelter => 2..3.min(size),
             Self::Brewer => 0..3.min(size),
         }
     }
@@ -541,20 +539,15 @@ impl InventoryKind {
                 };
                 slots.start.min(size)..slots.end.min(size)
             }
-            Self::Smelter(recipe) => {
+            Self::Smelter => {
                 let fuel = host
                     .item_burn_time(stack.item())
                     .is_some_and(|time| time > 0);
-                if !fuel {
-                    return 0..1.min(size);
-                }
-                let smeltable = host.recipes_of_type(recipe).iter().any(|recipe| {
-                    recipe
-                        .ingredients
-                        .first()
-                        .is_some_and(|input| input.test(host, stack))
-                });
-                usize::from(!smeltable)..2.min(size)
+                furnace_input_slots(size, fuel, || {
+                    host.block_key(&stack.item().id(host))
+                        .and_then(|block| host.block_in_tag(block, "minecraft:logs"))
+                        == Some(true)
+                })
             }
             Self::Brewer => match stack.item().id(host).as_str() {
                 "minecraft:potion" | "minecraft:splash_potion" | "minecraft:lingering_potion" => {
@@ -601,6 +594,16 @@ impl InventoryKind {
             pos[1],
             pos[2].checked_add(side * dz)?,
         ])
+    }
+}
+
+fn furnace_input_slots(size: usize, fuel: bool, is_log: impl FnOnce() -> bool) -> Range<usize> {
+    // Paper CargoUtils fast-paths smeltability by Bukkit's block LOGS tag,
+    // even for furnace variants with no recipe for those logs.
+    if fuel {
+        usize::from(!is_log())..2.min(size)
+    } else {
+        0..1.min(size)
     }
 }
 
@@ -923,6 +926,22 @@ mod tests {
             .filters
             .insert(FILTER_SLOTS[0], stack.to_nbt(host).unwrap());
         Filter::new(host, &node, &CargoSettings::load(&settings.save()).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn cargo_tries_burnable_logs_in_input_before_fuel_even_for_blast_and_smoking() {
+        for block in [
+            "minecraft:furnace",
+            "minecraft:blast_furnace",
+            "minecraft:smoker",
+        ] {
+            let kind = InventoryKind::from_block(block).unwrap();
+            assert!(matches!(kind, InventoryKind::Smelter));
+            assert_eq!(kind.extract(3), 2..3);
+        }
+        assert_eq!(furnace_input_slots(3, true, || true), 0..2);
+        assert_eq!(furnace_input_slots(3, true, || false), 1..2);
+        assert_eq!(furnace_input_slots(3, false, || unreachable!()), 0..1);
     }
 
     #[test]
