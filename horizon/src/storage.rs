@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use mod_api::{
-    CommandArgumentValue, CommandSource, ConfigPath, HostTransaction, ItemStack, LevelRef,
-    RunModCommandEvent, ServerHost,
-};
 use std::{collections::BTreeMap, fmt::Write, sync::Mutex};
+
+use mod_api::{
+    AttachmentCodec, AttachmentType, CommandArgumentValue, CommandSource, Compound, ConfigPath,
+    Holder, HostTransaction, ItemStack, LevelRef, RunModCommandEvent, ServerHost, Tag,
+};
 
 use crate::{
     ancient_altar, block_placer,
@@ -12,6 +13,20 @@ use crate::{
     network_runtime::Networks,
     networks::Component,
     output_chest, universal_storage,
+};
+
+// One receipt per coordinate, in the same chunk as the restored inventory. The
+// receipt survives breaking and replacing the carrier with another copy of the item.
+static ORPHAN_RECEIPTS: AttachmentType<Compound> = AttachmentType {
+    namespace: "slimefun",
+    name: "paper_orphan_menu_receipts",
+    default: Compound::new,
+    codec: Some(AttachmentCodec {
+        encode: |value| Ok(value.clone()),
+        decode: |value| Ok(value.clone()),
+    }),
+    copy_on_death: false,
+    sync: false,
 };
 
 fn read(host: &dyn ServerHost, path: &str) -> Result<toml::Table, String> {
@@ -372,6 +387,10 @@ fn at(
         return restore_output(host, level, pos).map(|output| vec![output]);
     }
     if matches!(action, "restore-network" | "restore-inventory") {
+        if action == "restore-inventory" && is_orphan_inventory(row) {
+            return restore_orphan_inventory(host, level, pos, row, networks)
+                .map(|message| vec![message]);
+        }
         let id = record_id(row).ok_or("The imported network block needs Paper metadata.")?;
         let component = Component::for_item(id);
         if action == "restore-inventory" && !row.contains_key("paper_inventory") {
@@ -461,6 +480,73 @@ fn has_restorable_menu(component: Option<Component>) -> bool {
                 | Component::TrashCan
         )
     )
+}
+
+fn is_orphan_inventory(row: &toml::Table) -> bool {
+    !row.contains_key("metadata") && row.contains_key("paper_inventory")
+}
+
+fn orphan_preset(row: &toml::Table) -> Result<&str, String> {
+    if !is_orphan_inventory(row)
+        || row
+            .get("paper_inventory")
+            .and_then(toml::Value::as_str)
+            .is_none()
+    {
+        return Err("The record is not a valid inventory-only Paper archive.".into());
+    }
+    let id = match row.get("inventory_preset") {
+        Some(toml::Value::String(id)) => id,
+        Some(_) => return Err("The Paper menu preset is invalid.".into()),
+        None => {
+            return Err("An inventory-only archive must explicitly identify its preset.".into());
+        }
+    };
+    if !has_restorable_menu(Component::for_item(id)) || crate::auto_crafter::is_machine(id) {
+        return Err("This inventory-only Paper menu preset is unsupported.".into());
+    }
+    Ok(id)
+}
+
+fn restore_orphan_inventory(
+    host: &mut dyn ServerHost,
+    level: LevelRef,
+    pos: [i32; 3],
+    row: &toml::Table,
+    networks: &Mutex<Networks>,
+) -> Result<String, String> {
+    let id = orphan_preset(row)?;
+    let items = decode_archived_slots(host, row, 54)?;
+    let mut networks = networks.lock().unwrap();
+    host.transaction(|host, _| {
+        let component = networks.installed_menu(host, level, pos, id)?;
+        let holder = Holder::Chunk(column(pos));
+        let mut receipts = ORPHAN_RECEIPTS
+            .get_existing(host, holder)
+            .map_err(|_| "Could not read the Paper inventory receipts.")?
+            .unwrap_or_default();
+        let [x, y, z] = pos;
+        let key = format!("{x},{y},{z}").as_str().into();
+        let receipt = Tag::String(id.into());
+        if let Some(previous) = receipts.get(&key) {
+            return if previous == &receipt {
+                Ok(format!(
+                    "The inventory-only Paper archive for {id} was already restored."
+                ))
+            } else {
+                Err("This position already has a receipt for a different Paper inventory.".into())
+            };
+        }
+
+        crate::network_runtime::restore_installed_menu(host, level, pos, id, component, items)?;
+        receipts.insert(key, receipt);
+        ORPHAN_RECEIPTS
+            .set(host, holder, receipts)
+            .map_err(|_| "Could not save the Paper inventory receipt.")?;
+        Ok(format!(
+            "Restored the Paper inventory for the existing {id} block."
+        ))
+    })
 }
 
 fn restore_output(
@@ -555,6 +641,9 @@ fn restore_chunk(
     let targets: Vec<_> = archived
         .into_iter()
         .filter_map(|(pos, row)| {
+            if is_orphan_inventory(row) {
+                return Some((pos, row, "(inventory only)"));
+            }
             let id = record_id(row)?;
             (id == "OUTPUT_CHEST"
                 || id == block_placer::BLOCK_PLACER.id()
@@ -589,7 +678,9 @@ fn restore_chunk(
                 .get("inventory_slots")
                 .and_then(toml::Value::as_integer)
                 .is_some_and(|count| count != 0);
-        let result = if let Some(kind) = ancient_altar::paper_device(id) {
+        let result = if is_orphan_inventory(row) {
+            restore_orphan_inventory(host, level, pos, row, networks)
+        } else if let Some(kind) = ancient_altar::paper_device(id) {
             ancient_altar::restore_paper(host, level, pos, kind, row)
         } else if id == block_placer::BLOCK_PLACER.id() {
             block_placer::restore_paper(host, level, pos, row)
@@ -635,6 +726,10 @@ fn restore_chunk(
     }
     Ok(lines)
 }
+
+#[cfg(test)]
+#[path = "storage_orphan_tests.rs"]
+mod orphan_live_tests;
 
 #[cfg(test)]
 mod tests {
@@ -739,6 +834,42 @@ mod tests {
                 "{id}"
             );
         }
+    }
+
+    pub(super) fn orphan_gold_pan() -> toml::Table {
+        let mut archive: toml::Table = r#"
+            inventory_preset = "ELECTRIC_GOLD_PAN_2"
+            inventory_slots = 1
+            paper_items = [{slot = 19, id = "minecraft:gravel", count = 1, data_version = 4903, components = {}}]
+        "#
+        .parse()
+        .unwrap();
+        archive.insert(
+            "paper_inventory".into(),
+            include_str!("../tools/paper-storage-export/fixtures/paper-26.2-electric-gold-pan.sfi")
+                .into(),
+        );
+        archive
+    }
+
+    #[test]
+    fn orphan_menus_require_an_explicit_stock_preset_and_no_metadata() {
+        let mut row = orphan_gold_pan();
+        assert_eq!(orphan_preset(&row).unwrap(), "ELECTRIC_GOLD_PAN_2");
+        for invalid in [
+            true.into(),
+            "EXTENSION_MENU".into(),
+            "ENHANCED_AUTO_CRAFTER".into(),
+        ] {
+            row.insert("inventory_preset".into(), invalid);
+            assert!(orphan_preset(&row).is_err());
+        }
+        row.remove("inventory_preset");
+        assert!(orphan_preset(&row).is_err());
+        let mut row = orphan_gold_pan();
+        row.insert("metadata".into(), toml::Value::Table(toml::Table::new()));
+        assert!(!is_orphan_inventory(&row));
+        assert!(orphan_preset(&row).is_err());
     }
 
     #[test]

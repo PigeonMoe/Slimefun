@@ -38,6 +38,7 @@ pub(crate) struct Machine {
     // These are vanilla-backed chest slots, keyed by their Paper menu indices on disk.
     slots: BTreeMap<usize, Compound>,
     imported: bool,
+    inventory_imported: bool,
 }
 
 impl Machine {
@@ -51,6 +52,7 @@ impl Machine {
             facing,
             slots: BTreeMap::new(),
             imported: false,
+            inventory_imported: false,
         }
     }
 
@@ -83,6 +85,10 @@ impl Machine {
             ("rotation".into(), Tag::String(self.facing.id().into())),
             ("slots".into(), Tag::Compound(nbt_slots)),
             ("paper".into(), Tag::Byte(i8::from(self.imported))),
+            (
+                "paper_inventory".into(),
+                Tag::Byte(i8::from(self.inventory_imported)),
+            ),
         ]))
     }
 
@@ -109,6 +115,13 @@ impl Machine {
         state.index = integer("index").ok_or(invalid)?;
         state.paused = flag("paused").ok_or(invalid)?;
         state.imported = flag("paper").ok_or(invalid)?;
+        state.inventory_imported = if data.contains_key(&"paper_inventory".into()) {
+            flag("paper_inventory").ok_or(invalid)?
+        } else {
+            // Old Android attachments could import the script and the slots
+            // together. Treat those files as already consumed to avoid refilling.
+            state.imported
+        };
         state.fuel = match data.get(&"fuel".into()) {
             Some(Tag::Float(raw)) if f32::from_bits(*raw).is_finite() => f32::from_bits(*raw),
             _ => return Err(invalid),
@@ -207,18 +220,28 @@ fn legacy(
         Some("false") => false,
         _ => return Err("Invalid Paper Android paused state."),
     };
-    for (slot, stack) in items {
-        let index = PAPER_SLOTS
-            .iter()
-            .position(|&value| value as u32 == slot)
-            .ok_or("Paper Android archive has an item outside its inventory slots.")?;
-        let encoded = stack
-            .to_nbt(host)
-            .ok_or("Could not encode a Paper Android item.")?;
-        state.slots.insert(index, encoded);
-    }
+    state.slots = paper_slots(host, items)?;
     state.imported = true;
     Ok(state)
+}
+
+fn paper_slots(
+    host: &dyn Host,
+    items: BTreeMap<u32, ItemStack>,
+) -> Result<BTreeMap<usize, Compound>, &'static str> {
+    items
+        .into_iter()
+        .map(|(slot, stack)| {
+            let index = PAPER_SLOTS
+                .iter()
+                .position(|&value| value as u32 == slot)
+                .ok_or("Paper Android archive has an item outside its inventory slots.")?;
+            let encoded = stack
+                .to_nbt(host)
+                .ok_or("Could not encode a Paper Android item.")?;
+            Ok((index, encoded))
+        })
+        .collect()
 }
 
 pub(crate) fn restore_paper(
@@ -235,16 +258,39 @@ pub(crate) fn restore_paper(
     if data(host, level, pos).is_some() {
         return Err("That Android already has a native owner and script.".into());
     }
-    let items = if row.contains_key("paper_inventory") {
+    let has_inventory = row.contains_key("paper_inventory");
+    let items = if has_inventory {
         crate::storage::validate_block_inventory_preset(row, id)?;
         crate::storage::decode_archived_slots(host, row, 54)?
     } else {
         BTreeMap::new()
     };
-    let state = legacy(host, metadata, items)?;
+    let mut state = legacy(host, metadata, items)?;
+    state.inventory_imported = has_inventory;
     save(host, pos, state)
         .then_some(())
         .ok_or("Could not save the Paper Android configuration.".into())
+}
+
+pub(crate) fn restore_installed_inventory(
+    host: &mut dyn ServerHost,
+    level: LevelRef,
+    pos: Position,
+    items: BTreeMap<u32, ItemStack>,
+) -> Result<(), String> {
+    let mut state = data(host, level, pos).ok_or("Could not read the existing Android state.")?;
+    let slots = paper_slots(host, items)?;
+    if state.inventory_imported {
+        return Ok(());
+    }
+    if !state.slots.is_empty() {
+        return Err("The existing Android already contains items.".into());
+    }
+    state.slots = slots;
+    state.inventory_imported = true;
+    save(host, pos, state)
+        .then_some(())
+        .ok_or("Could not save the Paper Android inventory.".into())
 }
 
 pub(crate) fn drop_items(level: &dyn LevelHost, event: &mut BlockDropsEvent<'_>) {
@@ -932,5 +978,35 @@ mod tests {
         assert_eq!(read.index, 1);
         assert_eq!(read.facing, Facing::South);
         assert!(!read.paused);
+    }
+
+    #[test]
+    fn an_orphan_android_menu_keeps_the_current_owner_script_fuel_and_instruction() {
+        let mut host = mod_api::testing::FakeHost::new();
+        let pos = [2, 64, 4];
+        let level = host.level.level();
+        host.level.block_entity(pos);
+        host.registries
+            .resolve_items([Identifier::parse("minecraft:coal").unwrap()])
+            .unwrap();
+        let coal = Kind::Vanilla("minecraft:coal").stack(&host, 2).unwrap();
+        let mut live = Machine::new(0xb758, Facing::East);
+        live.script = Script::parse("START-TURN_LEFT-REPEAT").unwrap();
+        live.index = 1;
+        live.fuel = 5.5;
+        live.paused = false;
+        assert!(save(&mut host, pos, live.clone()));
+        restore_installed_inventory(&mut host, level, pos, BTreeMap::from([(43, coal.clone())]))
+            .unwrap();
+        let restored = data(&mut host, level, pos).unwrap();
+        assert_eq!(slot(&host, &restored, FUEL), Some(coal));
+        live.inventory_imported = true;
+        live.slots = restored.slots.clone();
+        assert_eq!(restored.encode().unwrap(), live.encode().unwrap());
+
+        let mut old = live.encode().unwrap();
+        old.remove(&"paper_inventory".into());
+        old.insert("paper".into(), Tag::Byte(1));
+        assert!(Machine::decode(&old).unwrap().inventory_imported);
     }
 }

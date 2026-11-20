@@ -562,6 +562,51 @@ impl Networks {
         self.discoveries.remove(dimension);
     }
 
+    pub(crate) fn installed_menu(
+        &mut self,
+        host: &mut dyn ServerHost,
+        level: LevelRef,
+        pos: Position,
+        id: &str,
+    ) -> Result<Component, String> {
+        let error =
+            "An inventory-only Paper archive requires a matching, registered Slimefun block.";
+        if !level.in_place(host) {
+            return Err(error.into());
+        }
+        let dimension = level
+            .dimension()
+            .id(host)
+            .ok_or("Unknown Horizon dimension.")?;
+        let nodes = self.nodes(host, &dimension)?;
+        let node = nodes
+            .get(&pos)
+            .filter(|node| node.id == id && node.accepts_block(host, level, pos))
+            .ok_or(error)?;
+        if block_data(host, level, pos).is_none_or(|data| data.id != id) {
+            return Err(error.into());
+        }
+        Ok(node.component)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn bind_fixture_node(
+        &mut self,
+        host: &mut dyn ServerHost,
+        level: LevelRef,
+        pos: Position,
+        id: &str,
+        metadata: &toml::Table,
+        marked: bool,
+    ) {
+        let (node, data) = imported(id, metadata).unwrap();
+        let dimension = level.dimension().id(host).unwrap();
+        Arc::make_mut(self.levels.entry(dimension).or_default()).insert(pos, node);
+        if marked {
+            write_data(host, pos, data).unwrap();
+        }
+    }
+
     pub(crate) fn restore(
         &mut self,
         host: &mut dyn ServerHost,
@@ -584,16 +629,7 @@ impl Networks {
         {
             crate::storage::validate_block_inventory_preset(row, id)?;
             if let Some(items) = crate::storage::decode_inventory(host, row)? {
-                for (slot, item) in items {
-                    if !FILTER_SLOTS.contains(&(slot as usize)) {
-                        return Err(format!("Unexpected Paper cargo inventory slot {slot}."));
-                    }
-                    cargo.filters.insert(
-                        slot as usize,
-                        item.to_nbt(host)
-                            .ok_or("Paper cargo filter item has no item registry id.")?,
-                    );
-                }
+                cargo.filters = paper_cargo_filters(host, items)?;
                 cargo.imported_paper = true;
             }
         }
@@ -675,6 +711,61 @@ impl Networks {
             self.levels.insert(dimension, Arc::new(next));
         }
         Ok(())
+    }
+}
+
+fn paper_cargo_filters(
+    host: &dyn ServerHost,
+    items: BTreeMap<u32, ItemStack>,
+) -> Result<BTreeMap<usize, Compound>, String> {
+    items
+        .into_iter()
+        .map(|(slot, item)| {
+            if !FILTER_SLOTS.contains(&(slot as usize)) {
+                return Err(format!("Unexpected Paper cargo inventory slot {slot}."));
+            }
+            let saved = item
+                .to_nbt(host)
+                .ok_or("Paper cargo filter item has no item registry id.")?;
+            Ok((slot as usize, saved))
+        })
+        .collect()
+}
+
+pub(crate) fn restore_installed_menu(
+    host: &mut dyn ServerHost,
+    level: LevelRef,
+    pos: Position,
+    id: &str,
+    component: Component,
+    items: BTreeMap<u32, ItemStack>,
+) -> Result<(), String> {
+    match component {
+        Component::ElectricMachine { .. }
+        | Component::FuelGenerator { .. }
+        | Component::ReactorPort => {
+            let prepared = crate::factory::prepare_paper_inventory(host, level, pos, id, items)?;
+            crate::factory::restore_paper_inventory(host, level, pos, id, prepared)
+        }
+        Component::Android => {
+            crate::android_machine::restore_installed_inventory(host, level, pos, items)
+        }
+        Component::TrashCan => trash::restore_items(host, pos, items),
+        Component::CargoInput | Component::CargoOutput { advanced: true } => {
+            let filters = paper_cargo_filters(host, items)?;
+            let mut data =
+                block_data(host, level, pos).ok_or("Could not read the existing cargo node.")?;
+            let cargo = data
+                .cargo
+                .as_mut()
+                .ok_or("The existing cargo node has no saved settings.")?;
+            if cargo.import_filters(filters)? {
+                write_data(host, pos, data)
+                    .map_err(|_| "Could not save the Paper cargo filters.")?;
+            }
+            Ok(())
+        }
+        _ => Err("This inventory-only Paper menu preset is unsupported.".into()),
     }
 }
 
@@ -1790,6 +1881,64 @@ mod tests {
 
     fn node(id: &str) -> Node {
         imported(id, &toml::Table::new()).unwrap().0
+    }
+
+    #[test]
+    fn an_orphan_cargo_menu_recovers_filters_without_replacing_local_settings() {
+        let mut host = FakeHost::new();
+        let level = host.level.level();
+        let pos = [7, 64, 8];
+        let id = "CARGO_NODE_INPUT";
+        let metadata: toml::Table = "
+            owner = '27959afe-dde4-4b81-b630-87e7f43461a1'
+            frequency = '16'
+            filter-type = 'whitelist'
+            filter-lore = 'true'
+            round-robin = 'true'
+            smart-fill = 'true'
+        "
+        .parse()
+        .unwrap();
+        host.level.block_entity(pos);
+        let (node, marker) = imported(id, &metadata).unwrap();
+        write_data(&mut host, pos, marker).unwrap();
+        let component = node.component;
+        let material = Identifier::parse("minecraft:stone").unwrap();
+        host.registries.resolve_items([material.clone()]).unwrap();
+        let stack =
+            ItemStack::new((&host as &dyn ServerHost).item_key(&material).unwrap(), 1).unwrap();
+        let saved = stack.to_nbt(&host).unwrap();
+        let mut expected = block_data(&mut host, level, pos).unwrap().cargo.unwrap();
+        assert!(
+            restore_installed_menu(
+                &mut host,
+                level,
+                pos,
+                id,
+                component,
+                BTreeMap::from([(20, stack.clone()), (22, stack.clone())])
+            )
+            .is_err()
+        );
+        assert_eq!(
+            block_data(&mut host, level, pos).unwrap().cargo,
+            Some(expected.clone())
+        );
+        restore_installed_menu(
+            &mut host,
+            level,
+            pos,
+            id,
+            component,
+            BTreeMap::from([(20, stack)]),
+        )
+        .unwrap();
+        expected.filters.insert(20, saved);
+        expected.imported_paper = true;
+        assert_eq!(
+            block_data(&mut host, level, pos).unwrap().cargo,
+            Some(expected)
+        );
     }
 
     #[test]

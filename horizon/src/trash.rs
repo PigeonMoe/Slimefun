@@ -246,6 +246,25 @@ pub(super) fn restore(
     if !row.contains_key("paper_inventory") {
         return Ok(());
     }
+    restore_items_with(host, pos, |host| {
+        crate::storage::validate_block_inventory_preset(row, TRASH_CAN_BLOCK.id())?;
+        crate::storage::decode_archived_slots(host, row, 54)
+    })
+}
+
+pub(super) fn restore_items(
+    host: &mut dyn ServerHost,
+    pos: Position,
+    items: BTreeMap<u32, ItemStack>,
+) -> Result<(), String> {
+    restore_items_with(host, pos, |_| Ok(items))
+}
+
+fn restore_items_with(
+    host: &mut dyn ServerHost,
+    pos: Position,
+    items: impl FnOnce(&dyn ServerHost) -> Result<BTreeMap<u32, ItemStack>, String>,
+) -> Result<(), String> {
     let holder = Holder::BlockEntity(pos);
     let existing = CONTENTS
         .get(host, holder)
@@ -253,9 +272,7 @@ pub(super) fn restore(
     if matches!(existing.get(&RESTORED.into()), Some(Tag::Byte(1))) {
         return Ok(());
     }
-    crate::storage::validate_block_inventory_preset(row, TRASH_CAN_BLOCK.id())?;
-    let items = crate::storage::decode_inventory(host, row)?.unwrap_or_default();
-    let data = import_slots(host, existing, items)?;
+    let data = import_slots(host, existing, items(host)?)?;
     CONTENTS
         .set(host, holder, data)
         .map_err(|error| format!("Could not save the trash can inventory ({error:?})."))

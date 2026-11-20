@@ -1,0 +1,7 @@
+preset: ELECTRIC_GOLD_PAN_2
+'19':
+  ==: org.bukkit.inventory.ItemStack
+  DataVersion: 4903
+  id: minecraft:gravel
+  count: 1
+  schema_version: 1

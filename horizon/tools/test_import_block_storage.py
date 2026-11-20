@@ -25,6 +25,30 @@ RESEARCH_SPEC.loader.exec_module(RESEARCH)
 
 
 class BlockStorageTest(unittest.TestCase):
+    def test_stock_gold_pan_inventory_keeps_its_explicit_preset_without_a_block_record(self):
+        fixture = (MODULE_PATH.parent / "paper-storage-export" / "fixtures"
+                   / "paper-26.2-electric-gold-pan.sfi").read_text()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            inventories = root / "stored-inventories"
+            inventories.mkdir()
+            archive = inventories / "world;770;112;132.sfi"
+            archive.write_text(fixture)
+            records = IMPORT.collect(root, IMPORT.WORLDS)
+            output = root / "storage-import"
+            IMPORT.publish(output, records)
+            chunk = output / "minecraft:overworld".encode().hex() / "48_8.toml"
+            row, = tomllib.loads(chunk.read_text())["records"]
+            self.assertNotIn("metadata", row)
+            self.assertEqual(row["position"], [770, 112, 132])
+            self.assertEqual(row["paper_inventory"], fixture)
+            self.assertEqual(row["inventory_preset"], "ELECTRIC_GOLD_PAN_2")
+            self.assertEqual(row["inventory_slots"], 1)
+            self.assertEqual(row["paper_items"], [
+                {"slot": 19, "id": "minecraft:gravel", "data_version": 4903,
+                 "count": 1, "components": {}},
+            ])
+
     def test_imports_the_paper_backup_zip_with_authoritative_profiles_twice(self):
         owner = "341da016-f646-4030-af46-6e652265fa34"
         with tempfile.TemporaryDirectory() as tmp:

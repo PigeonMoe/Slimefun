@@ -67,19 +67,27 @@ impl CargoSettings {
     }
 
     pub(super) fn merge_paper(&mut self, paper: Self) -> Result<bool, &'static str> {
-        let restore_items = paper.imported_paper && !self.imported_paper;
-        if restore_items && !self.filters.is_empty() {
-            return Err("Cargo inventory already contains filter items.");
-        }
+        let restore_items = paper.imported_paper && self.import_filters(paper.filters)?;
         let restore_owner = self.owner.is_none() && paper.owner.is_some();
         if restore_owner {
             self.owner = paper.owner;
         }
-        if restore_items {
-            self.filters = paper.filters;
-            self.imported_paper = true;
-        }
         Ok(restore_owner || restore_items)
+    }
+
+    pub(super) fn import_filters(
+        &mut self,
+        filters: BTreeMap<usize, Compound>,
+    ) -> Result<bool, &'static str> {
+        if self.imported_paper {
+            return Ok(false);
+        }
+        if !self.filters.is_empty() {
+            return Err("Cargo inventory already contains filter items.");
+        }
+        self.filters = filters;
+        self.imported_paper = true;
+        Ok(true)
     }
 
     pub(super) fn save(&self) -> Compound {
