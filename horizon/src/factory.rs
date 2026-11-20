@@ -786,6 +786,13 @@ pub(crate) fn open(
         return true;
     }
     if matches!(furnace.family, RecipeFamily::OilPump) {
+        if !Resource::Oil.enabled() {
+            let _ = player.tell(
+                host,
+                Text::literal("The Oil GEO resource has been disabled."),
+            );
+            return true;
+        }
         match geo_deposits::supply(host, level, pos, Resource::Oil) {
             Ok(Some(_)) => {}
             Ok(None) => {
@@ -1752,6 +1759,9 @@ pub(crate) fn tick(
     charge: u32,
 ) -> Option<u32> {
     let furnace = ElectricMachine::for_item(id)?;
+    if matches!(furnace.family, RecipeFamily::OilPump) && !Resource::Oil.enabled() {
+        return None;
+    }
     let storage = furnace.storage(level, pos);
     let data = data_at(host, storage)?;
     if matches!(furnace.family, RecipeFamily::Advanced(spec) if spec.family == advanced_processing::Family::ChargingBench)

@@ -250,6 +250,7 @@ impl Slimefun {
         let mut settings = self.settings.lock().unwrap();
         if fresh {
             ticker_policy::load(true, None);
+            geo_deposits::load_config(true, None);
             *settings = Settings::default();
             enchantment_machines::configure(&toml::Table::new());
             self.talismans.configure(&toml::Table::new());
@@ -270,6 +271,7 @@ impl Slimefun {
         let Ok(table) = config.text.parse::<toml::Table>() else {
             return;
         };
+        geo_deposits::load_config(fresh, table.get("geo-resources"));
         output_chest::configure(&table);
         self.guide.configure(table.get("guide"), table.get("researches"));
         self.ore_tools.configure(&table);
@@ -2089,7 +2091,7 @@ fn describe_available_recipe(
             recipe.output.kind.id(),
         ));
     }
-    for resource in geo_deposits::MINER_RESOURCES {
+    for resource in geo_deposits::registered_miner_resources() {
         let item = resource.item();
         if outputs(item.id()) || outputs(geology::GEO_MINER.id()) {
             lines.push(format!(

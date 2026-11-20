@@ -241,6 +241,8 @@ slots = [0, 8, 17]
 
 Paper 的 `stored-chunks/chunks.sfc` 会随快照导出。生成导入档案后，操作员可在对应维度的已加载区块执行 `/sf storage restore-geo minecraft:overworld -1 64 -17`，恢复原油、下界冰、小块铀和盐的已扫描储量。旧档案和 `/sf storage restore-oil` 仍可用于单独恢复原油。耗尽的储量保持为零，重复恢复同一档案会显示当前剩余量。
 
+运行 `horizon/tools/import-block-storage.py` 时可加 `--resources-config <Paper 的 resources.yml>`。将导出目录中 `settings-geo.toml` 的 `[geo-resources]` 节合并到服务端 `slimefun-server.toml` 后重启。此节支持 `oil`、`nether_ice`、`uranium` 和 `salt` 四个布尔开关，默认开启。关闭的资源从扫描结果和采矿候选中移除，历史储量继续保留。关闭 `oil` 时抽油泵暂停。
+
 工业采矿机以高炉为底、箱子为上层，在左右两侧各放一个朝上的活塞，活塞下方使用铁块。高级型把铁块换成钻石块。用 `/sf research industrial_miner` 或 `/sf research advanced_industrial_miner` 解锁，在箱中放入燃料后右击高炉。普通型使用煤炭等固体燃料，搜索下方 7×7 范围并产出原矿等材料。高级型使用岩浆桶、原油桶或燃料桶，在 11×11 范围原样采出矿石，并退回空桶。采矿时按启动者的 UUID 检查每个位置的破坏权限。`[industrial-miner]` 和 `[advanced-industrial-miner]` 可分别设置 `can-mine-deepslate-ores` 和 `can-mine-ancient-debris`。
 
 自动繁殖机和动物生长加速器均提供七个饲料槽，货运可向这些槽送料。放入食品加工机产出的有机食物并接通电源。繁殖机每次消耗一份食物和 60 J，使附近符合繁殖条件的成年动物进入求爱状态。生长加速器每次消耗一份食物和 14 J，让附近的幼体最多提前 2000 游戏刻成长。可用 `/sf storage restore-inventory` 恢复这两种设备的 Paper 饲料槽。

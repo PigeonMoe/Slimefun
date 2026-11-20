@@ -25,6 +25,34 @@ RESEARCH_SPEC.loader.exec_module(RESEARCH)
 
 
 class BlockStorageTest(unittest.TestCase):
+    def test_imports_only_stock_geo_switches_without_removing_saved_reserves(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            resource_config = directory / "resources.yml"
+            resource_config.write_text("""\
+slimefun:
+  oil:
+    enabled: false
+  nether_ice:
+    enabled: true
+addon:
+  resource:
+    enabled: false
+""", encoding="utf8")
+            settings = IMPORT.collect_geo_settings(resource_config)
+            storage = directory / "storage-import"
+            supplies = {("minecraft:overworld", -1, 1): {"slimefun-oil": 7}}
+            IMPORT.publish(storage, {}, geo=supplies, geo_settings=settings)
+            IMPORT.publish(storage, {}, geo=supplies, geo_settings=settings)
+            self.assertEqual(tomllib.loads((storage / "settings-geo.toml").read_text()), {
+                "geo-resources": {"oil": False, "nether_ice": True},
+            })
+            reserve = storage / "geo" / "minecraft:overworld".encode().hex() / "-1_1.toml"
+            self.assertEqual(tomllib.loads(reserve.read_text())["slimefun-oil"], 7)
+            resource_config.write_text('slimefun: {oil: {enabled: "false"}}', encoding="utf8")
+            with self.assertRaisesRegex(ValueError, "slimefun.oil.enabled must be a boolean"):
+                IMPORT.collect_geo_settings(resource_config)
+
     def test_stock_gold_pan_inventory_keeps_its_explicit_preset_without_a_block_record(self):
         fixture = (MODULE_PATH.parent / "paper-storage-export" / "fixtures"
                    / "paper-26.2-electric-gold-pan.sfi").read_text()

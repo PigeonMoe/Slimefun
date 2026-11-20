@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
+use std::sync::atomic::{AtomicU8, Ordering};
+
 use mod_api::{
     AttachmentCodec, AttachmentError, AttachmentType, Compound, Holder, Host, HostTransaction,
     LevelRef, ServerHost, Tag,
@@ -31,7 +33,22 @@ pub(crate) const SCANNER_RESOURCES: [Resource; 4] = [
 pub(crate) const MINER_RESOURCES: [Resource; 3] =
     [Resource::Uranium, Resource::NetherIce, Resource::Salt];
 
+static DISABLED: AtomicU8 = AtomicU8::new(0);
+
 impl Resource {
+    fn disabled_bit(self) -> u8 {
+        1 << match self {
+            Self::Oil => 0,
+            Self::NetherIce => 1,
+            Self::Uranium => 2,
+            Self::Salt => 3,
+        }
+    }
+
+    pub(crate) fn enabled(self) -> bool {
+        DISABLED.load(Ordering::Relaxed) & self.disabled_bit() == 0
+    }
+
     pub fn paper_key(self) -> &'static str {
         match self {
             Self::Oil => "slimefun-oil",
@@ -128,6 +145,31 @@ impl Resource {
         };
         Some(base + roll(bound).filter(|&deviation| deviation < bound)?)
     }
+}
+
+fn disabled_resources(config: Option<&toml::Value>) -> u8 {
+    SCANNER_RESOURCES
+        .into_iter()
+        .filter(|resource| {
+            let key = resource.paper_key().strip_prefix("slimefun-").unwrap();
+            config
+                .and_then(|table| table.get(key))
+                .and_then(toml::Value::as_bool)
+                == Some(false)
+        })
+        .fold(0, |disabled, resource| disabled | resource.disabled_bit())
+}
+
+pub(crate) fn load_config(fresh: bool, config: Option<&toml::Value>) {
+    if fresh {
+        DISABLED.store(disabled_resources(config), Ordering::Relaxed);
+    }
+}
+
+pub(crate) fn registered_miner_resources() -> impl Iterator<Item = Resource> {
+    MINER_RESOURCES
+        .into_iter()
+        .filter(|resource| resource.enabled())
 }
 
 const PAPER_IMPORT: &str = "paper_import";
@@ -332,7 +374,10 @@ pub(crate) fn scan(
     host.transaction(|host, _| {
         let mut sample = None;
         let mut result = Vec::with_capacity(SCANNER_RESOURCES.len());
-        for resource in SCANNER_RESOURCES {
+        for resource in SCANNER_RESOURCES
+            .into_iter()
+            .filter(|resource| resource.enabled())
+        {
             let remaining = if let Some(saved) = read(host, holder, resource)? {
                 saved.remaining
             } else {
@@ -382,13 +427,25 @@ pub(crate) fn mining(
     pos: [i32; 3],
 ) -> Result<Mining, &'static str> {
     let holder = holder(host, level, chunk(pos))?;
-    choose(|resource| read(host, holder, resource).map(|saved| saved.map(|saved| saved.remaining)))
+    let mut resources = registered_miner_resources().peekable();
+    if resources.peek().is_none() {
+        for resource in SCANNER_RESOURCES {
+            if read(host, holder, resource)?.is_some() {
+                return Ok(Mining::Exhausted);
+            }
+        }
+        return Ok(Mining::Unscanned);
+    }
+    choose(resources, |resource| {
+        read(host, holder, resource).map(|saved| saved.map(|saved| saved.remaining))
+    })
 }
 
 fn choose(
+    resources: impl IntoIterator<Item = Resource>,
     mut supply: impl FnMut(Resource) -> Result<Option<u32>, &'static str>,
 ) -> Result<Mining, &'static str> {
-    for resource in MINER_RESOURCES {
+    for resource in resources {
         match supply(resource)? {
             None => return Ok(Mining::Unscanned),
             Some(0) => {}
@@ -401,6 +458,31 @@ fn choose(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn paper_geo_settings_skip_disabled_resources_without_requiring_their_reserves() {
+        let config = toml::Value::Table(
+            "nether_ice = false\nuranium = false\nsalt = true\noil = 0"
+                .parse::<toml::Table>()
+                .unwrap(),
+        );
+        let mask = disabled_resources(Some(&config));
+        assert_eq!(disabled_resources(None), 0);
+        assert_eq!(
+            mask,
+            Resource::NetherIce.disabled_bit() | Resource::Uranium.disabled_bit()
+        );
+        let registered = MINER_RESOURCES
+            .into_iter()
+            .filter(|resource| mask & resource.disabled_bit() == 0);
+        assert_eq!(
+            choose(registered, |resource| {
+                assert_eq!(resource, Resource::Salt);
+                Ok(Some(2))
+            }),
+            Ok(Mining::Available(Resource::Salt))
+        );
+    }
 
     #[test]
     fn reserve_rolls_back_with_operation_and_multiresource_import_is_atomic() {
@@ -531,14 +613,17 @@ mod tests {
             Reserve::decode(&legacy, Resource::Oil).unwrap().remaining,
             0
         );
-        assert_eq!(choose(|_| Ok(None)), Ok(Mining::Unscanned));
-        assert_eq!(choose(|_| Ok(Some(0))), Ok(Mining::Exhausted));
+        assert_eq!(choose(MINER_RESOURCES, |_| Ok(None)), Ok(Mining::Unscanned));
         assert_eq!(
-            choose(|_| Ok(Some(1))),
+            choose(MINER_RESOURCES, |_| Ok(Some(0))),
+            Ok(Mining::Exhausted)
+        );
+        assert_eq!(
+            choose(MINER_RESOURCES, |_| Ok(Some(1))),
             Ok(Mining::Available(Resource::Uranium))
         );
         assert_eq!(
-            choose(|resource| match resource {
+            choose(MINER_RESOURCES, |resource| match resource {
                 Resource::Uranium => Ok(Some(0)),
                 Resource::NetherIce => Ok(Some(1)),
                 _ => unreachable!(),

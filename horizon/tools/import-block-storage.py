@@ -213,6 +213,21 @@ def collect_universal(source):
 GEO_KEYS = ("slimefun-oil", "slimefun-nether_ice", "slimefun-uranium", "slimefun-salt")
 
 
+def collect_geo_settings(config):
+    values = mapping(config.read_text(encoding="utf8"), config).get("slimefun", {})
+    if not isinstance(values, dict):
+        raise ValueError(f"{config}: expected a mapping for the slimefun namespace.")
+    settings = {}
+    for legacy in GEO_KEYS:
+        key = legacy.removeprefix("slimefun-")
+        resource = values.get(key, {})
+        if not isinstance(resource, dict) or type(resource.get("enabled", True)) is not bool:
+            raise ValueError(f"{config}: slimefun.{key}.enabled must be a boolean.")
+        if "enabled" in resource:
+            settings[key] = resource["enabled"]
+    return settings
+
+
 def collect_geo(source, mappings):
     file = source / "stored-chunks" / "chunks.sfc"
     records = {}
@@ -311,7 +326,7 @@ def backpack_record(key, bag):
     return {"size": size, **converted}
 
 
-def render(records, universal=None, players=None, geo=None):
+def render(records, universal=None, players=None, geo=None, geo_settings=None):
     chunks = defaultdict(list)
     for (dimension, position), record in sorted(records.items()):
         x, _, z = position
@@ -390,14 +405,20 @@ def render(records, universal=None, players=None, geo=None):
             lines.extend(("[[backpacks]]", f"id = {bag_id}", f"size = {bag['size']}",
                           *item_fields(bag), ""))
         yield f"backpacks/{uuid}.toml", "\n".join(lines)
+    if geo_settings is not None:
+        yield "settings-geo.toml", "\n".join((
+            "[geo-resources]",
+            *(f"{key} = {str(enabled).lower()}" for key, enabled in geo_settings.items()),
+            "",
+        ))
 
 
-def publish(output, records, universal=None, players=None, geo=None):
+def publish(output, records, universal=None, players=None, geo=None, geo_settings=None):
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix=".storage-import-", dir=output.parent) as temp:
         stage = Path(temp) / "snapshot"
         stage.mkdir()
-        for name, text in render(records, universal, players, geo):
+        for name, text in render(records, universal, players, geo, geo_settings):
             data = text.encode("utf-8")
             if len(data) > DATA_FILE_MAX:
                 raise ValueError(f"Import chunk {name} exceeds Horizon's 64 MiB data file limit.")
@@ -464,6 +485,8 @@ def main():
     parser.add_argument("--map-world", action="append", default=[], metavar="PAPER=DIMENSION")
     parser.add_argument("--player-profiles", type=Path, metavar="PLAYERS_DIRECTORY",
                         help="explicitly replace the source Players directory with an exported snapshot")
+    parser.add_argument("--resources-config", type=Path, metavar="RESOURCES_YML",
+                        help="export the stock Paper GEO resource toggles as a TOML section")
     args = parser.parse_args()
     source = args.paper_storage.resolve()
     output = args.horizon_import_dir.resolve()
@@ -481,17 +504,21 @@ def main():
         if original is not None and (output.is_relative_to(original) or original.is_relative_to(output)):
             parser.error("The import directory and Paper data must be separate.")
     try:
+        geo_settings = collect_geo_settings(args.resources_config) if args.resources_config else None
         with paper_snapshot(source) as root:
             records = collect(root, worlds)
             universal = collect_universal(root)
             players = collect_backpacks(root, profiles)
             geo = collect_geo(root, worlds)
-        publish(output, records, universal, players, geo)
-    except (OSError, ValueError, BadZipFile) as error:
+        publish(output, records, universal, players, geo, geo_settings)
+    except (OSError, ValueError, BadZipFile, yaml.YAMLError) as error:
         parser.error(str(error))
     print(f"Prepared an import with {len(records)} block or inventory locations, "
           f"{len(universal)} universal inventories, {len(players)} backpack profiles, "
           f"and {len(geo)} GEO chunks.")
+    if geo_settings is not None:
+        print(f"Merge the stock GEO resource settings in {output / 'settings-geo.toml'} "
+              "into slimefun-server.toml.")
 
 
 if __name__ == "__main__":
