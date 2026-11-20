@@ -274,7 +274,14 @@ impl Guide {
         };
         let research = player.persistent_data(host);
         let show_hidden = self.show_hidden_groups_in_search.load(Ordering::Relaxed);
-        let mut menu = render(host, research.as_ref(), page, month, show_hidden);
+        let mut menu = render(
+            host,
+            research.as_ref(),
+            page,
+            month,
+            show_hidden,
+            allow_output_chest,
+        );
         if matches!(page, Page::Info) {
             let options = [Preference::Fireworks, Preference::Animation]
                 .into_iter()
@@ -495,8 +502,8 @@ fn render(
     screen: &Page,
     month: i32,
     show_hidden: bool,
+    allow_output_chest: bool,
 ) -> Menu {
-    let allow_output_chest = crate::output_chest::enabled(host.dimension());
     let visible_entry = |entry: &&Entry| visible(entry, allow_output_chest);
     let mut menu = Menu {
         slots: vec![None; 54],
@@ -1019,7 +1026,7 @@ mod tests {
             .iter()
             .find(|group| group.key == "basicMachines")
             .unwrap();
-        let menu = render(&host, None, &Page::Group(basic, 1), 1, false);
+        let menu = render(&host, None, &Page::Group(basic, 1), 1, false, true);
         assert_eq!(menu.slots.len(), 54);
         let craft = lookup("ENHANCED_CRAFTING_TABLE").unwrap();
         assert!(menu.actions.iter().any(|action| matches!(
@@ -1032,12 +1039,12 @@ mod tests {
             "PlayerPersisted".into(),
             Tag::compound([("slimefun:grind_stone", Tag::Byte(1))]),
         )]);
-        let menu = render(&host, Some(&learned), &Page::Group(basic, 1), 1, false);
+        let menu = render(&host, Some(&learned), &Page::Group(basic, 1), 1, false, true);
         let grind = lookup("GRIND_STONE").unwrap();
         assert!(menu.actions.iter().any(|action| matches!(
             action, Some(Action::Push(Page::Recipe(entry))) if std::ptr::eq(*entry, grind)
         )));
-        let recipe = render(&host, None, &Page::Recipe(craft), 1, false);
+        let recipe = render(&host, None, &Page::Recipe(craft), 1, false, true);
         let shown = |slot: usize| {
             recipe.slots[slot]
                 .as_ref()
@@ -1081,7 +1088,7 @@ mod tests {
             .resolve_items(MATERIALS.iter().map(|id| Identifier::parse(id).unwrap()))
             .unwrap();
         let table = lookup("TABLE_SAW").unwrap();
-        let menu = render(&host, None, &Page::Recipe(table), 1, false);
+        let menu = render(&host, None, &Page::Recipe(table), 1, false, true);
         for (slot, material) in [
             (12, "smooth_stone_slab"),
             (13, "stonecutter"),
@@ -1109,7 +1116,7 @@ mod tests {
         ] {
             let miner = lookup(id).unwrap();
             assert_eq!(miner.research.unwrap().cost, cost);
-            let shown = render(&host, None, &Page::Recipe(miner), 1, false);
+            let shown = render(&host, None, &Page::Recipe(miner), 1, false, true);
             assert_eq!(
                 shown.slots[13].as_ref().unwrap().item().id(&host),
                 "minecraft:chest"
@@ -1152,7 +1159,7 @@ mod tests {
         );
         assert_eq!(sifted.research.unwrap().id, "ore_washer");
         let circuit = lookup("BASIC_CIRCUIT_BOARD").unwrap();
-        let shown = render(&host, None, &Page::Recipe(circuit), 1, false);
+        let shown = render(&host, None, &Page::Recipe(circuit), 1, false, true);
         let head = shown.slots[13].as_ref().unwrap();
         assert_eq!(head.item().id(&host), "minecraft:player_head");
         assert!(
@@ -1196,7 +1203,7 @@ mod tests {
             )
             .unwrap();
         let groups = |month, show_hidden| {
-            render(&host, None, &Page::Main, month, show_hidden)
+            render(&host, None, &Page::Main, month, show_hidden, true)
                 .actions
                 .into_iter()
                 .filter_map(|action| match action {
