@@ -27,6 +27,36 @@ pub(crate) const PAPER_SLOTS: [usize; 7] = [20, 21, 22, 29, 30, 31, 43];
 const WORLD_UPDATE: BlockUpdateFlags = BlockUpdateFlags::CLIENTS;
 pub(crate) const DEVICE: &str = "minecraft:player_head";
 
+struct PaperControl {
+    profile: [i32; 4],
+    texture: &'static str,
+    title: &'static str,
+    lore: Option<&'static str>,
+}
+
+// ProgrammableAndroid.newInstance adds these heads after the Paper menu preset
+// is built. BlockMenu.save therefore writes them alongside the actual slots.
+const PAPER_CONTROLS: [PaperControl; 3] = [
+    PaperControl {
+        profile: [2051923214, 1764440002, -1465804083, 1654626908],
+        texture: "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHBzOi8vdGV4dHVyZXMubWluZWNyYWZ0Lm5ldC90ZXh0dXJlLzRhZTI5NDIyZGI0MDQ3ZWZkYjliYWMyY2RhZTVhMDcxOWViNzcyZmNjYzg4YTY2ZDkxMjMyMGIzNDNjMzQxIn19fQ==",
+        title: "§aStart/Continue",
+        lore: None,
+    },
+    PaperControl {
+        profile: [728422456, 1251750602, -1768418679, 1199211128],
+        texture: "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHBzOi8vdGV4dHVyZXMubWluZWNyYWZ0Lm5ldC90ZXh0dXJlL2Q3OGYyYjdlNWU3NTYzOWVhN2ZiNzk2YzM1ZDM2NGM0ZGYyOGI0MjQzZTY2Yjc2Mjc3YWFkY2Q2MjYxMzM3In19fQ==",
+        title: "§bMemory Core",
+        lore: Some("§8⇨ §7Click to open the Script Editor"),
+    },
+    PaperControl {
+        profile: [-1430806123, 377108335, -2105106683, -1825080643],
+        texture: "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHBzOi8vdGV4dHVyZXMubWluZWNyYWZ0Lm5ldC90ZXh0dXJlLzE2MTM5ZmQxYzU2NTRlNTZlOWU0ZTJjOGJlN2ViMmJkNWI0OTlkNjMzNjE2NjYzZmVlZTk5Yjc0MzUyYWQ2NCJ9fX0=",
+        title: "§4Pause",
+        lore: None,
+    },
+];
+
 #[derive(Clone)]
 pub(crate) struct Machine {
     pub owner: u128,
@@ -229,19 +259,87 @@ fn paper_slots(
     host: &dyn Host,
     items: BTreeMap<u32, ItemStack>,
 ) -> Result<BTreeMap<usize, Compound>, &'static str> {
-    items
-        .into_iter()
-        .map(|(slot, stack)| {
-            let index = PAPER_SLOTS
-                .iter()
-                .position(|&value| value as u32 == slot)
-                .ok_or("Paper Android archive has an item outside its inventory slots.")?;
+    let mut saved = BTreeMap::new();
+    for (slot, stack) in items {
+        if let Some(index) = PAPER_SLOTS.iter().position(|&value| value as u32 == slot) {
             let encoded = stack
                 .to_nbt(host)
                 .ok_or("Could not encode a Paper Android item.")?;
-            Ok((index, encoded))
-        })
-        .collect()
+            saved.insert(index, encoded);
+        } else if !is_paper_control(host, slot, &stack) {
+            return Err("Paper Android archive has an item outside its inventory slots.");
+        }
+    }
+    Ok(saved)
+}
+
+fn is_paper_control(host: &dyn Host, slot: u32, stack: &ItemStack) -> bool {
+    let Some(control) = slot
+        .checked_sub(15)
+        .and_then(|index| PAPER_CONTROLS.get(index as usize))
+    else {
+        return false;
+    };
+    if stack.count() != 1 || stack.item().id(host) != DEVICE {
+        return false;
+    }
+    let Some(parts) = stack.components().map(|components| components.as_nbt()) else {
+        return false;
+    };
+    let Some(Tag::Compound(profile)) = parts.get(&"minecraft:profile".into()) else {
+        return false;
+    };
+    let expected_property = Tag::compound([
+        ("name", Tag::String("textures".into())),
+        ("value", Tag::String(control.texture.into())),
+    ]);
+    if profile.len() != 2 + usize::from(profile.contains_key(&"name".into()))
+        || profile
+            .get(&"name".into())
+            .is_some_and(|name| name != &Tag::String("".into()))
+        || !matches!(profile.get(&"id".into()), Some(Tag::IntArray(id)) if id.as_slice() == control.profile)
+        || !matches!(profile.get(&"properties".into()), Some(Tag::List(properties)) if properties.as_slice() == [expected_property])
+        || !parts
+            .get(&"minecraft:custom_name".into())
+            .is_some_and(|name| paper_control_text(name, control.title))
+    {
+        return false;
+    }
+    match (control.lore, parts.get(&"minecraft:lore".into())) {
+        (None, None) => parts.len() == 2,
+        (Some(expected), Some(Tag::List(lore))) => {
+            parts.len() == 3
+                && matches!(lore.as_slice(), [blank, hint] if paper_control_text(blank, "") && paper_control_text(hint, expected))
+        }
+        _ => false,
+    }
+}
+
+fn paper_control_text(tag: &Tag, expected: &str) -> bool {
+    fn is_literal(tag: &Tag, depth: usize) -> bool {
+        if depth >= 8 {
+            return false;
+        }
+        match tag {
+            Tag::String(_) => true,
+            Tag::List(children) => children.iter().all(|child| is_literal(child, depth + 1)),
+            Tag::Compound(parts) => {
+                parts
+                    .iter()
+                    .all(|(key, value)| match key.to_string().as_deref() {
+                        Ok("text" | "color") => matches!(value, Tag::String(_)),
+                        Ok("bold" | "italic" | "underlined" | "strikethrough" | "obfuscated") => {
+                            matches!(value, Tag::Byte(0))
+                        }
+                        Ok("extra") => is_literal(value, depth + 1),
+                        _ => false,
+                    })
+            }
+            _ => false,
+        }
+    }
+
+    is_literal(tag, 0) && crate::network_runtime::paper_text(tag).as_deref() == Some(expected)
 }
 
 pub(crate) fn restore_paper(
@@ -950,9 +1048,79 @@ mod tests {
         );
     }
 
+    fn paper_menu(host: &mut mod_api::testing::FakeHost) -> BTreeMap<u32, ItemStack> {
+        host.registries
+            .resolve_items(
+                [DEVICE, "minecraft:cod", "minecraft:coal"]
+                    .map(|id| Identifier::parse(id).unwrap()),
+            )
+            .unwrap();
+        let paper_name = |labels: &[(&str, &str)]| {
+            Tag::compound([
+                ("text", Tag::String("".into())),
+                (
+                    "extra",
+                    Tag::List(
+                        labels
+                            .iter()
+                            .map(|(label, color)| crate::items::text(label, color, false))
+                            .collect(),
+                    ),
+                ),
+            ])
+        };
+        let mut items = BTreeMap::new();
+        for (slot, label, color) in [
+            (15, "Start/Continue", "green"),
+            (16, "Memory Core", "aqua"),
+            (17, "Pause", "dark_red"),
+        ] {
+            let control = &PAPER_CONTROLS[(slot - 15) as usize];
+            let mut head = Kind::Vanilla(DEVICE).stack(host, 1).unwrap();
+            let mut parts = Compound::from([
+                (
+                    "minecraft:profile".into(),
+                    Tag::compound([
+                        ("id", Tag::IntArray(control.profile.into())),
+                        ("name", Tag::String("".into())),
+                        (
+                            "properties",
+                            Tag::List(vec![Tag::compound([
+                                ("name", Tag::String("textures".into())),
+                                ("value", Tag::String(control.texture.into())),
+                            ])]),
+                        ),
+                    ]),
+                ),
+                (
+                    "minecraft:custom_name".into(),
+                    paper_name(&[(label, color)]),
+                ),
+            ]);
+            if slot == 16 {
+                parts.insert(
+                    "minecraft:lore".into(),
+                    Tag::List(vec![
+                        Tag::String("".into()),
+                        paper_name(&[
+                            ("⇨ ", "dark_gray"),
+                            ("Click to open the Script Editor", "gray"),
+                        ]),
+                    ]),
+                );
+            }
+            head.apply_components(&parts).unwrap();
+            items.insert(slot, head);
+        }
+        items.insert(20, Kind::Vanilla("minecraft:cod").stack(host, 3).unwrap());
+        items.insert(43, Kind::Vanilla("minecraft:coal").stack(host, 2).unwrap());
+        items
+    }
+
     #[test]
-    fn old_paper_program_fields_round_trip_and_keep_fishing_instructions() {
-        let host = mod_api::testing::FakeHost::new();
+    fn paired_paper_android_slots_drop_only_the_stock_buttons_and_keep_the_program() {
+        let mut host = mod_api::testing::FakeHost::new();
+        let items = paper_menu(&mut host);
         let metadata = toml::Table::from_iter([
             (
                 "owner".into(),
@@ -967,7 +1135,7 @@ mod tests {
             ("index".into(), "1".into()),
             ("paused".into(), "false".into()),
         ]);
-        let saved = legacy(&host, &metadata, BTreeMap::new()).unwrap();
+        let saved = legacy(&host, &metadata, items.clone()).unwrap();
         let read = Machine::decode(&saved.encode().unwrap()).unwrap();
         assert_eq!(read.owner, saved.owner);
         assert_eq!(
@@ -978,6 +1146,26 @@ mod tests {
         assert_eq!(read.index, 1);
         assert_eq!(read.facing, Facing::South);
         assert!(!read.paused);
+        assert_eq!(read.slots.len(), 2);
+        assert_eq!(slot(&host, &read, 0).as_ref(), items.get(&20));
+        assert_eq!(slot(&host, &read, FUEL).as_ref(), items.get(&43));
+
+        let mut swapped = items.clone();
+        swapped.insert(15, items[&17].clone());
+        assert!(legacy(&host, &metadata, swapped).is_err());
+
+        let mut wrong_owner = items[&15].components().unwrap().as_nbt().clone();
+        let Some(Tag::Compound(profile)) = wrong_owner.get_mut(&"minecraft:profile".into()) else {
+            panic!("stock button profile")
+        };
+        profile.insert("id".into(), Tag::IntArray(vec![0, 0, 0, 0]));
+        let mut arbitrary_head = items.clone();
+        arbitrary_head
+            .get_mut(&15)
+            .unwrap()
+            .set_components(wrong_owner)
+            .unwrap();
+        assert!(legacy(&host, &metadata, arbitrary_head).is_err());
     }
 
     #[test]
@@ -986,20 +1174,31 @@ mod tests {
         let pos = [2, 64, 4];
         let level = host.level.level();
         host.level.block_entity(pos);
-        host.registries
-            .resolve_items([Identifier::parse("minecraft:coal").unwrap()])
-            .unwrap();
-        let coal = Kind::Vanilla("minecraft:coal").stack(&host, 2).unwrap();
+        let items = paper_menu(&mut host);
         let mut live = Machine::new(0xb758, Facing::East);
         live.script = Script::parse("START-TURN_LEFT-REPEAT").unwrap();
         live.index = 1;
         live.fuel = 5.5;
         live.paused = false;
         assert!(save(&mut host, pos, live.clone()));
-        restore_installed_inventory(&mut host, level, pos, BTreeMap::from([(43, coal.clone())]))
+        let original = host.attachments.to_nbt();
+        let mut invalid = items.clone();
+        invalid
+            .get_mut(&16)
+            .unwrap()
+            .apply_components(&Compound::from([(
+                "minecraft:custom_data".into(),
+                Tag::compound([("addon_data", Tag::Byte(1))]),
+            )]))
             .unwrap();
+        assert!(restore_installed_inventory(&mut host, level, pos, invalid).is_err());
+        assert_eq!(host.attachments.to_nbt(), original);
+
+        restore_installed_inventory(&mut host, level, pos, items.clone()).unwrap();
         let restored = data(&mut host, level, pos).unwrap();
-        assert_eq!(slot(&host, &restored, FUEL), Some(coal));
+        assert_eq!(restored.slots.len(), 2);
+        assert_eq!(slot(&host, &restored, 0).as_ref(), items.get(&20));
+        assert_eq!(slot(&host, &restored, FUEL).as_ref(), items.get(&43));
         live.inventory_imported = true;
         live.slots = restored.slots.clone();
         assert_eq!(restored.encode().unwrap(), live.encode().unwrap());
