@@ -1833,7 +1833,7 @@ mod tests {
         let mut host = FakeHost::new();
         host.registries
             .resolve_items(
-                ["minecraft:player_head", "minecraft:jack_o_lantern"]
+                ["minecraft:player_head", "minecraft:jack_o_lantern", "minecraft:firework_rocket"]
                     .map(|material| Identifier::parse(material).unwrap()),
             )
             .unwrap();
@@ -1848,6 +1848,7 @@ mod tests {
                 .collect::<Vec<_>>()
         };
         for (key, month, query) in [
+            ("birthday", 10, "生日蛋糕"),
             ("christmas", 12, "hot chocolate"),
             ("halloween", 10, "rainbow_wool_halloween"),
             ("valentinesDay", 2, "rainbow_wool_valentine"),

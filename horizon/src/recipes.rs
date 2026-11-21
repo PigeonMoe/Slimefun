@@ -401,6 +401,21 @@ pub(crate) const CRAFTING: &[CraftingRecipe] = &[
     seasonal(
         [
             None,
+            Some(vanilla!("torch")),
+            None,
+            Some(vanilla!("sugar")),
+            Some(vanilla!("cake")),
+            Some(vanilla!("sugar")),
+            None,
+            None,
+            None,
+        ],
+        crate::seasonal_gifts::BIRTHDAY_CAKE,
+        1,
+    ),
+    seasonal(
+        [
+            None,
             None,
             None,
             Some(vanilla!("lime_dye")),
@@ -1718,11 +1733,23 @@ mod resource_recipe_tests {
                     "minecraft:potion",
                     "minecraft:pumpkin_pie",
                     "minecraft:apple",
+                    "minecraft:cake",
                 ]
                 .map(|id| mod_api::Identifier::parse(id).unwrap()),
             )
             .unwrap();
         let cases: &[(&str, &str, u32, &[(usize, &str)])] = &[
+            (
+                "BIRTHDAY_CAKE",
+                "cake",
+                1,
+                &[
+                    (1, "minecraft:torch"),
+                    (3, "minecraft:sugar"),
+                    (4, "minecraft:cake"),
+                    (5, "minecraft:sugar"),
+                ],
+            ),
             (
                 "CHRISTMAS_EGG_NOG",
                 "potion",

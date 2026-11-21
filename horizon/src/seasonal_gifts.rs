@@ -12,6 +12,7 @@ use crate::{
     recipes::Stack,
 };
 
+item!(BIRTHDAY_CAKE, "cake", "Birthday Cake", "aqua", None, None);
 item!(
     CHRISTMAS_PRESENT,
     "player_head",
