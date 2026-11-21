@@ -384,12 +384,6 @@ fn enchant(
 ) -> Attempt<(Vec<ItemStack>, u32)> {
     let mut applied = levels(host, target, DIRECT)?;
     let incoming = levels(host, book, STORED)?;
-    // Paper counts every enchantment already present on both the item and book,
-    // including one that will also be replaced by the new enchantment.
-    let overlap = applied
-        .keys()
-        .filter(|id| incoming.contains_key(*id))
-        .count();
     let mut selected = match select_levels(incoming, rules, viewed, |id| {
         host.enchantment_supports(id, target.item())
     })? {
@@ -402,12 +396,20 @@ fn enchant(
         });
     }
     let transfers = u32::try_from(selected.len()).ok()?;
-    if transfers == 0
-        || rules
-            .count_limit()
-            .is_some_and(|limit| selected.len() + overlap > limit)
-    {
+    if transfers == 0 {
         return None;
+    }
+    if let Some(limit) = rules.count_limit() {
+        // Paper's ItemMeta.hasEnchant checks the book's direct enchantments.
+        // Its stored enchantments supply the transfers counted separately here.
+        let book_enchantments = levels(host, book, DIRECT)?;
+        let overlap = applied
+            .keys()
+            .filter(|id| book_enchantments.contains_key(*id))
+            .count();
+        if selected.len() + overlap > limit {
+            return None;
+        }
     }
     // Paper uses unsafe Bukkit writes after the material and configured limits
     // check, including for mutually exclusive or over-vanilla-level enchantments.
@@ -631,7 +633,7 @@ mod tests {
     }
 
     #[test]
-    fn auto_enchanter_tiers_match_paper_equal_lower_and_counting_overlap() {
+    fn auto_enchanter_tiers_match_paper_overrides_and_lower_level_filtering() {
         let host = host();
         let sword = item(
             &host,
@@ -679,15 +681,6 @@ max-enchants = 2
                 .get(&"minecraft:sharpness".into()),
             Some(&Tag::Int(6))
         );
-        let count = config(
-            r#"
-[enchantment-machines.AUTO_ENCHANTER]
-override-existing-enchants-lvl = true
-use-max-enchants = true
-max-enchants = 2
-"#,
-        );
-        assert!(evaluate(&host, one, &inputs, &count, false).is_none());
         let equal = [
             Some(sword),
             Some(item(
@@ -706,6 +699,41 @@ max-enchants = 2
                 .work_ticks,
             150
         );
+    }
+
+    #[test]
+    fn auto_enchanter_count_limit_counts_overlap_with_direct_book_enchantments() {
+        let host = host();
+        let rules = config(
+            r#"
+[enchantment-machines.AUTO_ENCHANTER]
+use-max-enchants = true
+max-enchants = 1
+"#,
+        );
+        let one = machine("AUTO_ENCHANTER");
+        let sharpness = "minecraft:sharpness";
+        let sword = item(&host, Kind::Vanilla(SWORD), DIRECT, &[(sharpness, 2)]);
+        let mut book = item(&host, ENCHANTED_BOOK, STORED, &[(sharpness, 3)]);
+        let inputs = [Some(book.clone()), Some(sword.clone())];
+        let plan = evaluate(&host, one, &inputs, &rules, false)
+            .unwrap()
+            .ok()
+            .unwrap();
+        assert_eq!(plan.work_ticks, 150);
+        assert_eq!(
+            plan.outputs[0],
+            item(&host, Kind::Vanilla(SWORD), DIRECT, &[(sharpness, 3)])
+        );
+        assert_eq!(plan.outputs[1], BOOK.stack(&host, 1).unwrap());
+
+        book.apply_components(&Compound::from([(
+            DIRECT.into(),
+            Tag::compound([(sharpness, Tag::Int(1))]),
+        )]))
+        .unwrap();
+        let inputs = [Some(book), Some(sword)];
+        assert!(evaluate(&host, one, &inputs, &rules, false).is_none());
     }
 
     #[test]
