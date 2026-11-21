@@ -33,6 +33,7 @@ pub(crate) use locale::localize_item_components;
 pub(crate) use locale::research_name;
 
 const TITLE: &str = "远古工艺之书";
+const DASHBOARD_STYLE: &str = "pigeonmoe:life_skills_menu";
 const BOOK_LORE: &[&str] = &[
     "",
     "&e右键 &8⇨ &7浏览物品",
@@ -208,6 +209,12 @@ enum Page {
     Search(Arc<str>),
 }
 
+#[derive(Clone, Copy)]
+enum Presentation {
+    Book,
+    Dashboard,
+}
+
 #[derive(Clone)]
 enum Action {
     Push(Page),
@@ -226,6 +233,7 @@ enum Action {
 struct View {
     window: i32,
     path: Vec<Page>,
+    presentation: Presentation,
     actions: [Option<Action>; 54],
 }
 
@@ -233,7 +241,7 @@ struct View {
 struct Reader {
     history: Vec<Page>,
     view: Option<View>,
-    waiting_for_search: Option<Vec<Page>>,
+    waiting_for_search: Option<(Vec<Page>, Presentation)>,
 }
 
 pub(crate) struct Guide {
@@ -296,8 +304,8 @@ impl Guide {
     }
 
     pub(crate) fn tick(&self, host: &mut dyn ServerHost, player: PlayerRef) {
-        if let Some(page) = self.learning.tick(host, player) {
-            self.show(host, player, page);
+        if let Some((path, presentation)) = self.learning.tick(host, player) {
+            self.show(host, player, path, presentation);
         }
     }
 
@@ -313,13 +321,18 @@ impl Guide {
 
     pub(crate) fn open(&self, host: &mut dyn ServerHost, player: PlayerRef) {
         let path = self.last_path(player.uuid());
-        self.show(host, player, path);
+        self.show(host, player, path, Presentation::Book);
+    }
+
+    pub(crate) fn open_dashboard(&self, host: &mut dyn ServerHost, player: PlayerRef) {
+        let path = self.last_path(player.uuid());
+        self.show(host, player, path, Presentation::Dashboard);
     }
 
     pub(crate) fn search(&self, host: &mut dyn ServerHost, player: PlayerRef, query: &str) {
         let mut history = self.last_path(player.uuid());
         history.push(Page::Search(Arc::from(query)));
-        self.show(host, player, history);
+        self.show(host, player, history, Presentation::Book);
     }
 
     pub(crate) fn chat(&self, host: &mut dyn ServerHost, player: u128, query: &str) -> bool {
@@ -329,10 +342,10 @@ impl Guide {
             .unwrap()
             .get_mut(&player)
             .and_then(|reader| reader.waiting_for_search.take());
-        if let Some(mut path) = path {
+        if let Some((mut path, presentation)) = path {
             if let Some(player) = host.player(player) {
                 path.push(Page::Search(Arc::from(query)));
-                self.show(host, player, path);
+                self.show(host, player, path, presentation);
             }
             return true;
         }
@@ -354,11 +367,17 @@ impl Guide {
         if player.entity().is_shift_key_down(host) == Some(true) {
             path.push(Page::Info);
         }
-        self.show(host, player, path);
+        self.show(host, player, path, Presentation::Book);
         true
     }
 
-    fn show(&self, host: &mut dyn ServerHost, player: PlayerRef, mut path: Vec<Page>) {
+    fn show(
+        &self,
+        host: &mut dyn ServerHost,
+        player: PlayerRef,
+        mut path: Vec<Page>,
+        presentation: Presentation,
+    ) {
         if !availability::world_enabled(host.dimension()) {
             availability::Denied::World.tell(host, player);
             return;
@@ -449,12 +468,15 @@ impl Guide {
                 Some(Action::Back),
             );
         }
-        let title = match page {
+        let mut title = match page {
             Page::Info => Text::literal("设置与关于"),
             Page::Search(query) => Text::literal(search_title(query)),
             _ if cheat => Text::literal("远古工艺之书 · 作弊模式"),
             _ => Text::literal(TITLE),
         };
+        if matches!(presentation, Presentation::Dashboard) {
+            title.style.insertion = Some(DASHBOARD_STYLE.into());
+        }
         if let Ok(Some(window)) =
             host.open_menu(player.uuid(), 6, title, menu.slots, MenuReplace::CloseFirst)
         {
@@ -468,6 +490,7 @@ impl Guide {
             reader.view = Some(View {
                 window,
                 path,
+                presentation,
                 actions: menu.actions,
             });
             reader.waiting_for_search = None;
@@ -506,6 +529,7 @@ impl Guide {
             return;
         };
         let mut path = view.path;
+        let presentation = view.presentation;
         if matches!(path.first(), Some(Page::Cheat)) && !can_cheat(host, player) {
             host.close_menu(event.uuid);
             let _ = player.tell(host, colored_label("&c只有二级及以上管理员可以使用作弊模式。"));
@@ -528,10 +552,11 @@ impl Guide {
                 if (topic.id == crate::recipes::CHEST_RESEARCH.id && !availability.output_chest)
                     || !research_available(topic.id, availability.tickers, availability.dimension)
                 {
-                    self.show(host, player, path);
+                    self.show(host, player, path, presentation);
                     return;
                 }
-                if !learned(host, player, topic) && !self.learning.start(host, player, topic, &path)
+                if !learned(host, player, topic)
+                    && !self.learning.start(host, player, topic, &path, presentation)
                 {
                     return;
                 }
@@ -565,7 +590,7 @@ impl Guide {
                     .unwrap()
                     .entry(event.uuid)
                     .or_default()
-                    .waiting_for_search = Some(path);
+                    .waiting_for_search = Some((path, presentation));
                 let _ = player.tell(host, colored_label("&b请在聊天栏输入要搜索的物品。"));
                 return;
             }
@@ -579,7 +604,7 @@ impl Guide {
                 return;
             }
         }
-        self.show(host, player, path);
+        self.show(host, player, path, presentation);
     }
 
     pub(crate) fn closed(&self, event: &MenuClosedEvent) {
@@ -1932,6 +1957,7 @@ mod tests {
                 view: Some(View {
                     window: 3,
                     path: history,
+                    presentation: Presentation::Book,
                     actions: std::array::from_fn(|_| None),
                 }),
                 waiting_for_search: None,

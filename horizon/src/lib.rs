@@ -919,6 +919,7 @@ impl Hooks for Slimefun {
             Command::new("sf guide"),
             Command::new("slimefun open_guide"),
             Command::new("sf open_guide"),
+            Command::new("sf dashboard_guide"),
             Command::op("sf life_menu <target:player>", 4),
             Command::new("slimefun search [query:text]"),
             Command::new("sf search [query:text]"),
@@ -1033,12 +1034,12 @@ impl Hooks for Slimefun {
                 }
                 return Flow::Cancel;
             }
-            Some(action @ ("guide" | "open_guide")) => {
+            Some(action @ ("guide" | "open_guide" | "dashboard_guide")) => {
                 if let CommandSource::Player { player, .. } = *event.source {
-                    if action == "guide" {
-                        guide::give(host, player);
-                    } else {
-                        self.guide.open(host, player);
+                    match action {
+                        "guide" => guide::give(host, player),
+                        "dashboard_guide" => self.guide.open_dashboard(host, player),
+                        _ => self.guide.open(host, player),
                     }
                 } else {
                     let _ = host.commands().feedback(Text::literal("只有玩家可以使用此命令。"));
