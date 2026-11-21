@@ -9,7 +9,8 @@ use mod_api::{
 };
 
 use crate::guide::strip_colors;
-use crate::machine::{Dispenser, Refusal, deposit_stack};
+use crate::lifeskills::Production;
+use crate::machine::{Dispenser, Machine, Refusal, deposit_stack};
 use crate::network_runtime::paper_text;
 use crate::output_chest;
 use crate::random::Rolls;
@@ -43,6 +44,7 @@ struct Output {
     holder: BlockEntityRef,
     dispenser: Dispenser,
     stack: ItemStack,
+    production: Option<Production>,
 }
 
 enum Action {
@@ -84,6 +86,7 @@ impl DelayedCrafts {
         let output = Output {
             holder,
             dispenser,
+            production: Production::for_stack(Machine::Compressing, player, &stack),
             stack,
         };
         let actions = STEPS
@@ -120,6 +123,7 @@ impl DelayedCrafts {
             holder,
             dispenser,
             stack,
+            production: None,
         };
         self.queue(
             host,
@@ -152,6 +156,7 @@ impl DelayedCrafts {
             holder,
             dispenser,
             stack,
+            production: None,
         };
         self.queue(
             host,
@@ -172,6 +177,7 @@ impl DelayedCrafts {
         let output = Output {
             holder,
             dispenser,
+            production: Production::for_stack(Machine::ArmorCrafting, player, &stack),
             stack,
         };
         let sounds = [
@@ -487,7 +493,15 @@ impl Output {
                 .ok_or(())?;
             Ok(())
         });
-        result.map_err(|_| self)
+        match result {
+            Ok(()) => {
+                if let Some(production) = self.production {
+                    production.complete(host);
+                }
+                Ok(())
+            }
+            Err(()) => Err(self),
+        }
     }
 }
 

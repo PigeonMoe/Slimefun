@@ -8,6 +8,7 @@ use mod_api::{
 use crate::backpacks;
 use crate::compressor::DelayedCrafts;
 use crate::items::{Kind, OUTPUT_CHEST, SIFTED_ORE, STONE_CHUNK};
+use crate::lifeskills::Production;
 use crate::output_chest;
 use crate::random::Rolls;
 use crate::recipes::{
@@ -357,7 +358,8 @@ impl Machine {
             return Err(Refusal::Locked);
         }
 
-        host.transaction(|host, tx| {
+        let mut production = None;
+        let result = host.transaction(|host, tx| {
             let slots = dispenser.slots(host);
             match self {
                 Self::Grinding
@@ -433,7 +435,10 @@ impl Machine {
                         }
 
                         deposit(host, tx, dispenser, output)?;
-                        return consume(host, tx, &dispenser.place(slot), input, consumption);
+                        consume(host, tx, &dispenser.place(slot), input, consumption)?;
+                        production =
+                            Production::for_recipe(self, player, output.kind.id(), output.count);
+                        return Ok(());
                     }
                     Err(Refusal::MissingRecipe)
                 }
@@ -567,10 +572,19 @@ impl Machine {
                             _ => unreachable!(),
                         };
                     }
-                    deposit_output(host, tx, dispenser, &output)
+                    deposit_output(host, tx, dispenser, &output)?;
+                    production =
+                        Production::for_recipe(self, player, recipe.output.kind.id(), output.count());
+                    Ok(())
                 }
             }
-        })
+        });
+        if result.is_ok()
+            && let Some(production) = production
+        {
+            production.complete(host);
+        }
+        result
     }
 }
 
