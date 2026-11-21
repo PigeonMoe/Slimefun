@@ -6,7 +6,7 @@ use std::{collections::BTreeMap, sync::Mutex};
 
 use mod_api::{Compound, GameMode, Host, Identifier, PlayerRef, ServerHost, SoundSource, Tag};
 
-use super::{Page, catalog, colored_label, research_name};
+use super::{Page, Presentation, catalog, colored_label, research_name};
 use crate::{random::Rolls, recipes::Research, research};
 
 pub(super) use fireworks::research_rocket;
@@ -59,7 +59,7 @@ struct Study {
     topic: &'static Research,
     elapsed: u32,
     step: usize,
-    return_path: Option<Vec<Page>>,
+    return_path: Option<(Vec<Page>, Presentation)>,
 }
 
 #[derive(Default)]
@@ -121,6 +121,7 @@ impl Learning {
         player: PlayerRef,
         topic: &'static Research,
         path: &[Page],
+        presentation: Presentation,
     ) -> bool {
         let Settings {
             free_in_creative, ..
@@ -141,7 +142,7 @@ impl Learning {
                 topic,
                 elapsed: 0,
                 step: 0,
-                return_path: Some(path.to_vec()),
+                return_path: Some((path.to_vec(), presentation)),
             },
         );
         host.close_menu(player.uuid());
@@ -174,7 +175,11 @@ impl Learning {
             });
     }
 
-    pub(super) fn tick(&self, host: &mut dyn ServerHost, player: PlayerRef) -> Option<Vec<Page>> {
+    pub(super) fn tick(
+        &self,
+        host: &mut dyn ServerHost,
+        player: PlayerRef,
+    ) -> Option<(Vec<Page>, Presentation)> {
         let uuid = player.uuid();
         let (topic, step, percent) = {
             let mut active = self.active.lock().unwrap();
@@ -472,12 +477,12 @@ mod tests {
         assert!(super::super::can_cheat(&host, player));
 
         let guide = Learning::default();
-        assert!(!guide.start(&mut host, player, topic, &[Page::Main]));
+        assert!(!guide.start(&mut host, player, topic, &[Page::Main], Presentation::Book));
         assert_eq!(host.state, (Compound::new(), topic.cost + 4));
         assert_eq!(host.journal.closed(), [(1, false)]);
 
         host.deny_experience_write = false;
-        assert!(!guide.start(&mut host, player, topic, &[Page::Main]));
+        assert!(!guide.start(&mut host, player, topic, &[Page::Main], Presentation::Book));
         assert_eq!(host.state.1, 4);
         for _ in 0..20 {
             assert!(guide.tick(&mut host, player).is_none());
@@ -490,7 +495,7 @@ mod tests {
         let config: toml::Table = "[researches]\nenable-fireworks = false".parse().unwrap();
         reopened.configure(config.get("researches"));
         reopened.resume(&host, player);
-        assert!(!reopened.start(&mut host, player, topic, &[Page::Main]));
+        assert!(!reopened.start(&mut host, player, topic, &[Page::Main], Presentation::Book));
         for _ in 0..79 {
             assert!(reopened.tick(&mut host, player).is_none());
         }
