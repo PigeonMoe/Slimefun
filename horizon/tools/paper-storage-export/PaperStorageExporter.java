@@ -116,7 +116,8 @@ public final class PaperStorageExporter extends JavaPlugin {
                     String name = from.getFileName().toString();
                     try {
                         if (directory.endsWith("-inventories") && name.endsWith(".sfi")) {
-                            Files.writeString(to, normalize(Files.readString(from)));
+                            boolean requirePreset = directory.equals("universal-inventories");
+                            Files.writeString(to, normalize(Files.readString(from), requirePreset));
                         } else if (directory.equals("Players") && name.matches(
                                 "[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}\\.yml")) {
                             Files.writeString(to, normalizePlayer(Files.readString(from)));
@@ -132,10 +133,13 @@ public final class PaperStorageExporter extends JavaPlugin {
         }
     }
 
-    static String normalize(String input) throws Exception {
+    static String normalize(String input, boolean requirePreset) throws Exception {
         Map<?, ?> document = readDocument(input);
-        if (!(document.get("preset") instanceof String preset) || preset.isBlank()) {
-            throw new IOException("The inventory has no Slimefun preset.");
+        // Paper positional menus can get their preset from the registered block.
+        // Preserve an absent key so Horizon can perform the same identity check.
+        if ((requirePreset || document.containsKey("preset"))
+                && (!(document.get("preset") instanceof String preset) || preset.isBlank())) {
+            throw new IOException("The inventory has no valid Slimefun preset.");
         }
         Map<?, ?> normalized = normalizeSlots(document, 54, "", true);
         return normalized == document ? input : new Yaml().dump(normalized);

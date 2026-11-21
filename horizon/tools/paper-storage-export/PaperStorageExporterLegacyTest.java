@@ -54,11 +54,20 @@ public final class PaperStorageExporterLegacyTest {
         Files.writeString(eggFile, unknown);
         verifyRefused(source, result, "Paper could not deserialize ItemMeta", eggFile, unknown);
 
+        String olderSkull = skull.replace("preset: ELECTRIC_FURNACE\n", "");
+        String olderEgg = egg.replace("preset: ELECTRIC_FURNACE\n", "");
+        Path olderSkullFile = stored.resolve("world;3;64;2.sfi");
+        Path olderEggFile = stored.resolve("world;4;64;2.sfi");
+        Files.writeString(olderSkullFile, olderSkull);
+        Files.writeString(olderEggFile, olderEgg);
+        Path blocks = Files.createDirectories(source.resolve("stored-blocks/world"));
+        Files.writeString(blocks.resolve("0_0.sfb"),
+                "world;3;64;2: '{\"id\":\"ELECTRIC_FURNACE\",\"energy-charge\":\"18\"}'\n");
         Files.writeString(eggFile, egg);
         PaperStorageExporter.exportSnapshot(source, result);
         Path repeated = Path.of("legacy-repeated");
         PaperStorageExporter.exportSnapshot(source, repeated);
-        for (Path file : new Path[] {skullFile, eggFile}) {
+        for (Path file : new Path[] {skullFile, eggFile, olderSkullFile, olderEggFile}) {
             Path relative = source.relativize(file);
             if (Files.mismatch(result.resolve(relative), repeated.resolve(relative)) != -1) {
                 throw new AssertionError("Repeating the export changed " + relative);
@@ -74,7 +83,17 @@ public final class PaperStorageExporterLegacyTest {
                 "{Boss_NbtTag:{Boss_V4:\"LavaLurker\"}}"))) {
             throw new AssertionError("The historic plugin NBT changed: " + pluginData);
         }
-        if (!skull.equals(Files.readString(skullFile)) || !egg.equals(Files.readString(eggFile))) {
+        Path olderSkullOutput = result.resolve(source.relativize(olderSkullFile));
+        Path olderEggOutput = result.resolve(source.relativize(olderEggFile));
+        if (!profile.equals(component(olderSkullOutput, "19", "minecraft:profile"))
+                || !pluginData.equals(component(olderEggOutput, "24", "minecraft:custom_data"))
+                || ((Map<?, ?>) new Yaml().load(Files.readString(olderSkullOutput))).containsKey("preset")
+                || ((Map<?, ?>) new Yaml().load(Files.readString(olderEggOutput))).containsKey("preset")) {
+            throw new AssertionError("A presetless menu lost item data or acquired a synthetic identity.");
+        }
+        if (!skull.equals(Files.readString(skullFile)) || !egg.equals(Files.readString(eggFile))
+                || !olderSkull.equals(Files.readString(olderSkullFile))
+                || !olderEgg.equals(Files.readString(olderEggFile))) {
             throw new AssertionError("The source snapshot changed during export.");
         }
 
@@ -159,7 +178,7 @@ public final class PaperStorageExporterLegacyTest {
 
     private static String component(Path file, String slot, String component) throws Exception {
         String data = Files.readString(file);
-        if (!data.equals(PaperStorageExporter.normalize(data))) {
+        if (!data.equals(PaperStorageExporter.normalize(data, false))) {
             throw new AssertionError("An exported inventory changed when normalized again.");
         }
         Map<?, ?> root = new Yaml().load(data);

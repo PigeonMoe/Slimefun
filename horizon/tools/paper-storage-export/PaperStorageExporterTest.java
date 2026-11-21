@@ -49,7 +49,24 @@ public final class PaperStorageExporterTest {
             assertRefused(source, output);
             assertRefused(source, source.resolve("unexpected-nested-output"));
 
+            Path universal = Files.createDirectory(source.resolve("universal-inventories"))
+                    .resolve("TEST_SHARED.sfi");
+            String noPreset = MODERN.replace("preset: ELECTRIC_FURNACE\n", "");
+            Files.writeString(universal, noPreset);
+            Path rejectedUniversal = root.resolve("rejected-universal");
+            assertRefused(source, rejectedUniversal);
+            if (Files.exists(rejectedUniversal) || !noPreset.equals(Files.readString(universal))) {
+                throw new AssertionError("A universal menu without a preset published output or changed its source.");
+            }
+            Files.delete(universal);
+
             Path duplicate = menus.resolve("world;2;72;-10.sfi");
+            Files.writeString(duplicate, MODERN.replace("ELECTRIC_FURNACE", "[ELECTRIC_FURNACE]"));
+            Path rejectedPreset = root.resolve("rejected-preset");
+            assertRefused(source, rejectedPreset);
+            if (Files.exists(rejectedPreset)) {
+                throw new AssertionError("A malformed positional preset published output.");
+            }
             String malformed = MODERN + "'19':\n";
             Files.writeString(duplicate, malformed);
             Path rejected = root.resolve("rejected");
@@ -83,12 +100,12 @@ public final class PaperStorageExporterTest {
                       type: STONE
                       amount: 4
                     """;
-            String normalized = PaperStorageExporter.normalize(legacy);
+            String normalized = PaperStorageExporter.normalize(legacy, false);
             if (!normalized.contains("schema_version: 1")
                     || !normalized.contains("id: minecraft:stone")
                     || !normalized.contains("count: 4")
                     || !normalized.contains("plugin_byte:1b")
-                    || !normalized.equals(PaperStorageExporter.normalize(normalized))) {
+                    || !normalized.equals(PaperStorageExporter.normalize(normalized, false))) {
                 throw new AssertionError("The decoded legacy slot was not exported as components.");
             }
             String profile = """
