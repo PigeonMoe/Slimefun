@@ -1547,6 +1547,60 @@ mod tests {
     }
 
     #[test]
+    fn electrical_items_preserve_paper_machine_details_on_stacks_and_guide_icons() {
+        mod_api::__private::initialize().unwrap();
+        let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
+        let mut host = FakeHost::new();
+        host.registries
+            .resolve_items(
+                ["minecraft:furnace", "minecraft:crafting_table", "minecraft:red_terracotta"]
+                    .map(|material| Identifier::parse(material).unwrap()),
+            )
+            .unwrap();
+        let cases = [
+            (
+                "ELECTRIC_ORE_GRINDER_2",
+                &[
+                    "",
+                    "&r矿物粉碎机与磨石的完美结合",
+                    "",
+                    "&4终局机器",
+                    "&8⇨ &b⚡ &7速度: &b4.0x",
+                    "&8⇨ &e⚡ &730 J/s",
+                ][..],
+            ),
+            (
+                "ELECTRIC_INGOT_FACTORY_3",
+                &["", "&4终局机器", "&8⇨ &b⚡ &7速度: &b8.0x", "&8⇨ &e⚡ &740 J/s"][..],
+            ),
+            (
+                "CHARGING_BENCH",
+                &[
+                    "",
+                    "&r能够给物品充电, 比如喷气背包",
+                    "",
+                    "&e基础机器",
+                    "&8⇨ &e⚡ &7128 J 缓冲",
+                    "&8⇨ &e⚡ &7能源损失率: &c50%",
+                ][..],
+            ),
+        ];
+        for (id, lore) in cases {
+            let entry = lookup(id).unwrap();
+            let real = entry.item.kind.stack(&host, 1).unwrap();
+            let icon = entry_icon(&host, entry, 1).unwrap();
+            let expected = Tag::List(lore.iter().copied().map(colored_lore).collect());
+            for stack in [real, icon] {
+                assert_eq!(
+                    stack.components().unwrap().as_nbt().get(&"minecraft:lore".into()),
+                    Some(&expected),
+                    "{id}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn capacitor_lore_keeps_the_paper_range_tier_and_capacity_on_each_stack() {
         use crate::network_runtime::paper_text;
 

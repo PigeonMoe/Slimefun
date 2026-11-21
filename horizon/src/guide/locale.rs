@@ -91,16 +91,19 @@ pub(crate) fn localize_item_components(id: &str, components: &mut Compound) {
     for line in lore {
         let displayed = literal(line);
         let content = base.and(name).filter(|_| displayed.starts_with("Content: "));
+        let styled = crate::network_runtime::paper_text(line);
         let translated = content
             .or_else(|| {
-                let styled = crate::network_runtime::paper_text(line)?;
+                let styled = styled.as_deref()?;
                 translations
                     .iter()
-                    .find_map(|(source, target)| (source == &styled).then_some(*target))
+                    .find_map(|(source, target)| (source == styled).then_some(*target))
             })
             .or_else(|| shared_lore(&displayed));
         if let Some(target) = translated {
             *line = colored_lore(target);
+        } else if let Some(target) = styled.as_deref().and_then(crate::machine_lore::localize) {
+            *line = colored_lore(&target);
         }
     }
 }

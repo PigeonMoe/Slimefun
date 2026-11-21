@@ -65,6 +65,7 @@ mod item_clicks;
 mod infernal_bonemeal;
 mod infused;
 mod items;
+mod machine_lore;
 mod jet_boots;
 mod jetpack;
 mod juice;
