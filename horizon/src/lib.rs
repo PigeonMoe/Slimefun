@@ -70,6 +70,7 @@ mod jet_boots;
 mod jetpack;
 mod juice;
 mod knowledge_tome;
+mod lifeskills;
 mod lumber_axe;
 mod machine;
 mod magic_eye;
@@ -449,7 +450,8 @@ impl Slimefun {
 
 #[mod_api::horizon_mod]
 impl Hooks for Slimefun {
-    fn register(&self, registrar: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
+    fn register(&self, registrar: &mut dyn mod_api::Registrar, context: &mod_api::RegistrationContext) {
+        lifeskills::register(context);
         let dispenser = registrar.item_key("minecraft:dispenser");
         registrar.item_part(dispenser, block_placer::Placement);
         let chest = registrar.item_key("minecraft:chest");
@@ -917,6 +919,7 @@ impl Hooks for Slimefun {
             Command::new("sf guide"),
             Command::new("slimefun open_guide"),
             Command::new("sf open_guide"),
+            Command::op("sf life_menu <target:player>", 4),
             Command::new("slimefun search [query:text]"),
             Command::new("sf search [query:text]"),
             Command::new("slimefun status"),
@@ -1007,6 +1010,15 @@ impl Hooks for Slimefun {
             return Flow::Continue;
         }
         let lines = match path.next() {
+            Some("life_menu") => {
+                let (CommandSource::Console { .. }, Some(CommandArgumentValue::Player(target))) =
+                    (&*event.source, event.command.argument("target"))
+                else {
+                    return Flow::Continue;
+                };
+                self.guide.open(host, *target);
+                return Flow::Cancel;
+            }
             Some("search") => {
                 match (&*event.source, event.command.argument("query")) {
                     (CommandSource::Player { player, .. }, Some(CommandArgumentValue::String(query))) => {
