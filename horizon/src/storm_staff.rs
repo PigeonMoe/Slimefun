@@ -64,19 +64,19 @@ fn uses_line(count: i32, chinese: bool) -> Tag {
 }
 
 pub(crate) fn localize_uses(line: &str) -> Option<Tag> {
-    let Some((count, suffix)) = line.strip_prefix("§e")?.split_once(' ') else {
-        return None;
-    };
-    if !matches!(suffix, "Use §7left" | "Uses §7left") {
+    let (counter, tail) = line.strip_prefix("§e")?.split_once("§7")?;
+    let (count, unit) = counter.trim().split_once(' ')?;
+    if tail.trim() != "left" || !matches!(unit.trim(), "Use" | "Uses") {
         return None;
     }
     Some(uses_line(count.parse().ok()?, true))
 }
 
 fn is_local_uses(line: &str) -> bool {
-    line.strip_prefix("§7剩余可用 §e")
-        .and_then(|line| line.strip_suffix(" §7次"))
-        .is_some_and(|count| count.parse::<i32>().is_ok())
+    line.strip_prefix("§7剩余可用")
+        .and_then(|line| line.trim_start().strip_prefix("§e"))
+        .and_then(|line| line.split_once("§7"))
+        .is_some_and(|(count, tail)| tail.trim() == "次" && count.trim().parse::<i32>().is_ok())
 }
 
 pub(crate) fn decorate(id: &str, components: &mut Compound) {
@@ -377,10 +377,30 @@ mod tests {
             Some(&Tag::Int(100))
         );
         assert!(
-            lore(&used_staff(fresh, 7).unwrap())
+            lore(&used_staff(fresh.clone(), 7).unwrap())
                 .iter()
                 .any(|line| line.contains("剩余可用 §e7 §7次"))
         );
+
+        // Paper imports can attach the spacer to the following colored run.
+        for line in ["&7剩余可用 &e8&7 次", "&e8 Uses&7 left"] {
+            let mut imported = fresh.clone();
+            let other_line = colored_lore("&b原有记录");
+            imported
+                .apply_components(&Compound::from([(
+                    "minecraft:lore".into(),
+                    Tag::List(vec![other_line, colored_lore(line)]),
+                )]))
+                .unwrap();
+            let worn = used_staff(imported, 7).unwrap();
+            let expected = if line.contains("剩余可用") {
+                "§7剩余可用 §e7 §7次"
+            } else {
+                "§e7 Uses §7left"
+            };
+            assert_eq!(lore(&worn), ["§b原有记录", expected]);
+            assert_eq!(remaining(&worn), 7);
+        }
     }
 }
 
