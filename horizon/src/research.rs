@@ -40,6 +40,7 @@ pub(crate) fn unlock(host: &mut dyn ServerHost, player: PlayerRef, research: &Re
 }
 
 const PENDING: &str = "slimefun:pending_research";
+const SYNC_GUIDE_ISSUED: &str = "slimefun:sync_guide_issued";
 pub(crate) const SKIP_LEGACY_IMPORT: &str = "slimefun:skip_legacy_research_import";
 const UPDATE_ERROR: &str = "远古工艺无法更新你的研究数据。";
 
@@ -253,14 +254,21 @@ pub(crate) fn legacy_research_flags(
     host: &dyn ServerHost,
     uuid: u128,
 ) -> Result<Option<Vec<String>>, &'static str> {
-    let uuid = format!("{uuid:032x}");
-    read_legacy(host, &uuid)?
+    let owner = format!("{uuid:032x}");
+    let mut flags = read_legacy(host, &owner)?
         .map(|text| {
-            legacy_research_ids(&uuid, &text)
+            legacy_research_ids(&owner, &text)
                 .map(|ids| ids.into_iter().map(str::to_owned).collect())
                 .ok_or("The saved Paper research archive is invalid.")
         })
-        .transpose()
+        .transpose()?;
+    let synchronized =
+        crate::pm_profile::with_archive(host, uuid, |profile| Ok(profile.slimefun_researches()))
+            .map_err(|_| "The saved Slimefun sync archive is invalid.")?;
+    if let Some(synchronized) = synchronized {
+        flags.get_or_insert_with(Vec::new).extend(synchronized);
+    }
+    Ok(flags)
 }
 
 /// Import canonical research IDs prepared from a Paper legacy profile when its UUID joins.
@@ -278,6 +286,51 @@ pub(crate) fn import_legacy(host: &mut dyn ServerHost, player: PlayerRef) {
     if let Some(merged) = merge_import(data, &uuid, &text) {
         let _ = player.set_persistent_data(host, merged);
     }
+}
+
+pub(crate) fn import_synchronized_profile(host: &mut dyn ServerHost, player: PlayerRef) {
+    let Some(data) = player.persistent_data(host) else {
+        return;
+    };
+    let profile = crate::pm_profile::with_archive(host, player.uuid(), |profile| {
+        Ok((profile.guide_issued, profile.slimefun_researches()))
+    });
+    let (guide_issued, researches) = match profile {
+        Ok(Some(profile)) => profile,
+        Ok(None) => return,
+        Err(error) => {
+            let _ = player.tell(host, mod_api::Text::literal(error));
+            return;
+        }
+    };
+    if let Some(data) = merge_synchronized_profile(data, guide_issued, &researches) {
+        let _ = player.set_persistent_data(host, data);
+    }
+}
+
+fn merge_synchronized_profile(
+    mut data: Compound,
+    guide_issued: bool,
+    researches: &BTreeSet<String>,
+) -> Option<Compound> {
+    let saved = saved_data(&mut data)?;
+    let skip = saved.get(&SKIP_LEGACY_IMPORT.into()) == Some(&Tag::Byte(1));
+    let mut changed = false;
+    if guide_issued {
+        changed = saved.insert(SYNC_GUIDE_ISSUED.into(), Tag::Byte(1)) != Some(Tag::Byte(1));
+    }
+    if !skip {
+        changed |= grant_shared(&mut data, researches).is_ok_and(|learned| !learned.is_empty());
+    }
+    changed.then_some(data)
+}
+
+pub(crate) fn sync_guide_already_issued(host: &dyn Host, player: PlayerRef) -> bool {
+    player.persistent_data(host).is_some_and(|data| {
+        data.get(&PERSISTED.into())
+            .and_then(|saved| saved.get(SYNC_GUIDE_ISSUED))
+            == Some(&Tag::Byte(1))
+    })
 }
 
 fn legacy_research_ids<'a>(uuid: &str, text: &'a str) -> Option<Vec<&'a str>> {
@@ -310,6 +363,26 @@ mod tests {
     use crate::recipes::LUMPS;
 
     const ID: &str = "00000000000000000000000000000001";
+
+    #[test]
+    fn synchronized_research_does_not_regrant_manually_cleared_research_or_a_guide() {
+        let flags = BTreeSet::from(["slimefun:lumps".to_owned()]);
+        let imported = merge_synchronized_profile(Compound::new(), true, &flags).unwrap();
+        assert!(unlocked(&imported, &LUMPS));
+        assert!(merge_synchronized_profile(imported.clone(), true, &flags).is_none());
+
+        let mut cleared = imported;
+        apply_bulk_change(&mut cleared, BulkChange::Clear).unwrap();
+        assert!(!unlocked(&cleared, &LUMPS));
+        assert_eq!(
+            cleared
+                .get(&PERSISTED.into())
+                .unwrap()
+                .get(SYNC_GUIDE_ISSUED),
+            Some(&Tag::Byte(1))
+        );
+        assert!(merge_synchronized_profile(cleared, true, &flags).is_none());
+    }
 
     #[test]
     fn bulk_research_changes_preserve_preferences_and_do_not_resume_a_cancelled_study() {

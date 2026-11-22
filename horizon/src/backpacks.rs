@@ -664,15 +664,40 @@ fn load_paper(
     id: BackpackId,
     expected_size: Option<u32>,
 ) -> Result<Backpack, String> {
-    let profile = read_profile(host, id.owner)?
-        .ok_or("There is no Paper archive for this backpack owner.")?;
-    let (row, size) = archived_backpack(&profile, id, expected_size)?;
-    let slots = decode_archived_slots(host, row, size)?;
-    Ok(Backpack {
-        size,
-        slots,
-        paper: true,
-    })
+    if let Some(profile) = read_profile(host, id.owner)? {
+        let (row, size) = archived_backpack(&profile, id, expected_size)?;
+        let slots = decode_archived_slots(host, row, size)?;
+        return Ok(Backpack {
+            size,
+            slots,
+            paper: true,
+        });
+    }
+    crate::pm_profile::with_archive(host, id.owner, |profile| {
+        let contents = profile
+            .backpacks
+            .get(&id.number)
+            .ok_or("同步档案中没有此背包编号。")?;
+        let size = contents.len() as u32;
+        if expected_size.is_some_and(|expected| expected != size) {
+            return Err("同步档案中的背包容量与当前背包不一致。".into());
+        }
+        let mut slots = BTreeMap::new();
+        for (slot, encoded) in contents.iter().enumerate() {
+            if !encoded.is_empty() {
+                let item = host
+                    .item_from_saved_gzip_nbt(encoded.to_vec())
+                    .ok_or_else(|| format!("无法解码同步背包第 {slot} 槽的 Paper 物品。"))?;
+                slots.insert(slot as u32, item);
+            }
+        }
+        Ok(Backpack {
+            size,
+            slots,
+            paper: true,
+        })
+    })?
+    .ok_or_else(|| "There is no Paper archive for this backpack owner.".into())
 }
 
 /// The canonical record store is shared across dimensions and its writes join the item transaction.
@@ -771,7 +796,13 @@ fn next_number(
 
 fn archived_max(host: &dyn ServerHost, owner: u128) -> Result<Option<u32>, String> {
     let Some(profile) = read_profile(host, owner)? else {
-        return Ok(None);
+        return Ok(crate::pm_profile::with_archive(host, owner, |profile| {
+            Ok(profile
+                .backpacks
+                .last_key_value()
+                .map(|(&number, _)| number))
+        })?
+        .flatten());
     };
     Ok(archived_records(&profile, owner)?
         .last_key_value()

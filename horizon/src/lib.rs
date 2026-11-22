@@ -55,6 +55,7 @@ mod gold_pan;
 mod gps_controls;
 mod gps_transport;
 mod gps_waypoints;
+mod pm_profile;
 mod grappling_hook;
 mod guide;
 mod hand_machine;
@@ -1658,6 +1659,7 @@ impl Hooks for Slimefun {
     fn player_logged_in(&self, host: &mut dyn ServerHost, event: &mut PlayerLoggedInEvent<'_>) {
         if let Some(player) = host.player(event.player) {
             research::import_legacy(host, player);
+            research::import_synchronized_profile(host, player);
             self.guide.logged_in(host, player);
             if let Err(error) = gps_waypoints::import(host, event.player) {
                 let _ = player.tell(host, Text::literal(error));
@@ -1666,7 +1668,11 @@ impl Hooks for Slimefun {
     }
 
     fn player_first_join(&self, host: &mut dyn ServerHost, event: &mut mod_api::PlayerFirstJoinEvent<'_>) {
-        self.guide.first_join(host, event.player);
+        let issued = host.player(event.player)
+            .is_some_and(|player| research::sync_guide_already_issued(host, player));
+        if !issued {
+            self.guide.first_join(host, event.player);
+        }
     }
 
     fn player_logged_out(

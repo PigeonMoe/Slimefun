@@ -193,6 +193,8 @@ ORDER BY player_uuid;
 
 在装有同一 Paper 导出工具的本地控制台执行 `sf-export-synced-profiles pm-snapshots.tsv normalized-pm`。工具校验 PM-Sync v2 和 Slimefun SFP1 的 SHA-256，再核对玩家 UUID，逐一用 Paper 恢复原槽物品组件。任意记录损坏会阻止整个新目录写入。此命令只读导出的文件，处理 Slimefun 背包和研究字段。仍需按对应迁移流程处理角色、末影箱及其他同步插件的数据。
 
+使用支持版本化 gzip 物品 NBT 的 Horizon SDK 时，可以把导出的 `SFP1` 目录内容直接放进世界内的 `horizon-mod-data/slimefun/pm-sync-import/`。原玩家进入时，插件会合并已知的研究键和历史数字 ID，并保留档案中的首次发书状态。用 `/sf restore-backpack` 或 `/sf backpack` 恢复背包时，Horizon 会按原编号、原容量和原槽位读取该档案，并用对应的 DataVersion 转换物品。已有的标准 TOML 背包档案优先，已恢复的当前背包不会被旧档覆盖。未识别的附属插件研究仍保存在原始 SFP1 文件中。
+
 给方块导入脚本附加 `--player-profiles normalized-pm/Players`，可从同一时间点的方块快照或 ZIP 导入方块，并使用 PM-Sync 导出的背包。该参数指定唯一的玩家档案来源。研究通过 `import-research.py <Paper 配方目录 JSON> normalized-pm/Players <Horizon 研究导入目录>` 转换，保留原命名空间解锁并按原目录映射历史数字 ID。备份、PM-Sync 快照和导出的 Players 文件都应保留以供核对。
 
 二级及以上 OP 可执行 `/sf storage restore-universal TEST_SHARED` 恢复精确名称的共享库存，再执行 `/sf storage open-universal TEST_SHARED` 打开。相同预设的多个菜单会直接访问同一份存档，支持跨维度和重启，重复恢复不会补回已经取走的物品。扩展模组的物理方块权限、无线终端和装饰交互需由对应扩展定义。

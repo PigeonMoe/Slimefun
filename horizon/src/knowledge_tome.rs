@@ -130,7 +130,11 @@ static TOPICS: LazyLock<BTreeMap<String, &'static str>> = LazyLock::new(|| {
     // still transferable even if its gameplay hasn't yet been ported.
     for (id, name) in include_str!("knowledge_researches.tsv")
         .lines()
-        .filter_map(|row| row.split_once('\t'))
+        .filter_map(|row| {
+            let (id, rest) = row.split_once('\t')?;
+            let (name, _) = rest.rsplit_once('\t')?;
+            Some((id, name))
+        })
     {
         topics.insert(format!("slimefun:{id}"), name);
     }

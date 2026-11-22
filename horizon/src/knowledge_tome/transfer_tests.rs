@@ -143,6 +143,9 @@ impl ConfigServerHost for TomeHost {
 }
 impl ConfigFiles for TomeHost {
     fn read(&self, path: &ConfigPath) -> Result<Vec<u8>, ConfigFileError> {
+        if String::from(path) == format!("pm-sync-import/{DONOR:032x}.sfp1") {
+            return Err(ConfigFileError::NotFound);
+        }
         assert_eq!(
             String::from(path),
             format!("research-import/{DONOR:032x}.txt")
