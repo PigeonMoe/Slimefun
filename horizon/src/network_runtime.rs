@@ -20,6 +20,7 @@ use crate::{
         tree_growth,
     },
     geo_deposits, geology,
+    gps_transport::{GPS_TELEPORTER_PYLON, PYLON_CARRIERS},
     items::{item_id, network_item},
     machine::Settings,
     networks::Component,
@@ -340,6 +341,14 @@ impl ItemPart for NetworkPlacement {
 
 pub(crate) fn restore_drop(level: &dyn LevelHost, event: &mut BlockDropsEvent<'_>) {
     if let Some(id) = plain_network::take_drop(level, event) {
+        if id == GPS_TELEPORTER_PYLON.id() {
+            if let Some(carrier) = level.state_block(event.state) {
+                crate::rainbow::placed::drop_colored_block(
+                    level, event, GPS_TELEPORTER_PYLON, carrier,
+                );
+            }
+            return;
+        }
         if let Some(item) = network_item(&id)
             && let Some(key) = level.item_key_by_name(item.material())
         {
@@ -485,6 +494,7 @@ fn accepts_carrier(component: Component, actual: &str) -> bool {
         Component::ManualCrucible | Component::ManualComposter => {
             return crate::crucible::carrier(actual);
         }
+        Component::GpsDevice(kind) if kind == GPS_TELEPORTER_PYLON => PYLON_CARRIERS,
         Component::GpsDevice(kind) => return actual == kind.material(),
         Component::Android => return actual == crate::android_machine::DEVICE,
         Component::AndroidInterface => return actual == "minecraft:dispenser",
@@ -515,6 +525,7 @@ pub(crate) struct Networks {
     round_robin: HashMap<(LevelRef, Position), usize>,
     discoveries: BTreeMap<String, Discovery>,
     gps_signals: BTreeMap<String, BTreeMap<Position, (u128, u32)>>,
+    pylon_phase: crate::rainbow::placed::Phase,
 }
 
 impl Networks {
@@ -552,6 +563,7 @@ impl Networks {
         self.round_robin.clear();
         self.discoveries.clear();
         self.gps_signals.clear();
+        self.pylon_phase = crate::rainbow::placed::Phase::default();
         plain_network::clear();
     }
 
@@ -1399,6 +1411,22 @@ pub(crate) fn tick(
         if !crate::availability::globally_enabled(&node.id) {
             continue;
         }
+        if node.component == Component::GpsDevice(GPS_TELEPORTER_PYLON)
+            && crate::availability::use_denial(&dimension, &node.id).is_none()
+        {
+            let material = networks
+                .lock()
+                .unwrap()
+                .pylon_phase
+                .color(profile.round, &PYLON_CARRIERS);
+            profile.measure(host, &node.id, pos, |host| {
+                let old = level.block_state(host, pos)?;
+                let new = host.block_state_id(material)?;
+                crate::rainbow::placed::set_recolored_block(
+                    host, level, (dimension.clone(), pos), old, new,
+                )
+            });
+        }
         if node.component == Component::TrashCan {
             profile.measure(host, &node.id, pos, |host| trash::clear(host, pos));
         }
@@ -2245,6 +2273,16 @@ mod tests {
             shared.component,
             "minecraft:stone_pressure_plate"
         ));
+        assert_eq!(data.gps_owner, None);
+
+        let (pylon, data) = imported(GPS_TELEPORTER_PYLON.id(), &toml::Table::new()).unwrap();
+        assert!(matches!(pylon.family(), Network::Independent));
+        assert!(is_plain_node(pylon.component));
+        for carrier in PYLON_CARRIERS {
+            assert!(accepts_carrier(pylon.component, carrier));
+        }
+        assert!(!accepts_carrier(pylon.component, "minecraft:blue_stained_glass"));
+        assert_eq!(data.id, GPS_TELEPORTER_PYLON.id());
         assert_eq!(data.gps_owner, None);
     }
 

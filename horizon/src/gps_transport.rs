@@ -72,10 +72,17 @@ item!(
     None
 );
 
-pub(crate) const CARRIERS: &[&str] = &[
-    "minecraft:purple_stained_glass",
-    "minecraft:stone_pressure_plate",
+pub(crate) const PYLON_CARRIERS: [&str; 2] = [
+    "minecraft:cyan_stained_glass",
+    GPS_TELEPORTER_PYLON.material(),
 ];
+
+pub(crate) fn decorate(id: &str, components: &mut mod_api::Compound) {
+    if id == GPS_TELEPORTER_PYLON.id() {
+        let lore = ["", "&7Teleporter Component"].map(crate::hologram_projector::colored_lore);
+        components.insert("minecraft:lore".into(), mod_api::Tag::List(lore.into()));
+    }
+}
 const PLATE_RESEARCH: Research = Research {
     id: "teleporter_activation_plates",
     name: "Teleporter Activation",

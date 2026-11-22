@@ -74,6 +74,7 @@ const TICKING_ITEMS: &[&str] = &[
     "FREEZER_2",
     "FREEZER_3",
     "GEO_MINER",
+    "GPS_TELEPORTER_PYLON",
     "GPS_TRANSMITTER",
     "GPS_TRANSMITTER_2",
     "GPS_TRANSMITTER_3",
@@ -215,7 +216,7 @@ mod tests {
 
     #[test]
     fn only_stock_cargo_manager_and_other_real_tickers_are_unavailable() {
-        assert_eq!(TICKING_ITEMS.len(), 119);
+        assert_eq!(TICKING_ITEMS.len(), 120);
         assert!(TICKING_ITEMS.windows(2).all(|pair| pair[0] < pair[1]));
         let off = Tickers::disabled();
         for id in [
@@ -225,6 +226,7 @@ mod tests {
             "ENHANCED_AUTO_CRAFTER",
             "ELECTRIC_FURNACE_3",
             "GEO_MINER",
+            "GPS_TELEPORTER_PYLON",
             "CARBONADO_EDGED_FURNACE",
             "RAINBOW_WOOL_XMAS",
         ] {

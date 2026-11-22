@@ -11,7 +11,10 @@ use mod_api::{
     ItemPart, ItemStack, LevelHost, LevelRef, OnBlockPlacedByEvent, ServerHost, Tag,
 };
 
-use crate::{items::item_id, network_runtime::dimension_name};
+use crate::{
+    items::{Kind, item_id},
+    network_runtime::dimension_name,
+};
 
 use super::{BLOCK_COUNT, Rainbow, block, is_carrier};
 
@@ -34,13 +37,13 @@ const MARKERS: AttachmentType<Compound> = AttachmentType {
 };
 
 #[derive(Clone, Copy, Default)]
-struct Phase {
+pub(crate) struct Phase {
     round: Option<i64>,
     color: usize,
 }
 
 impl Phase {
-    fn color(&mut self, round: i64, colors: &'static [&'static str]) -> &'static str {
+    pub(crate) fn color(&mut self, round: i64, colors: &'static [&'static str]) -> &'static str {
         if self.round != Some(round) {
             self.round = Some(round);
             self.color = (self.color + 1) % colors.len();
@@ -60,6 +63,30 @@ struct Recolor {
     at: Address,
     old: BlockState,
     new: BlockState,
+}
+
+impl Recolor {
+    fn matches(&self, event: &BlockChangedEvent) -> bool {
+        self.at.0 == dimension_name(&event.dimension)
+            && self.at.1 == [event.pos.x, event.pos.y, event.pos.z]
+            && self.old == event.old
+            && self.new == event.new
+    }
+}
+
+struct RecolorGuard;
+
+impl RecolorGuard {
+    fn enter(at: Address, old: BlockState, new: BlockState) -> Self {
+        RUNTIME.lock().unwrap().recolor = Some(Recolor { at, old, new });
+        Self
+    }
+}
+
+impl Drop for RecolorGuard {
+    fn drop(&mut self) {
+        RUNTIME.lock().unwrap().recolor = None;
+    }
 }
 
 #[derive(Default)]
@@ -253,9 +280,11 @@ pub(crate) fn changed(level: &dyn LevelHost, event: &BlockChangedEvent) {
     let pos = [event.pos.x, event.pos.y, event.pos.z];
     let address = (dimension_name(&event.dimension).to_owned(), pos);
     let mut runtime = RUNTIME.lock().unwrap();
-    if runtime.recolor.as_ref().is_some_and(|current| {
-        current.at == address && current.old == event.old && current.new == event.new
-    }) {
+    if runtime
+        .recolor
+        .as_ref()
+        .is_some_and(|current| current.matches(event))
+    {
         return;
     }
     if let Some(change) = runtime.retired.get_mut(&address) {
@@ -267,6 +296,15 @@ pub(crate) fn changed(level: &dyn LevelHost, event: &BlockChangedEvent) {
     {
         runtime.retired.insert(address, Retired::Removed);
     }
+}
+
+pub(crate) fn is_recolor(event: &BlockChangedEvent) -> bool {
+    RUNTIME
+        .lock()
+        .unwrap()
+        .recolor
+        .as_ref()
+        .is_some_and(|current| current.matches(event))
 }
 
 pub(crate) fn drop_item(level: &dyn LevelHost, event: &mut BlockDropsEvent<'_>) {
@@ -288,18 +326,26 @@ pub(crate) fn drop_item(level: &dyn LevelHost, event: &mut BlockDropsEvent<'_>) 
     }
     runtime.retired.insert(address, Retired::Dropped);
     drop(runtime);
+    drop_colored_block(level, event, record.kind, carrier);
+}
 
+pub(crate) fn drop_colored_block(
+    level: &dyn LevelHost,
+    event: &mut BlockDropsEvent<'_>,
+    kind: Kind,
+    carrier: &str,
+) {
     if event.breaker.is_none() {
         event.drops.clear();
         return;
     }
     let Some(mut stack) = level
-        .item_key_by_name(record.kind.material())
+        .item_key_by_name(kind.material())
         .and_then(|key| ItemStack::new(key, 1))
     else {
         return;
     };
-    record.kind.decorate(&mut stack);
+    kind.decorate(&mut stack);
     let prepared = level.item_key_by_name(carrier).and_then(|vanilla| {
         let mut found = None;
         event.drops.retain(|drop| {
@@ -312,6 +358,7 @@ pub(crate) fn drop_item(level: &dyn LevelHost, event: &mut BlockDropsEvent<'_>) 
         found
     });
     let (at, velocity, delay) = prepared.unwrap_or_else(|| {
+        let pos = [event.pos.x, event.pos.y, event.pos.z];
         (
             pos.map(|coordinate| f64::from(coordinate) + 0.5),
             [0.0, 0.2, 0.0],
@@ -469,17 +516,21 @@ fn recolor(
     if rainbow.suffix == "stained_glass_pane" {
         new = pane_state(&host.block_states(), old, new)?;
     }
+    set_recolored_block(host, level, at, old, new)
+}
+
+pub(crate) fn set_recolored_block(
+    host: &mut dyn ServerHost,
+    level: LevelRef,
+    at: Address,
+    old: BlockState,
+    new: BlockState,
+) -> Option<()> {
     if old == new {
         return Some(());
     }
-    struct RecolorGuard;
-    impl Drop for RecolorGuard {
-        fn drop(&mut self) {
-            RUNTIME.lock().unwrap().recolor = None;
-        }
-    }
-    RUNTIME.lock().unwrap().recolor = Some(Recolor { at, old, new });
-    let _guard = RecolorGuard;
+    let pos = at.1;
+    let _guard = RecolorGuard::enter(at, old, new);
     let flags = BlockUpdateFlags::CLIENTS | BlockUpdateFlags::KNOWN_SHAPE;
     level.set_block(host, pos, new, flags).ok()?.then_some(())
 }
@@ -515,6 +566,144 @@ mod tests {
             assert_eq!(phase.color(1, record.palette.colors()), expected[0]);
             assert_eq!(phase.color(1, record.palette.colors()), expected[0]);
             assert_eq!(phase.color(18, record.palette.colors()), expected[1]);
+        }
+    }
+
+    #[test]
+    fn a_pylon_recolor_preserves_its_marker_and_both_colors_yield_the_same_item() {
+        use crate::{
+            gps_transport::{GPS_TELEPORTER_PYLON, PYLON_CARRIERS},
+            network_runtime,
+        };
+        use mod_api::{
+            BlockPos, BlockStateRecord, Identifier, ItemKey, LevelDimension, testing::FakeHost,
+        };
+
+        let mut host = FakeHost::new();
+        host.registries
+            .resolve_items(PYLON_CARRIERS.map(|id| Identifier::parse(id).unwrap()))
+            .unwrap();
+        let cyan =
+            BlockStateRecord::new(mod_api::__private::parts_installation::block_key(0), 0).into();
+        let purple =
+            BlockStateRecord::new(mod_api::__private::parts_installation::block_key(1), 0).into();
+
+        struct PylonLevel {
+            colors: [(BlockState, ItemKey); 2],
+            pos: Pos,
+        }
+
+        impl LevelHost for PylonLevel {
+            fn state_block(&self, state: BlockState) -> Option<&str> {
+                self.colors
+                    .iter()
+                    .position(|(block, _)| *block == state)
+                    .map(|i| PYLON_CARRIERS[i])
+            }
+            fn item_key_by_name(&self, id: &str) -> Option<ItemKey> {
+                PYLON_CARRIERS
+                    .iter()
+                    .position(|&carrier| carrier == id)
+                    .map(|i| self.colors[i].1)
+            }
+            fn chunk_saved_attachment(
+                &self,
+                chunk_pos: ChunkPos,
+                namespace: &str,
+                name: &str,
+            ) -> Option<Compound> {
+                (chunk_pos == chunk(self.pos)
+                    && namespace == "slimefun"
+                    && name == "plain_energy_nodes")
+                    .then(|| {
+                        Compound::from([(
+                            key(self.pos).as_str().into(),
+                            Tag::compound([("id", Tag::String(GPS_TELEPORTER_PYLON.id().into()))]),
+                        )])
+                    })
+            }
+        }
+
+        let mut phase = Phase::default();
+        assert_eq!(phase.color(10, &PYLON_CARRIERS), PYLON_CARRIERS[1]);
+        assert_eq!(phase.color(20, &PYLON_CARRIERS), PYLON_CARRIERS[0]);
+        assert_eq!(phase.color(20, &PYLON_CARRIERS), PYLON_CARRIERS[0]);
+        assert_eq!(phase.color(30, &PYLON_CARRIERS), PYLON_CARRIERS[1]);
+
+        let item = GPS_TELEPORTER_PYLON.stack(&host, 1).unwrap();
+        let components = item.components().unwrap().as_nbt();
+        assert_eq!(
+            components
+                .get(&"minecraft:lore".into())
+                .and_then(network_runtime::paper_text)
+                .as_deref(),
+            Some("§7传送器组件")
+        );
+        for (x, index, internal, breaker) in [
+            (421, 0, true, Some(7)),
+            (422, 1, true, Some(7)),
+            (423, 0, true, None),
+            (424, 1, false, Some(7)),
+        ] {
+            let [x, y, z] = [x, 70, -806];
+            let state = [cyan, purple][index];
+            let pos = [x, y, z];
+            let block_pos = BlockPos::new(x, y, z);
+            let level = PylonLevel {
+                colors: [cyan, purple].map(|state| {
+                    let id = PYLON_CARRIERS[usize::from(state == purple)];
+                    (state, Kind::Vanilla(id).stack(&host, 1).unwrap().item())
+                }),
+                pos,
+            };
+            let dimension = LevelDimension::Overworld;
+            let changed = BlockChangedEvent {
+                dimension: dimension.clone(),
+                pos: block_pos,
+                old: [purple, cyan][index],
+                new: state,
+            };
+            let marker = || network_runtime::plate_marker(&level, &dimension, pos);
+            {
+                let _guard = internal.then(|| {
+                    RecolorGuard::enter(
+                        (dimension_name(&dimension).into(), pos),
+                        changed.old,
+                        changed.new,
+                    )
+                });
+                network_runtime::observe_plain_change(&level, &changed);
+                assert_eq!(
+                    marker().as_deref(),
+                    internal.then(|| GPS_TELEPORTER_PYLON.id())
+                );
+            }
+            let vanilla = ItemStack::new(level.colors[index].1, 1).unwrap();
+            let mut drops = vec![ItemDrop::new(vanilla.clone(), [4.0; 3], [0.1; 3], 9)];
+            let mut event = BlockDropsEvent {
+                dimension: dimension.clone(),
+                pos: block_pos,
+                state,
+                breaker,
+                breaker_entity: None,
+                block_entity: None,
+                tool: None,
+                drops: &mut drops,
+                experience: 0,
+                cancelled: false,
+            };
+            network_runtime::restore_drop(&level, &mut event);
+            if breaker.is_none() {
+                assert!(drops.is_empty());
+            } else {
+                assert_eq!(drops.len(), 1);
+                assert_eq!(
+                    drops[0].stack,
+                    if internal { item.clone() } else { vanilla }
+                );
+                assert_eq!(drops[0].pickup_delay, 9);
+            }
+            assert!(marker().is_none());
         }
     }
 

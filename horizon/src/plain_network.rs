@@ -8,6 +8,7 @@ use mod_api::{
 };
 
 use super::{BlockData, NETWORK_STATE, Position, accepts_carrier, saved_id};
+use crate::gps_transport::PYLON_CARRIERS;
 
 pub(crate) const CARRIERS: &[&str] = &[
     "minecraft:light_gray_stained_glass",
@@ -29,8 +30,9 @@ pub(crate) const CARRIERS: &[&str] = &[
     "minecraft:iron_block",
     "minecraft:bookshelf",
     "minecraft:hay_block",
-    crate::gps_transport::CARRIERS[0],
-    crate::gps_transport::CARRIERS[1],
+    PYLON_CARRIERS[0],
+    PYLON_CARRIERS[1],
+    "minecraft:stone_pressure_plate",
 ];
 
 pub(crate) fn is_carrier(block: &str) -> bool {
@@ -85,6 +87,9 @@ pub(crate) fn observe_plain_change(level: &dyn LevelHost, event: &BlockChangedEv
     if old == new
         || !(replaced_carrier || placed_carrier)
         || old.is_some_and(crate::crucible::carrier) && new.is_some_and(crate::crucible::carrier)
+        || old.is_some_and(|block| PYLON_CARRIERS.contains(&block))
+            && new.is_some_and(|block| PYLON_CARRIERS.contains(&block))
+            && crate::rainbow::placed::is_recolor(event)
     {
         return;
     }
