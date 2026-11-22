@@ -121,8 +121,8 @@ pub(crate) fn has_stock_item_id(id: &str) -> bool {
     catalog::has_stock_item_id(id)
 }
 
-pub(crate) fn localized_item_name(id: &str) -> Option<&'static str> {
-    locale::item_name(id)
+pub(crate) fn localized_plain_item_name(id: &str) -> Option<String> {
+    locale::item_name(id).map(crate::hologram_projector::plain_label)
 }
 
 pub(crate) fn command_item(id: &str) -> Option<Result<Kind, &'static str>> {
@@ -1209,6 +1209,17 @@ mod tests {
     use super::*;
     use mod_api::prelude::ItemsHost;
     use mod_api::{Identifier, prelude::PlayersHost, testing::FakeHost};
+
+    #[test]
+    fn plain_command_names_keep_the_translation_of_each_formatted_run() {
+        let id = "CARGO_NODE_INPUT";
+        assert_eq!(locale::item_name(id), Some("&7货运节点 &c(输入)"));
+        assert_eq!(
+            localized_plain_item_name(id).as_deref(),
+            Some("货运节点 (输入)")
+        );
+        assert_eq!(localized_plain_item_name("UNRECOGNIZED_ITEM"), None);
+    }
 
     #[test]
     fn vanilla_stations_keep_plain_unknown_and_vanilla_wrapped_items() {

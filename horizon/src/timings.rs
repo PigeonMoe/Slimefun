@@ -281,7 +281,9 @@ fn section(
             }
             _ => millis(group.elapsed),
         };
-        let name = items.then(|| guide::localized_item_name(&id)).flatten();
+        let name = items
+            .then(|| guide::localized_plain_item_name(&id))
+            .flatten();
         let label = match name {
             Some(name) if name != id => format!("{name}（{id}）"),
             _ => id,
@@ -326,6 +328,23 @@ mod tests {
         assert_eq!(round_at(25, 25), Some(25));
         assert_eq!(round_at(50, 25), Some(50));
         assert_eq!(round_at(-25, 25), Some(-25));
+    }
+
+    #[test]
+    fn the_verbose_report_prints_plain_localized_item_names_alongside_ids() {
+        let profiler = Profiler::default();
+        let mut cycle = Cycle::new("minecraft:overworld".into(), 1);
+        cycle.record("CARGO_NODE_INPUT", [0, 64, 0], 1_000_000);
+        profiler.collect(cycle);
+        profiler.finish_tick();
+        let report = summarize(
+            &profiler.0.lock().unwrap().completed,
+            Options::parse("--verbose", true).unwrap(),
+            10,
+        );
+        assert!(report.iter().any(|line| {
+            line == "  货运节点 (输入)（CARGO_NODE_INPUT） · 1 个方块 · 1.000 ms"
+        }));
     }
 
     #[test]

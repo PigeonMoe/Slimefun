@@ -554,6 +554,13 @@ pub(crate) fn colored_label(label: &str) -> Text {
     result
 }
 
+pub(crate) fn plain_label(label: &str) -> String {
+    formatted_runs(label)
+        .into_iter()
+        .map(|(value, _)| value)
+        .collect()
+}
+
 #[derive(Clone, Copy, Default)]
 struct LegacyStyle {
     color: Option<&'static str>,

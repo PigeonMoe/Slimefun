@@ -102,7 +102,7 @@ pub(crate) fn give(
     let Some(mut stack) = kind.stack(host, 1) else {
         return format!("当前服务器无法生成物品 {id}。");
     };
-    let name = guide::localized_item_name(&id).unwrap_or(&id);
+    let name = guide::localized_plain_item_name(&id).unwrap_or(id);
     let Ok(remaining) = insert(host, player, &stack, count) else {
         return format!("无法写入玩家 {target} 的背包。");
     };

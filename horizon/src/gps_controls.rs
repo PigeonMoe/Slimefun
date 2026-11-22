@@ -10,6 +10,7 @@ use mod_api::{
 use crate::{
     geology::{GPS_SETUP, GPS_TRANSMITTER},
     gps_waypoints::{self, Location, MAX_PLAYER_WAYPOINTS, Waypoint},
+    hologram_projector::colored_lore,
     items::{
         ADVANCED_CIRCUIT_BOARD, ALUMINUM_BRASS_INGOT, COBALT_INGOT, ELECTRO_MAGNET, HeadTexture,
         Kind, item, text,
@@ -231,7 +232,7 @@ impl Controls {
                 format!("Complexity: {complexity}"),
             ],
         );
-        items[6] = head_icon(host, &OVERWORLD, "Waypoints", &[]);
+        items[6] = world_icon(host, "&7Waypoints");
         let mut entries = BTreeMap::new();
         match tab {
             Tab::Transmitters => {
@@ -410,21 +411,40 @@ pub(crate) fn waypoint_icon(
     waypoint: &Waypoint,
     lore: &[String],
 ) -> Option<ItemStack> {
-    let (name, texture) = if let Some(name) = waypoint.name.strip_prefix("player:death ") {
-        (name, &DEATH)
+    let texture = if waypoint.name.starts_with("player:death ") {
+        &DEATH
     } else {
-        let texture = match waypoint.location.dimension.as_str() {
+        match waypoint.location.dimension.as_str() {
             "minecraft:the_nether" => &NETHER,
             "minecraft:the_end" => &END,
             _ => &OVERWORLD,
-        };
-        (waypoint.name.as_str(), texture)
+        }
     };
-    head_icon(host, texture, name, lore)
+    let name = waypoint.name.replace("player:death ", "");
+    colored_head_icon(host, texture, &name, lore)
 }
 
 pub(crate) fn world_icon(host: &dyn Host, name: &str) -> Option<ItemStack> {
-    head_icon(host, &OVERWORLD, name, &[])
+    colored_head_icon(host, &OVERWORLD, name, &[])
+}
+
+fn colored_head_icon(
+    host: &dyn Host,
+    texture: &HeadTexture,
+    name: &str,
+    lore: &[String],
+) -> Option<ItemStack> {
+    let mut icon = Kind::Vanilla("minecraft:player_head").stack(host, 1)?;
+    icon.apply_components(&Compound::from([
+        ("minecraft:profile".into(), texture.component()),
+        ("minecraft:custom_name".into(), colored_lore(name)),
+        (
+            "minecraft:lore".into(),
+            Tag::List(lore.iter().map(|line| colored_lore(line)).collect()),
+        ),
+    ]))
+    .ok()?;
+    Some(icon)
 }
 
 pub(crate) fn head_icon(
@@ -436,16 +456,7 @@ pub(crate) fn head_icon(
     let mut icon = icon(host, Kind::Vanilla("minecraft:player_head"), name, lore)?;
     icon.apply_components(&Compound::from([(
         "minecraft:profile".into(),
-        Tag::compound([
-            ("id", Tag::IntArray(texture.profile.to_vec())),
-            (
-                "properties",
-                Tag::List(vec![Tag::compound([
-                    ("name", Tag::String("textures".into())),
-                    ("value", Tag::String(texture.value.into())),
-                ])]),
-            ),
-        ]),
+        texture.component(),
     )]))
     .ok()?;
     Some(icon)
@@ -462,4 +473,88 @@ pub(crate) fn icon(host: &dyn Host, kind: Kind, name: &str, lore: &[String]) -> 
     ]))
     .ok()?;
     Some(icon)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::network_runtime::paper_text;
+    use mod_api::{Identifier, testing::FakeHost};
+
+    #[test]
+    fn waypoint_heads_keep_their_texture_and_render_paper_labels() {
+        let mut host = FakeHost::new();
+        host.registries
+            .resolve_items([Identifier::parse("minecraft:player_head").unwrap()])
+            .unwrap();
+        let header = world_icon(&host, "&e你的传送点").unwrap();
+        let components = header.components().unwrap().as_nbt();
+        assert_eq!(
+            components
+                .get(&"minecraft:custom_name".into())
+                .and_then(paper_text)
+                .as_deref(),
+            Some("§e你的传送点")
+        );
+        assert_eq!(
+            components.get(&"minecraft:profile".into()),
+            Some(&OVERWORLD.component())
+        );
+
+        let mut waypoint = Waypoint {
+            name: "&b基地 §a港口 &z".into(),
+            location: Location {
+                dimension: "minecraft:the_nether".into(),
+                position: [1.0, 2.0, 3.0],
+                rotation: [0.0; 2],
+            },
+        };
+        let lore = ["&8⇨ &7世界：&f下界".into()];
+        let icon = waypoint_icon(&host, &waypoint, &lore).unwrap();
+        let components = icon.components().unwrap().as_nbt();
+        assert_eq!(
+            components
+                .get(&"minecraft:custom_name".into())
+                .and_then(paper_text)
+                .as_deref(),
+            Some("§b基地 §a港口 &z")
+        );
+        assert_eq!(
+            components
+                .get(&"minecraft:lore".into())
+                .and_then(paper_text)
+                .as_deref(),
+            Some("§8⇨ §7世界：§f下界")
+        );
+        assert_eq!(
+            components.get(&"minecraft:profile".into()),
+            Some(&NETHER.component())
+        );
+        assert_eq!(waypoint.name, "&b基地 §a港口 &z");
+
+        waypoint.name = "player:death &4Deathpoint &7(Nov 19, 2026 @ 01:07)".into();
+        let icon = waypoint_icon(&host, &waypoint, &[]).unwrap();
+        let components = icon.components().unwrap().as_nbt();
+        assert_eq!(
+            components
+                .get(&"minecraft:custom_name".into())
+                .and_then(paper_text)
+                .as_deref(),
+            Some("§4Deathpoint §7(Nov 19, 2026 @ 01:07)")
+        );
+        assert_eq!(
+            components.get(&"minecraft:profile".into()),
+            Some(&DEATH.component())
+        );
+
+        let literal = head_icon(&host, &OVERWORLD, "&b", &[]).unwrap();
+        assert_eq!(
+            literal
+                .components()
+                .unwrap()
+                .as_nbt()
+                .get(&"minecraft:custom_name".into()),
+            Some(&text("&b", "gray", false))
+        );
+    }
 }
