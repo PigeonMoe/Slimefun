@@ -5,9 +5,13 @@
 use std::{
     borrow::Cow,
     collections::{BTreeMap, BTreeSet},
+    sync::{Arc, LazyLock, Mutex},
 };
 
-use mod_api::{Compound, ConfigFileError, ConfigPath, ItemStack, PlayerRef, ServerHost, Tag};
+use mod_api::{
+    Compound, ConfigFileError, ConfigPath, Host, Identifier, ItemStack, PlayerRef, ServerHost, Tag,
+    TransferProfileReadError,
+};
 use sha2::{Digest, Sha256};
 
 use crate::{backpacks, research};
@@ -21,6 +25,65 @@ const DIGEST_BYTES: usize = 32;
 const OVERSIZE: &str = "Slimefun 同步档案大小超出允许范围。";
 const INVALID_DATA: &str = "Slimefun 同步档案包含无效数据。";
 const TRUNCATED: &str = "Slimefun 同步档案不完整。";
+static SECTION: LazyLock<Identifier> =
+    LazyLock::new(|| Identifier::parse("slimefun:profile").expect("Slimefun transfer section"));
+static COMMITTED_CACHE: Mutex<Option<CachedProfile>> = Mutex::new(None);
+
+struct CachedProfile {
+    owner: u128,
+    generation: u128,
+    profile: Arc<Profile<'static>>,
+}
+
+fn committed_profile_error(error: TransferProfileReadError) -> String {
+    match error {
+        TransferProfileReadError::Transferring | TransferProfileReadError::Away => {
+            "玩家正在换服或已离开本服，暂时无法读取 Slimefun 档案。".into()
+        }
+        _ => "无法验证本服当前的 Slimefun 档案。".into(),
+    }
+}
+
+pub(crate) fn committed_generation(
+    host: &dyn ServerHost,
+    owner: u128,
+) -> Result<Option<u128>, String> {
+    host.player_transfer_profile_generation(owner, &SECTION)
+        .map_err(committed_profile_error)
+}
+
+pub(crate) fn with_committed_profile<T>(
+    host: &dyn ServerHost,
+    owner: u128,
+    generation: u128,
+    read: impl FnOnce(&Profile<'_>) -> Result<T, String>,
+) -> Result<T, String> {
+    // Callers selected the active generation through the host. The engine owns
+    // the immutable payload, so many slot reads can share one validated decode.
+    let cached = COMMITTED_CACHE
+        .lock()
+        .unwrap()
+        .as_ref()
+        .filter(|cached| cached.owner == owner && cached.generation == generation)
+        .map(|cached| Arc::clone(&cached.profile));
+    if let Some(profile) = cached {
+        return read(&profile);
+    }
+    let bytes = host
+        .player_transfer_profile_payload(owner, &SECTION, generation)
+        .map_err(committed_profile_error)?;
+    let profile = Arc::new(Profile::decode(owner, &bytes)?.into_owned());
+    *COMMITTED_CACHE.lock().unwrap() = Some(CachedProfile {
+        owner,
+        generation,
+        profile: Arc::clone(&profile),
+    });
+    read(&profile)
+}
+
+pub(crate) fn clear_committed_cache() {
+    *COMMITTED_CACHE.lock().unwrap() = None;
+}
 
 #[derive(Default)]
 pub(crate) struct Profile<'a> {
@@ -32,6 +95,27 @@ pub(crate) struct Profile<'a> {
 }
 
 impl<'a> Profile<'a> {
+    fn into_owned(self) -> Profile<'static> {
+        Profile {
+            guide_issued: self.guide_issued,
+            researches: self.researches,
+            legacy_researches: self.legacy_researches,
+            backpacks: self
+                .backpacks
+                .into_iter()
+                .map(|(id, slots)| {
+                    (
+                        id,
+                        slots
+                            .into_iter()
+                            .map(|item| Cow::Owned(item.into_owned()))
+                            .collect(),
+                    )
+                })
+                .collect(),
+        }
+    }
+
     /// Match Paper's registered keys and each of the IDs shared by multiple
     /// Research definitions. Unknown add-on values remain in the source file.
     pub(crate) fn slimefun_researches(&self) -> BTreeSet<String> {
@@ -307,7 +391,7 @@ pub(crate) fn stage_apply(
 }
 
 fn stage_apply_with_decoder(
-    host: &dyn ServerHost,
+    host: &dyn Host,
     owner: u128,
     base_player_data: &Compound,
     bytes: &[u8],

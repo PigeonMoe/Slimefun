@@ -40,7 +40,11 @@ pub(crate) struct BackpackId {
 
 impl BackpackId {
     pub(crate) fn storage_key(self) -> String {
-        format!("{:032x}#{}", self.owner, self.number)
+        self.storage_key_for(None)
+    }
+
+    fn storage_key_for(self, generation: Option<u128>) -> String {
+        format!("{}{}", storage_prefix(self.owner, generation), self.number)
     }
 
     fn lore(self) -> String {
@@ -54,6 +58,13 @@ impl BackpackId {
             &owner[20..],
             self.number
         )
+    }
+}
+
+fn storage_prefix(owner: u128, generation: Option<u128>) -> String {
+    match generation {
+        Some(id) => format!("{owner:032x}/{id:032x}#"),
+        None => format!("{owner:032x}#"),
     }
 }
 
@@ -674,7 +685,10 @@ fn archived_size(entry: &toml::Table) -> Option<u32> {
         .filter(|&size| valid_size(size))
 }
 
-pub(crate) fn read_profile(host: &dyn ServerHost, owner: u128) -> Result<Option<toml::Table>, String> {
+pub(crate) fn read_profile(
+    host: &dyn ServerHost,
+    owner: u128,
+) -> Result<Option<toml::Table>, String> {
     let path = ConfigPath::new(&format!("storage-import/backpacks/{owner:032x}.toml"))
         .expect("hexadecimal UUID is a valid archive path");
     let bytes = match host.world_data_files().read(&path) {
@@ -698,6 +712,9 @@ fn load_paper(
     id: BackpackId,
     expected_size: Option<u32>,
 ) -> Result<Backpack, String> {
+    if crate::pm_profile::committed_generation(host, id.owner)?.is_some() {
+        return Err("本服当前的同步档案不包含这个背包。".into());
+    }
     if let Some(profile) = read_profile(host, id.owner)? {
         let (row, size) = archived_backpack(&profile, id, expected_size)?;
         let slots = decode_archived_slots(host, row, size)?;
@@ -769,7 +786,8 @@ fn require_unfrozen_owner(host: &dyn ServerHost, owner: u128) -> Result<(), Stri
 
 impl BackpackStore for GlobalBackpacks {
     fn load(&self, host: &mut dyn ServerHost, id: BackpackId) -> Result<Option<Compound>, String> {
-        let key = id.storage_key();
+        let generation = crate::pm_profile::committed_generation(host, id.owner)?;
+        let key = id.storage_key_for(generation);
         let lookup = |data: &Compound| data.get(&key.as_str().into()).cloned();
         let decoded = RECORDS
             .with_decoded(host, Holder::Server, |data| data.map(lookup))
@@ -785,7 +803,25 @@ impl BackpackStore for GlobalBackpacks {
         match record {
             Some(Tag::Compound(record)) => Ok(Some(record)),
             Some(_) => Err("The global backpack record is corrupt.".into()),
-            None => Ok(None),
+            None => {
+                let Some(generation) = generation else {
+                    return Ok(None);
+                };
+                crate::pm_profile::with_committed_profile(host, id.owner, generation, |profile| {
+                    profile
+                        .backpacks
+                        .get(&id.number)
+                        .map(|slots| {
+                            stage_snapshot_bag(
+                                host,
+                                id.number,
+                                slots.iter().map(std::borrow::Cow::as_ref),
+                                |bytes| host.item_from_saved_gzip_nbt(bytes.to_vec()),
+                            )
+                        })
+                        .transpose()
+                })
+            }
         }
     }
 
@@ -798,11 +834,15 @@ impl BackpackStore for GlobalBackpacks {
     ) -> Result<(), String> {
         // A recovered head may be held by another player while its owner transfers.
         require_unfrozen_owner(host, id.owner)?;
+        let generation = crate::pm_profile::committed_generation(host, id.owner)?;
         let mut data = RECORDS
             .get_existing(host, Holder::Server)
             .map_err(|_| "The global backpack store is unavailable.")?
             .unwrap_or_default();
-        data.insert(id.storage_key().as_str().into(), Tag::Compound(record));
+        data.insert(
+            id.storage_key_for(generation).as_str().into(),
+            Tag::Compound(record),
+        );
         RECORDS
             .set(host, Holder::Server, data)
             .map_err(|_| "Could not write the global backpack record.".into())
@@ -832,7 +872,15 @@ pub(crate) fn visit_snapshot_bags(
         }
         let size = archived_size(row).ok_or("存档中的背包容量无效。")?;
         let slots = decode_archived_slots(host, row, size)?;
-        visit(host, id, Backpack { size, slots, paper: true })?;
+        visit(
+            host,
+            id,
+            Backpack {
+                size,
+                slots,
+                paper: true,
+            },
+        )?;
     }
     for id in live {
         let id = BackpackId { owner, number: id };
@@ -883,7 +931,8 @@ fn next_number(
     archived: Option<u32>,
 ) -> Result<u32, String> {
     let mut maximum = archived;
-    let prefix = format!("{owner:032x}#");
+    let generation = crate::pm_profile::committed_generation(host, owner)?;
+    let prefix = storage_prefix(owner, generation);
     if let Some(records) = RECORDS
         .get_existing(host, Holder::Server)
         .map_err(|_| "The global backpack store is unavailable.")?
@@ -905,6 +954,14 @@ fn next_number(
 }
 
 fn archived_max(host: &dyn ServerHost, owner: u128) -> Result<Option<u32>, String> {
+    if let Some(generation) = crate::pm_profile::committed_generation(host, owner)? {
+        return crate::pm_profile::with_committed_profile(host, owner, generation, |profile| {
+            Ok(profile
+                .backpacks
+                .last_key_value()
+                .map(|(&number, _)| number))
+        });
+    }
     let Some(profile) = read_profile(host, owner)? else {
         return Ok(crate::pm_profile::with_archive(host, owner, |profile| {
             Ok(profile
@@ -1269,9 +1326,11 @@ pub(crate) fn register(registrar: &mut dyn Registrar) {
         }
         let stack = at.stack(host)?;
         let (id, bag) = held_record(host, &stack)?;
+        let generation = crate::pm_profile::committed_generation(host, id.owner).ok()?;
         Some(Box::new(BackpackInventory {
             at: at.clone(),
             id,
+            generation,
             size: bag.size,
             cooler: COOLER.matches(host, &stack),
         }))
@@ -1281,6 +1340,7 @@ pub(crate) fn register(registrar: &mut dyn Registrar) {
 struct BackpackInventory {
     at: ItemPlace,
     id: BackpackId,
+    generation: Option<u128>,
     size: u32,
     cooler: bool,
 }
@@ -1295,6 +1355,9 @@ impl BackpackInventory {
     }
 
     fn read(&self, host: &mut dyn ServerHost) -> Option<Backpack> {
+        if !self.current_generation(host) {
+            return None;
+        }
         let held = self.at.stack(host)?;
         let (id, bag) = held_record(host, &held)?;
         (id == self.id && bag.size == self.size && self.cooler == COOLER.matches(host, &held))
@@ -1302,10 +1365,30 @@ impl BackpackInventory {
     }
 
     fn write(&self, host: &mut dyn ServerHost, tx: &Transaction, bag: &Backpack) -> bool {
+        if !self.current_generation(host) {
+            return false;
+        }
         let Ok(data) = bag.to_nbt(host) else {
             return false;
         };
         GlobalBackpacks.save(host, tx, self.id, data).is_ok()
+    }
+
+    fn current_generation(&self, host: &dyn ServerHost) -> bool {
+        if !crate::pm_profile::committed_generation(host, self.id.owner)
+            .is_ok_and(|active| active == self.generation)
+        {
+            return false;
+        }
+        let ItemPlace::PlayerHand { player, .. } = self.at else {
+            return false;
+        };
+        let open = VIEWERS.lock().unwrap().get(&player).copied();
+        !open.is_some_and(|open| {
+            open.id == self.id
+                && open.generation != self.generation
+                && host.menu(player, open.window).is_some()
+        })
     }
 }
 
@@ -1413,37 +1496,48 @@ impl ResourceHandler<ItemResource> for BackpackInventory {
     }
 }
 
+#[derive(Clone, Copy)]
+struct OpenBackpack {
+    id: BackpackId,
+    window: i32,
+    generation: Option<u128>,
+}
+
+static VIEWERS: Mutex<BTreeMap<u128, OpenBackpack>> = Mutex::new(BTreeMap::new());
+
 #[derive(Default)]
-pub(crate) struct BackpackMenus(Mutex<BTreeMap<u128, (BackpackId, i32)>>);
+pub(crate) struct BackpackMenus;
 
 impl BackpackMenus {
     pub(crate) fn clear(&self) {
-        self.0.lock().unwrap().clear();
+        VIEWERS.lock().unwrap().clear();
+        crate::pm_profile::clear_committed_cache();
     }
 
     pub(crate) fn closed(&self, event: &MenuClosedEvent) {
-        let mut viewers = self.0.lock().unwrap();
+        let mut viewers = VIEWERS.lock().unwrap();
         if viewers
             .get(&event.uuid)
-            .is_some_and(|&(_, window)| event.window == window)
+            .is_some_and(|open| event.window == open.window)
         {
             viewers.remove(&event.uuid);
         }
     }
 
     fn refresh_cooler(&self, host: &mut dyn ServerHost, id: BackpackId) {
-        let viewer = self
-            .0
+        let viewer = VIEWERS
             .lock()
             .unwrap()
             .iter()
-            .find_map(|(&viewer, &(open, window))| (open == id).then_some((viewer, window)));
-        if let Some((viewer, window)) = viewer
-            && host.menu(viewer, window).is_some()
+            .find_map(|(&viewer, &open)| (open.id == id).then_some((viewer, open)));
+        if let Some((viewer, open)) = viewer
+            && host.menu(viewer, open.window).is_some()
+            && crate::pm_profile::committed_generation(host, id.owner)
+                .is_ok_and(|active| active == open.generation)
             && let Ok(Some(mut bag)) = live_bag(host, id, cooler::SIZE)
         {
             let slots = (0..bag.size).map(|slot| bag.slots.remove(&slot)).collect();
-            let _ = host.menu_set_items(viewer, window, slots);
+            let _ = host.menu_set_items(viewer, open.window, slots);
         }
     }
 
@@ -1504,13 +1598,13 @@ impl BackpackMenus {
             return false;
         };
         let result = target.and_then(|(id, size)| {
+            let generation = crate::pm_profile::committed_generation(host, id.owner)?;
             {
-                let mut viewers = self.0.lock().unwrap();
-                viewers.retain(|uuid, (_, window)| host.menu(*uuid, *window).is_some());
-                if viewers
-                    .iter()
-                    .any(|(&uuid, &(open, _))| open == id && uuid != player.uuid())
-                {
+                let mut viewers = VIEWERS.lock().unwrap();
+                viewers.retain(|uuid, open| host.menu(*uuid, open.window).is_some());
+                if viewers.iter().any(|(&uuid, open)| {
+                    open.id == id && open.generation == generation && uuid != player.uuid()
+                }) {
                     return Err("Someone else is already using this backpack.".into());
                 }
             }
@@ -1531,7 +1625,14 @@ impl BackpackMenus {
                 host.close_menu(player.uuid());
                 return Err("The held backpack could not be bound to its menu.".into());
             }
-            self.0.lock().unwrap().insert(player.uuid(), (id, window));
+            VIEWERS.lock().unwrap().insert(
+                player.uuid(),
+                OpenBackpack {
+                    id,
+                    window,
+                    generation,
+                },
+            );
             Ok(())
         });
         if let Err(message) = result {
@@ -1624,7 +1725,11 @@ mod tests {
         host.transaction(|host, tx| GlobalBackpacks.save(host, tx, ID, saved.clone()))
             .unwrap();
         recover_lost(
-            &mut host, borrower, PermissionLevel::Gamemasters, OWNER_UUID, "3",
+            &mut host,
+            borrower,
+            PermissionLevel::Gamemasters,
+            OWNER_UUID,
+            "3",
         )
         .unwrap();
         let bag = BackpackInventory {
@@ -1633,6 +1738,7 @@ mod tests {
                 hand: Hand::Main,
             },
             id: ID,
+            generation: None,
             size: 9,
             cooler: false,
         };
@@ -1660,11 +1766,23 @@ mod tests {
             Err(refusal.clone())
         );
         assert_eq!(
-            recover_lost(&mut host, borrower, PermissionLevel::Gamemasters, OWNER_UUID, "3"),
+            recover_lost(
+                &mut host,
+                borrower,
+                PermissionLevel::Gamemasters,
+                OWNER_UUID,
+                "3"
+            ),
             Err(refusal.clone())
         );
         assert_eq!(
-            restore_held(&mut host, &GlobalBackpacks, borrower, Hand::Main, PermissionLevel::Gamemasters),
+            restore_held(
+                &mut host,
+                &GlobalBackpacks,
+                borrower,
+                Hand::Main,
+                PermissionLevel::Gamemasters
+            ),
             Err(refusal)
         );
 
@@ -1690,15 +1808,125 @@ mod tests {
         assert_eq!(deposit(&mut host), Ok(0));
         assert_eq!(source.stack(&mut host), Some(diamond.clone()));
         assert_eq!(destination.stack(&mut host), None);
-        assert_eq!(GlobalBackpacks.load(&mut host, ID).unwrap(), Some(saved));
+        assert!(GlobalBackpacks.load(&mut host, ID).is_err());
 
         host.frozen_player_handovers.remove(&OWNER);
+        assert_eq!(GlobalBackpacks.load(&mut host, ID).unwrap(), Some(saved));
         assert_eq!(withdraw(&mut host), Ok(()));
         assert_eq!(deposit(&mut host), Ok(2));
         assert_eq!(source.stack(&mut host), None);
         assert_eq!(destination.stack(&mut host), Some(diamond));
         assert_eq!(bag.amount(&mut host, 8), 0);
         assert_eq!(bag.amount(&mut host, 0), 2);
+    }
+
+    #[test]
+    fn committed_generations_keep_bags_and_allocations_separate_from_old_records() {
+        let mut host = fixture();
+        host.join(RECIPIENT, 7);
+        let borrower = (&host as &dyn Host).player(RECIPIENT).unwrap();
+        let diamond = material(&host, "minecraft:diamond", 2);
+        let record = Backpack {
+            size: 9,
+            slots: BTreeMap::from([(8, diamond.clone())]),
+            paper: false,
+        }
+        .to_nbt(&host)
+        .unwrap();
+        let unrelated = BackpackId {
+            owner: OWNER + 1,
+            number: ID.number,
+        };
+        host.transaction(|host, tx| {
+            GlobalBackpacks.save(host, tx, ID, record.clone())?;
+            GlobalBackpacks.save(host, tx, BackpackId { number: 70, ..ID }, record.clone())?;
+            GlobalBackpacks.save(host, tx, unrelated, record.clone())
+        })
+        .unwrap();
+        recover_lost(
+            &mut host,
+            borrower,
+            PermissionLevel::Gamemasters,
+            OWNER_UUID,
+            "3",
+        )
+        .unwrap();
+
+        let held = ItemPlace::PlayerHand {
+            player: RECIPIENT,
+            hand: Hand::Main,
+        };
+        let old_handle = BackpackInventory {
+            at: held.clone(),
+            id: ID,
+            generation: None,
+            size: 9,
+            cooler: false,
+        };
+        assert_eq!(old_handle.amount(&mut host, 8), 2);
+        let section = Identifier::parse("slimefun:profile").unwrap();
+        let snapshot = |numbers: &[u32]| {
+            crate::pm_profile::Profile {
+                backpacks: numbers
+                    .iter()
+                    .map(|&number| (number, vec![std::borrow::Cow::Borrowed(&[][..]); 9]))
+                    .collect(),
+                ..Default::default()
+            }
+            .encode(OWNER)
+            .unwrap()
+        };
+
+        // The owner need not be online for a borrower to see the exact committed view.
+        host.transfer_profiles
+            .insert((OWNER, section.clone()), (41, snapshot(&[ID.number, 14])));
+        assert_eq!(old_handle.size(&mut host), 0);
+        assert!(load_bag(&mut host, ID).unwrap().unwrap().slots.is_empty());
+        assert_eq!(next_number(&mut host, OWNER, Some(14)).unwrap(), 15);
+        let missing = BackpackId { number: 70, ..ID };
+        assert!(load_bag(&mut host, missing).unwrap().is_none());
+        assert!(
+            load_paper(&host, missing, None)
+                .unwrap_err()
+                .contains("当前的同步档案")
+        );
+
+        let active = BackpackInventory {
+            at: held,
+            id: ID,
+            generation: Some(41),
+            size: 9,
+            cooler: false,
+        };
+        assert_eq!(
+            host.transaction(|host, tx| Ok::<_, ()>(active.insert(
+                host,
+                tx,
+                8,
+                &ItemResource::of(&diamond),
+                2
+            ))),
+            Ok(2)
+        );
+        host.attachments = mod_api::Attachments::from_nbt(host.attachments.to_nbt());
+        assert_eq!(active.amount(&mut host, 8), 2);
+
+        host.transfer_profiles
+            .insert((OWNER, section), (42, snapshot(&[ID.number])));
+        assert_eq!(active.size(&mut host), 0);
+        assert!(load_bag(&mut host, ID).unwrap().unwrap().slots.is_empty());
+        assert_eq!(next_number(&mut host, OWNER, Some(ID.number)).unwrap(), 4);
+        assert_eq!(
+            GlobalBackpacks.load(&mut host, unrelated).unwrap(),
+            Some(record.clone())
+        );
+        host.transfer_profile_refusals
+            .insert(OWNER, mod_api::TransferProfileReadError::Away);
+        assert!(GlobalBackpacks.load(&mut host, ID).is_err());
+        assert!(
+            host.transaction(|host, tx| GlobalBackpacks.save(host, tx, ID, record))
+                .is_err()
+        );
     }
 
     #[test]
@@ -1818,6 +2046,7 @@ mod tests {
                 hand: Hand::Main,
             },
             id: ID,
+            generation: None,
             size: 27,
             cooler: false,
         };
@@ -2252,6 +2481,7 @@ mod tests {
         let original = BackpackInventory {
             at: shell,
             id: ID,
+            generation: None,
             size: 9,
             cooler: false,
         };
@@ -2270,6 +2500,7 @@ mod tests {
                 hand: Hand::Main,
             },
             id: ID,
+            generation: None,
             size: 9,
             cooler: false,
         };

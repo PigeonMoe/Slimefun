@@ -237,6 +237,7 @@ mod tests {
                 hand: Hand::Off,
             },
             id,
+            generation: None,
             size: SIZE,
             cooler: true,
         };
