@@ -326,7 +326,7 @@ fn pull(
         let Some(item) = host.item_entity(entity) else {
             continue;
         };
-        if item.pickup_delay(host) != Some(0)
+        if item.pickup_delay(host).is_none_or(|delay| delay > 0)
             || !entity.position(host).is_some_and(|from| {
                 from.into_iter()
                     .zip(target)
@@ -348,6 +348,93 @@ fn pull(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mod_api::{
+        Backend, BackendMut, BackendMutRef, BackendRef, EntityRef, Host, ItemEntityRef,
+        __private::game::{BackendMutRefOf, BackendRefOf},
+        prelude::{
+            EntitiesBackend, EntitiesBackendMut, ItemEntitiesBackend, ItemEntitiesHost, LevelsBackend,
+        },
+        testing::FakeLevel,
+    };
+
+    struct Drops {
+        delays: [Option<i32>; 6],
+        pulled: Vec<u32>,
+    }
+
+    impl Host for Drops {
+        fn backend(&self) -> Option<BackendRef<'_>> {
+            Some(BackendRef::of(self))
+        }
+    }
+
+    impl ServerHost for Drops {
+        fn backend_mut(&mut self) -> Option<BackendMutRef<'_>> {
+            Some(BackendMutRef::of(self))
+        }
+    }
+
+    impl Backend for Drops {}
+    impl BackendMut for Drops {}
+    mod_api::impl_host_areas!(Drops, except(item_entities));
+    mod_api::impl_server_host_areas!(Drops);
+    mod_api::impl_backend_areas!(Drops, except(entities, item_entities, levels));
+    mod_api::impl_backend_mut_areas!(Drops, except(entities));
+
+    impl LevelsBackend for Drops {
+        fn level_entities_in(
+            &self,
+            level: LevelRef,
+            _: [f64; 3],
+            _: [f64; 3],
+        ) -> Option<Vec<EntityRef>> {
+            Some((1..=7).map(|id| EntityRef::new(level.epoch(), id)).collect())
+        }
+    }
+
+    impl ItemEntitiesHost for Drops {
+        fn item_entity(&self, entity: EntityRef) -> Option<ItemEntityRef> {
+            (entity.id() < 7).then(|| ItemEntityRef::new(entity))
+        }
+    }
+
+    impl ItemEntitiesBackend for Drops {
+        fn item_entity_pickup_delay(&self, item: ItemEntityRef) -> Option<i32> {
+            self.delays[item.entity().id() as usize - 1]
+        }
+    }
+
+    impl EntitiesBackend for Drops {
+        fn entity_position(&self, entity: EntityRef) -> Option<[f64; 3]> {
+            Some([if entity.id() == 6 { 0.25 } else { 2.0 }, 0.0, 0.0])
+        }
+    }
+
+    impl EntitiesBackendMut for Drops {
+        fn entity_teleport_to(
+            &mut self,
+            entity: EntityRef,
+            _: [f64; 3],
+            _: Option<[f32; 2]>,
+        ) -> bool {
+            self.pulled.push(entity.id());
+            true
+        }
+    }
+
+    #[test]
+    fn infused_devices_pull_negative_and_zero_delays_but_respect_pickup_guards() {
+        mod_api::__private::initialize().unwrap();
+        let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
+        let level = FakeLevel::default().level();
+        let target = [0.0; 3];
+        let mut host = Drops {
+            delays: [Some(-7), Some(0), Some(1), Some(32_767), None, Some(-7)],
+            pulled: Vec::new(),
+        };
+        assert!(pull(&mut host, level, [target; 2], target, 3.5, 0.25, None));
+        assert_eq!(host.pulled, [1, 2]);
+    }
 
     #[test]
     fn paper_gadget_defaults_and_toggle_apply_separately() {
