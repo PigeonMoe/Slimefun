@@ -156,7 +156,11 @@ pub(crate) const BEE_ARMOR: Research = Research {
 research!(ELYTRA_CAP_RESEARCH, "elytra_cap", "Crash Gear", 20);
 research!(LEAD_CLOTHING, "lead_clothing", "Lead Clothing", 14);
 research!(SPECIAL_RUNES, "special_runes", "Purple Runes", 18);
-research!(ELYTRA, "elytra", "Elytras", 20);
+pub(crate) const ELYTRA: Research = Research {
+    id: "elytra",
+    name: "Elytras",
+    cost: 20,
+};
 
 const UNLOCKED: Research = Research {
     id: "",

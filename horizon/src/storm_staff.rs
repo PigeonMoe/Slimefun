@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use mod_api::{
-    Compound, GameMode, GameRuleValue, Hand, Host, HostTransaction, ItemPlace, ItemStack, LevelRef,
-    PlayerRef, ServerHost, SoundSource, Tag,
+    Compound, GameMode, Hand, Host, HostTransaction, ItemPlace, ItemStack, LevelRef, PlayerRef,
+    ServerHost, SoundSource, Tag,
 };
 
 use crate::{
-    enchantment_rune::ANCIENT_RUNE_LIGHTNING,
     elemental_staves::{STAFF_ELEMENTAL_WATER, STAFF_ELEMENTAL_WIND},
+    enchantment_rune::ANCIENT_RUNE_LIGHTNING,
     hologram_projector::{colored_label, colored_lore},
     items::{ENDER_LUMP_3, Kind, item, item_id},
     random::natural_drop_position,
@@ -291,10 +291,7 @@ pub(crate) fn use_held(
     let Some(target) = targeted_block(host, player, level) else {
         return Some(false);
     };
-    if !matches!(
-        level.game_rule(host, "minecraft:pvp"),
-        Ok(Some(GameRuleValue::Bool(true)))
-    ) {
+    if !level.allow_player_attack_at(host, player, target) {
         let _ = player.tell(host, colored_label("&c你不能在这里攻击其他玩家!"));
         return Some(false);
     }
@@ -386,3 +383,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "storm_staff_target_tests.rs"]
+mod target_tests;

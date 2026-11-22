@@ -23,7 +23,10 @@ use mod_api::{
 
 use crate::{
     backpacks::{ESSENCE_OF_AFTERLIFE, NECROMANCY, NECROTIC_SKULL},
-    items::{ENDER_LUMP_3, GOLD_8K, Kind, MAGIC_LUMP_1, MAGIC_LUMP_2, MAGIC_LUMP_3, item, text},
+    items::{
+        ENDER_LUMP_3, GOLD_8K, Kind, MAGIC_LUMP_1, MAGIC_LUMP_2, MAGIC_LUMP_3,
+        REINFORCED_ALLOY_INGOT, item, text,
+    },
     recipes::{CraftingRecipe, Research, Stack},
     research,
 };
@@ -154,6 +157,17 @@ pub(crate) const MAGIC_CRAFTING: &[CraftingRecipe] = &[
     },
 ];
 
+const TRIDENT_RESEARCH: Research = Research {
+    id: "trident",
+    name: "Trident",
+    cost: 20,
+};
+const TOTEM_RESEARCH: Research = Research {
+    id: "totem_of_undying",
+    name: "Totem of Undying",
+    cost: 36,
+};
+
 pub(crate) const CRAFTING: &[CraftingRecipe] = &[
     altar_recipe(
         [
@@ -266,6 +280,54 @@ pub(crate) const CRAFTING: &[CraftingRecipe] = &[
         SYNTHETIC_SHULKER_SHELL,
         1,
         &SYNTHETIC_SHULKERS,
+    ),
+    altar_recipe(
+        [
+            crate::armor_forge::ELYTRA_SCALE,
+            ANCIENT_RUNE_AIR,
+            crate::armor_forge::ELYTRA_SCALE,
+            ANCIENT_RUNE_AIR,
+            vanilla!("leather_chestplate"),
+            ANCIENT_RUNE_AIR,
+            crate::armor_forge::ELYTRA_SCALE,
+            ANCIENT_RUNE_AIR,
+            crate::armor_forge::ELYTRA_SCALE,
+        ],
+        vanilla!("elytra"),
+        1,
+        &crate::armor_forge::ELYTRA,
+    ),
+    altar_recipe(
+        [
+            vanilla!("nautilus_shell"),
+            REINFORCED_ALLOY_INGOT,
+            vanilla!("nautilus_shell"),
+            crate::elemental_staves::STAFF_ELEMENTAL_WATER,
+            vanilla!("diamond_sword"),
+            crate::elemental_staves::STAFF_ELEMENTAL_WATER,
+            MAGIC_LUMP_3,
+            vanilla!("nether_star"),
+            MAGIC_LUMP_3,
+        ],
+        vanilla!("trident"),
+        1,
+        &TRIDENT_RESEARCH,
+    ),
+    altar_recipe(
+        [
+            ESSENCE_OF_AFTERLIFE,
+            vanilla!("emerald_block"),
+            ESSENCE_OF_AFTERLIFE,
+            MAGIC_LUMP_3,
+            crate::talismans::COMMON_TALISMAN,
+            MAGIC_LUMP_3,
+            ESSENCE_OF_AFTERLIFE,
+            vanilla!("emerald_block"),
+            ESSENCE_OF_AFTERLIFE,
+        ],
+        vanilla!("totem_of_undying"),
+        1,
+        &TOTEM_RESEARCH,
     ),
     crate::infused::ALTAR,
     crate::spawner_repair::ALTAR,
@@ -839,7 +901,11 @@ fn start_ritual(
     if crate::availability::output_denial(host.dimension(), recipe.output.kind).is_some() {
         return Err("This item has been disabled in this world.");
     }
-    if !recipe.research.id.is_empty() && !research::can_use(host, player, recipe.research) {
+    // Paper checks the output's Slimefun PDC. VanillaItem outputs do not carry it.
+    if matches!(recipe.output.kind, Kind::Slimefun(_))
+        && !recipe.research.id.is_empty()
+        && !research::can_use(host, player, recipe.research)
+    {
         return Err(match recipe.research.id {
             "essence_of_afterlife" => "Unlock Necromancy with /sf research essence_of_afterlife.",
             "special_runes" => "Unlock Purple Runes with /sf research special_runes.",
@@ -1321,6 +1387,88 @@ pub(crate) fn decorate(id: &str, components: &mut Compound) {
 mod tests {
     use super::*;
     use mod_api::{Identifier, testing::FakeHost};
+
+    #[test]
+    fn paper_vanilla_altar_recipes_match_and_return_unmarked_items() {
+        let mut host = FakeHost::new();
+        host.registries
+            .resolve_items(
+                CRAFTING
+                    .iter()
+                    .filter(|recipe| matches!(recipe.output.kind, Kind::Vanilla(_)))
+                    .flat_map(|recipe| {
+                        recipe
+                            .inputs
+                            .into_iter()
+                            .flatten()
+                            .chain([recipe.output.kind])
+                    })
+                    .map(|kind| Identifier::parse(kind.material()).unwrap()),
+            )
+            .unwrap();
+        for (material, research_id, expected) in [
+            (
+                "minecraft:elytra",
+                "elytra",
+                [
+                    "ELYTRA_SCALE",
+                    "ANCIENT_RUNE_AIR",
+                    "ELYTRA_SCALE",
+                    "ANCIENT_RUNE_AIR",
+                    "minecraft:leather_chestplate",
+                    "ANCIENT_RUNE_AIR",
+                    "ELYTRA_SCALE",
+                    "ANCIENT_RUNE_AIR",
+                    "ELYTRA_SCALE",
+                ],
+            ),
+            (
+                "minecraft:trident",
+                "trident",
+                [
+                    "minecraft:nautilus_shell",
+                    "REINFORCED_ALLOY_INGOT",
+                    "minecraft:nautilus_shell",
+                    "STAFF_ELEMENTAL_WATER",
+                    "minecraft:diamond_sword",
+                    "STAFF_ELEMENTAL_WATER",
+                    "MAGIC_LUMP_3",
+                    "minecraft:nether_star",
+                    "MAGIC_LUMP_3",
+                ],
+            ),
+            (
+                "minecraft:totem_of_undying",
+                "totem_of_undying",
+                [
+                    "ESSENCE_OF_AFTERLIFE",
+                    "minecraft:emerald_block",
+                    "ESSENCE_OF_AFTERLIFE",
+                    "MAGIC_LUMP_3",
+                    "COMMON_TALISMAN",
+                    "MAGIC_LUMP_3",
+                    "ESSENCE_OF_AFTERLIFE",
+                    "minecraft:emerald_block",
+                    "ESSENCE_OF_AFTERLIFE",
+                ],
+            ),
+        ] {
+            let output = Kind::Vanilla(material);
+            let recipe = CRAFTING
+                .iter()
+                .find(|recipe| recipe.output.kind == output)
+                .unwrap();
+            let inputs = recipe.inputs.map(Option::unwrap);
+            assert_eq!(inputs.map(Kind::id), expected);
+            assert_eq!(recipe.research.id, research_id);
+            let ring = PEDESTAL_PATTERN.map(|cell| inputs[cell].stack(&host, 1).unwrap());
+            let catalyst = inputs[4].stack(&host, 1).unwrap();
+            let found = ritual_recipe(&host, &catalyst, &ring).unwrap();
+            let reward = found.output.kind.stack(&host, found.output.count).unwrap();
+            assert!(output.matches(&host, &reward));
+            assert_eq!(reward.count(), 1);
+        }
+    }
 
     #[test]
     fn paper_marker_archives_distinguish_absent_and_untyped_item_data() {

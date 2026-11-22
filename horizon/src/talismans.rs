@@ -20,10 +20,15 @@ use crate::{
     recipes::{CraftingRecipe, Research, Stack},
     research,
     smelters_pickaxe::{enchantment, fortune_amount, ore},
+    snacks::MONSTER_JERKY,
 };
 
 #[path = "anvil_talisman.rs"]
 pub(crate) mod anvil;
+#[path = "fluid_talismans.rs"]
+mod fluids;
+#[path = "melee_talismans.rs"]
+pub(crate) mod melee;
 
 item!(
     COMMON_TALISMAN,
@@ -187,6 +192,50 @@ item!(
     None
 );
 
+item!(
+    HUNTER_TALISMAN,
+    "emerald",
+    "Talisman of the Hunter",
+    "green",
+    None,
+    None
+);
+item!(
+    ENDER_HUNTER_TALISMAN,
+    "emerald",
+    "Ender Talisman of the Hunter",
+    "dark_purple",
+    None,
+    None
+);
+
+const HUNTER_RESEARCH: Research = Research {
+    id: "hunter_talisman",
+    name: "Talisman of the Hunter",
+    cost: 18,
+};
+
+item!(
+    WHIRLWIND_TALISMAN,
+    "emerald",
+    "Talisman of the Whirlwind",
+    "green",
+    None,
+    None
+);
+item!(
+    ENDER_WHIRLWIND_TALISMAN,
+    "emerald",
+    "Ender Talisman of the Whirlwind",
+    "dark_purple",
+    None,
+    None
+);
+const WHIRLWIND_RESEARCH: Research = Research {
+    id: "whirlwind_talisman",
+    name: "Talisman of the Whirlwind",
+    cost: 19,
+};
 const FIRE_RESEARCH: Research = Research {
     id: "fire_talisman",
     name: "Talisman of the Firefighter",
@@ -255,11 +304,17 @@ pub(crate) const RESEARCHES: &[&Research] = &[
     &WIZARD_RESEARCH,
     &WISE_RESEARCH,
     &FIRE_RESEARCH,
+    &fluids::LAVA_RESEARCH,
+    &fluids::WATER_RESEARCH,
     &ANGEL_RESEARCH,
     &TRAVELLER_RESEARCH,
+    &WHIRLWIND_RESEARCH,
     &MINER_RESEARCH,
     &FARMER_RESEARCH,
+    &HUNTER_RESEARCH,
     &CAVEMAN_RESEARCH,
+    &melee::WARRIOR_RESEARCH,
+    &melee::KNIGHT_RESEARCH,
     &ENDER_RESEARCH,
 ];
 
@@ -408,6 +463,10 @@ pub(crate) const CRAFTING: &[CraftingRecipe] = &[
         ],
     ),
     infused(ENDER_FIRE_TALISMAN, FIRE_TALISMAN, 4),
+    fluids::LAVA_RECIPE,
+    fluids::ENDER_LAVA_RECIPE,
+    fluids::WATER_RECIPE,
+    fluids::ENDER_WATER_RECIPE,
     recipe(
         ANGEL_TALISMAN,
         &ANGEL_RESEARCH,
@@ -443,6 +502,23 @@ pub(crate) const CRAFTING: &[CraftingRecipe] = &[
     infused(ENDER_ANGEL_TALISMAN, ANGEL_TALISMAN, 1),
     infused(ENDER_TRAVELLER_TALISMAN, TRAVELLER_TALISMAN, 1),
     recipe(
+        WHIRLWIND_TALISMAN,
+        &WHIRLWIND_RESEARCH,
+        1,
+        [
+            LUMP_3,
+            None,
+            LUMP_3,
+            Some(STAFF_ELEMENTAL_WIND),
+            Some(TRAVELLER_TALISMAN),
+            Some(STAFF_ELEMENTAL_WIND),
+            LUMP_3,
+            None,
+            LUMP_3,
+        ],
+    ),
+    infused(ENDER_WHIRLWIND_TALISMAN, WHIRLWIND_TALISMAN, 1),
+    recipe(
         MINER_TALISMAN,
         &MINER_RESEARCH,
         1,
@@ -477,6 +553,23 @@ pub(crate) const CRAFTING: &[CraftingRecipe] = &[
     ),
     infused(ENDER_FARMER_TALISMAN, FARMER_TALISMAN, 1),
     recipe(
+        HUNTER_TALISMAN,
+        &HUNTER_RESEARCH,
+        1,
+        [
+            LUMP_3,
+            None,
+            LUMP_3,
+            Some(SYNTHETIC_SAPPHIRE),
+            Some(COMMON_TALISMAN),
+            Some(MONSTER_JERKY),
+            LUMP_3,
+            None,
+            LUMP_3,
+        ],
+    ),
+    infused(ENDER_HUNTER_TALISMAN, HUNTER_TALISMAN, 1),
+    recipe(
         CAVEMAN_TALISMAN,
         &CAVEMAN_RESEARCH,
         1,
@@ -493,6 +586,10 @@ pub(crate) const CRAFTING: &[CraftingRecipe] = &[
         ],
     ),
     infused(ENDER_CAVEMAN_TALISMAN, CAVEMAN_TALISMAN, 1),
+    melee::CRAFTING[0],
+    melee::CRAFTING[1],
+    melee::CRAFTING[2],
+    melee::CRAFTING[3],
 ];
 
 const MAGICIAN: Talisman = Talisman {
@@ -578,6 +675,22 @@ const TRAVELLER: Talisman = Talisman {
         "Speed Buff when you start sprinting",
     ],
 };
+const WHIRLWIND: Talisman = Talisman {
+    normal: WHIRLWIND_TALISMAN,
+    ender: ENDER_WHIRLWIND_TALISMAN,
+    research: &WHIRLWIND_RESEARCH,
+    chance: 60,
+    message: "Your Talisman reflected the Projectile",
+    lore: &[
+        "Having this Talisman",
+        "in your Inventory will reflect",
+        "60% of any projectiles fired at you.",
+    ],
+};
+const WHIRLWIND_CAUTION: &[&str] = &[
+    "Only a thrown Trident can pierce",
+    "through this layer of protection",
+];
 const MINER: Talisman = Talisman {
     normal: MINER_TALISMAN,
     ender: ENDER_MINER_TALISMAN,
@@ -602,6 +715,19 @@ const FARMER: Talisman = Talisman {
         "in your Inventory it has",
         "a 20% chance of doubling",
         "all crops you harvest",
+    ],
+};
+const HUNTER: Talisman = Talisman {
+    normal: HUNTER_TALISMAN,
+    ender: ENDER_HUNTER_TALISMAN,
+    research: &HUNTER_RESEARCH,
+    chance: 20,
+    message: "Your Talisman just doubled your drops",
+    lore: &[
+        "While you have this Talisman",
+        "in your Inventory it has",
+        "a 20% chance of doubling",
+        "all Drops from Mobs you kill",
     ],
 };
 const CAVEMAN: Talisman = Talisman {
@@ -639,7 +765,21 @@ pub(crate) fn lore(id: &str) -> Option<Tag> {
         ]));
     }
     let talisman = [
-        &MAGICIAN, &WIZARD, &WISE, &FIRE, &ANGEL, &TRAVELLER, &MINER, &FARMER, &CAVEMAN,
+        &MAGICIAN,
+        &WIZARD,
+        &WISE,
+        &FIRE,
+        &fluids::LAVA,
+        &fluids::WATER,
+        &ANGEL,
+        &TRAVELLER,
+        &WHIRLWIND,
+        &MINER,
+        &FARMER,
+        &HUNTER,
+        &CAVEMAN,
+        &melee::WARRIOR,
+        &melee::KNIGHT,
     ]
     .into_iter()
     .find(|talisman| [talisman.normal.id(), talisman.ender.id()].contains(&id))?;
@@ -650,6 +790,13 @@ pub(crate) fn lore(id: &str) -> Option<Tag> {
     }
     lines.push(blank());
     lines.extend(talisman.lore.iter().map(|line| text(line, "white", false)));
+    if talisman.normal == WHIRLWIND_TALISMAN {
+        lines.extend(
+            WHIRLWIND_CAUTION
+                .iter()
+                .map(|line| text(line, "yellow", true)),
+        );
+    }
     Some(Tag::List(lines))
 }
 
@@ -696,6 +843,58 @@ impl Default for Rules {
 pub(crate) struct Talismans(Mutex<Rules>);
 
 impl Talismans {
+    pub(crate) fn whirlwind(
+        &self,
+        host: &mut dyn ServerHost,
+        player: PlayerRef,
+        rolls: &Rolls,
+    ) -> bool {
+        if !host.can_return_player_damage_projectile(player) {
+            return false;
+        }
+        let Some(level) = player.level(host) else {
+            return false;
+        };
+        if !chance(host, level, &WHIRLWIND, rolls) || !present(host, player, &WHIRLWIND) {
+            return false;
+        }
+        if !host.return_player_damage_projectile(player) {
+            return false;
+        }
+        let actionbar = self.0.lock().unwrap().actionbar;
+        notify(host, player, &WHIRLWIND, actionbar);
+        true
+    }
+
+    pub(crate) fn hunter_drops(
+        &self,
+        host: &mut dyn ServerHost,
+        event: &mut mod_api::MobDeathBonusDropsEvent<'_>,
+        rolls: &Rolls,
+    ) {
+        if event.drops.is_empty() || event.can_pick_up_loot {
+            return;
+        }
+        let Some(player) = event.credited_player.and_then(|uuid| host.player(uuid)) else {
+            return;
+        };
+        let Some(level) = host.level(host.dimension()) else {
+            return;
+        };
+        if !chance(host, level, &HUNTER, rolls) || !present(host, player, &HUNTER) {
+            return;
+        }
+        // Paper sends the activation even when every drop is protected.
+        let actionbar = self.0.lock().unwrap().actionbar;
+        notify(host, player, &HUNTER, actionbar);
+        event.bonus_drops.extend(hunter_copies(
+            host,
+            event.kind,
+            event.drops,
+            event.protected_drops,
+        ));
+    }
+
     pub(crate) fn caveman(
         &self,
         host: &mut dyn ServerHost,
@@ -883,32 +1082,35 @@ impl Talismans {
         }
     }
 
-    pub(crate) fn protect_from_fire(
+    pub(crate) fn protect_from_environment(
         &self,
         host: &mut dyn ServerHost,
         player: PlayerRef,
         damage_type: &str,
     ) -> bool {
-        if damage_type != "minecraft:in_fire" || !learned(host, player, &FIRE) {
+        let Some((spec, effect_id)) = environment_effect(damage_type) else {
+            return false;
+        };
+        if !learned(host, player, spec) {
             return false;
         }
         let Some(living) = host.living(player.entity()) else {
             return false;
         };
-        let Some(effect) = host.effect_key("minecraft:fire_resistance") else {
+        let Some(effect) = host.effect_key(effect_id) else {
             return false;
         };
         if living.effect(host, effect).is_some() {
             return false;
         }
         let activated = host.transaction(|host, _| {
-            consume_carried(host, player, &FIRE)?;
-            let resistance = ActiveEffect::new(effect, 3600, 4, false, true, true);
-            living.add_effect(host, &resistance).then_some(()).ok_or(())
+            consume_carried(host, player, spec)?;
+            let effect = ActiveEffect::new(effect, 3600, 4, true, true, true);
+            living.add_effect(host, &effect).then_some(()).ok_or(())
         });
         if activated.is_ok() {
             let actionbar = self.0.lock().unwrap().actionbar;
-            notify(host, player, &FIRE, actionbar);
+            notify(host, player, spec, actionbar);
             true
         } else {
             false
@@ -1005,8 +1207,39 @@ fn possible_magic_enchants(
     candidates
 }
 
+fn environment_effect(damage_type: &str) -> Option<(&'static Talisman, &'static str)> {
+    Some(match damage_type {
+        "minecraft:in_fire" => (&FIRE, "minecraft:fire_resistance"),
+        "minecraft:lava" => (&fluids::LAVA, "minecraft:fire_resistance"),
+        "minecraft:drown" => (&fluids::WATER, "minecraft:water_breathing"),
+        _ => return None,
+    })
+}
+
 fn present(host: &dyn ServerHost, player: PlayerRef, spec: &Talisman) -> bool {
     carried_talisman(host, player, spec).is_some() && learned(host, player, spec)
+}
+
+fn hunter_copies(
+    host: &dyn Host,
+    kind: &str,
+    drops: &[ItemStack],
+    protected: &[ItemStack],
+) -> Vec<ItemStack> {
+    let mut copies = drops.to_vec();
+    fn remove_once(copies: &mut Vec<ItemStack>, item: &ItemStack) {
+        if let Some(index) = copies.iter().position(|stack| stack == item) {
+            copies.remove(index);
+        }
+    }
+    for item in protected {
+        remove_once(&mut copies, item);
+    }
+    if kind != "minecraft:ravager" {
+        copies.retain(|stack| stack.item().id(host) != "minecraft:saddle");
+    }
+    copies.retain(|stack| stack.item().id(host) != "minecraft:air");
+    copies
 }
 
 fn miner_triggers(block: &str) -> bool {
@@ -1074,7 +1307,11 @@ fn carried_talisman(
         .map(|(slot, stack)| (StorageSlot::EnderChest(slot), stack))
 }
 
-fn consume_carried(host: &mut dyn ServerHost, player: PlayerRef, spec: &Talisman) -> Result<(), ()> {
+fn consume_carried(
+    host: &mut dyn ServerHost,
+    player: PlayerRef,
+    spec: &Talisman,
+) -> Result<(), ()> {
     let (slot, current) = carried_talisman(host, player, spec).ok_or(())?;
     let remainder = current.shrink(1);
     match slot {
@@ -1131,7 +1368,85 @@ fn notify(host: &mut dyn ServerHost, player: PlayerRef, spec: &Talisman, actionb
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn whirlwind_keeps_original_reflection_chance_lore_and_recipe() {
+        assert!(roll_succeeds(&WHIRLWIND, 60));
+        assert!(!roll_succeeds(&WHIRLWIND, 61));
+        let base = CRAFTING
+            .iter()
+            .find(|recipe| recipe.output.kind == WHIRLWIND.normal)
+            .unwrap();
+        let ender = CRAFTING
+            .iter()
+            .find(|recipe| recipe.output.kind == WHIRLWIND.ender)
+            .unwrap();
+        assert_eq!(
+            base.inputs[3..6],
+            [
+                Some(STAFF_ELEMENTAL_WIND),
+                Some(TRAVELLER_TALISMAN),
+                Some(STAFF_ELEMENTAL_WIND)
+            ]
+        );
+        assert_eq!(base.output.count, 1);
+        assert_eq!(base.research.cost, 19);
+        assert_eq!(ender.inputs[4], Some(WHIRLWIND.normal));
+        assert_eq!(ender.output.count, 1);
+        let Some(Tag::List(lines)) = lore(WHIRLWIND.normal.id()) else {
+            panic!("missing Whirlwind lore");
+        };
+        assert_eq!(
+            &lines[lines.len() - 2..],
+            &WHIRLWIND_CAUTION
+                .iter()
+                .map(|line| text(line, "yellow", true))
+                .collect::<Vec<_>>()
+        );
+    }
     use mod_api::testing::FakeHost;
+
+    #[test]
+    fn hunter_copies_only_unprotected_death_stacks_in_original_order() {
+        use mod_api::Identifier;
+
+        let mut host = FakeHost::new();
+        let items = [
+            "minecraft:chest",
+            "minecraft:apple",
+            "minecraft:saddle",
+            "minecraft:air",
+        ];
+        host.registries
+            .resolve_items(items.map(|id| Identifier::parse(id).unwrap()))
+            .unwrap();
+        let [chest, apple, saddle, air] =
+            items.map(|id| Kind::Vanilla(id).stack(&host, 1).unwrap());
+        let whole_stack = Kind::Vanilla("minecraft:apple").stack(&host, 2).unwrap();
+        let drops = [
+            chest.clone(),
+            saddle.clone(),
+            whole_stack.clone(),
+            apple.clone(),
+            air,
+        ];
+        let storage = [chest, apple.clone()];
+        assert_eq!(
+            hunter_copies(&host, "minecraft:donkey", &drops, &storage),
+            [whole_stack.clone()]
+        );
+        let repeated = [apple.clone(), whole_stack.clone(), apple.clone()];
+        assert_eq!(
+            hunter_copies(&host, "minecraft:zombie", &repeated, &[apple.clone()]),
+            [whole_stack, apple]
+        );
+        assert_eq!(
+            hunter_copies(&host, "minecraft:ravager", &[saddle.clone()], &[]),
+            [saddle]
+        );
+        assert!(roll_succeeds(&HUNTER, 20));
+        assert!(!roll_succeeds(&HUNTER, 21));
+    }
 
     #[test]
     fn miner_augments_each_nonblock_drop_with_papers_fortune_amount() {

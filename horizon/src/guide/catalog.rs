@@ -3,11 +3,13 @@
 use std::{collections::BTreeMap, sync::LazyLock};
 
 use crate::{
-    ancient_altar, armor_forge, food_machines, fuel_generators, industrial_miner,
+    advanced_processing, ancient_altar, armor_forge,
+    factory::reactors,
+    food_machines, fuel_generators, geology, heated_pressure, industrial_miner,
     items::{self, Kind},
     nether_goo, rainbow,
     recipes::{self, CraftingRecipe, Research, SingleRecipe, Stack},
-    soulbound_gear,
+    soulbound_gear, spawner_repair, thermal_machines,
 };
 
 #[derive(Clone, Copy)]
@@ -19,8 +21,12 @@ pub(super) struct RecipeType {
 
 impl RecipeType {
     const fn plain(material: &'static str, name: &'static str) -> Self {
+        Self::device(Kind::Vanilla(material), name)
+    }
+
+    const fn device(icon: Kind, name: &'static str) -> Self {
         Self {
-            icon: Kind::Vanilla(material),
+            icon,
             name,
             lore: &[],
         }
@@ -65,6 +71,32 @@ const FOOD_COMPOSTER: RecipeType = RecipeType {
     icon: food_machines::FOOD_COMPOSTER,
     name: "食物堆肥机",
     lore: &[],
+};
+
+const HEATED_PRESSURE: RecipeType =
+    RecipeType::device(heated_pressure::HEATED_PRESSURE_CHAMBER, "加热压力舱");
+const FREEZER: RecipeType = RecipeType::device(thermal_machines::FREEZER, "冰箱");
+const GEO_MINER: RecipeType = RecipeType::device(geology::GEO_MINER, "自然资源开采机");
+const OIL_PUMP: RecipeType = RecipeType::device(geology::OIL_PUMP, "原油泵");
+const REFINERY: RecipeType = RecipeType::device(advanced_processing::REFINERY, "炼油机");
+const NUCLEAR_REACTOR: RecipeType = RecipeType::device(reactors::NUCLEAR_REACTOR, "核反应堆");
+const CONTAINMENT: RecipeType =
+    RecipeType::device(spawner_repair::PICKAXE_OF_CONTAINMENT, "刷怪笼之镐");
+
+const NETHER_ICE_RESEARCH: Research = Research {
+    id: "nether_ice",
+    name: "Nether Ice Coolant",
+    cost: 45,
+};
+const BOOSTED_URANIUM_RESEARCH: Research = Research {
+    id: "boosted_uranium",
+    name: "Never-Ending Circle",
+    cost: 30,
+};
+const REACTOR_ESSENTIALS: Research = Research {
+    id: "reactor_essentials",
+    name: "Reactor Essentials",
+    cost: 36,
 };
 
 const IRON_GOLEM: &[IngredientVisual] = &[IngredientVisual {
@@ -704,5 +736,165 @@ fn stock_sources(entries: &mut BTreeMap<String, Entry>) {
             fertilizer,
             &[],
         );
+    }
+
+    let magnesium = fuel_generators::RESEARCHES
+        .iter()
+        .find(|topic| topic.id == "magnesium_generator");
+    for recipe in heated_pressure::RECIPES {
+        let (first_slot, research) = match recipe.output.kind {
+            heated_pressure::PLASTIC_SHEET => (4, Some(&heated_pressure::PLASTIC_RESEARCH)),
+            heated_pressure::BOOSTED_URANIUM => (0, Some(&BOOSTED_URANIUM_RESEARCH)),
+            heated_pressure::ENRICHED_NETHER_ICE | heated_pressure::NETHER_ICE_COOLANT_CELL => {
+                (0, Some(&NETHER_ICE_RESEARCH))
+            }
+            heated_pressure::MAGNESIUM_SALT => (0, magnesium),
+            heated_pressure::BLISTERING_INGOT
+            | heated_pressure::BLISTERING_INGOT_2
+            | crate::network_recipes::BLISTERING_INGOT_3 => {
+                (0, Some(&recipes::BLISTERING_INGOTS_RESEARCH))
+            }
+            _ => continue,
+        };
+        let ingredients: Vec<_> = recipe
+            .inputs
+            .iter()
+            .enumerate()
+            .map(|(index, input)| (first_slot + index, input.kind))
+            .collect();
+        add(
+            HEATED_PRESSURE,
+            recipe.output.kind,
+            recipe.output.count,
+            &ingredients,
+            research,
+            &[],
+        );
+    }
+
+    for (method, output, inputs, research) in [
+        (
+            OIL_PUMP,
+            heated_pressure::BUCKET_OF_OIL,
+            &[(4, Kind::Vanilla("minecraft:bucket"))][..],
+            &geology::OIL,
+        ),
+        (
+            REFINERY,
+            fuel_generators::BUCKET_OF_FUEL,
+            &[(4, heated_pressure::BUCKET_OF_OIL)],
+            &advanced_processing::FUEL,
+        ),
+        (
+            GEO_MINER,
+            heated_pressure::NETHER_ICE,
+            &[],
+            &NETHER_ICE_RESEARCH,
+        ),
+        (
+            FREEZER,
+            thermal_machines::REACTOR_COLLANT_CELL,
+            &[(0, Kind::Vanilla("minecraft:blue_ice"))],
+            &REACTOR_ESSENTIALS,
+        ),
+        (
+            NUCLEAR_REACTOR,
+            reactors::NEPTUNIUM,
+            &[(0, heated_pressure::URANIUM)],
+            &REACTOR_ESSENTIALS,
+        ),
+        (
+            NUCLEAR_REACTOR,
+            heated_pressure::PLUTONIUM,
+            &[(0, reactors::NEPTUNIUM)],
+            &REACTOR_ESSENTIALS,
+        ),
+        (
+            CONTAINMENT,
+            spawner_repair::BROKEN_SPAWNER,
+            &[(4, Kind::Vanilla("minecraft:spawner"))],
+            &spawner_repair::CONTAINMENT,
+        ),
+    ] {
+        add(method, output, 1, inputs, Some(research), &[]);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn paper_lists_every_stock_guide_item_except_its_two_hidden_items() {
+        let missing: Vec<_> = include_str!("stock.tsv")
+            .lines()
+            .filter_map(|line| line.split_once('\t'))
+            .flat_map(|(_, ids)| ids.split_ascii_whitespace())
+            .filter(|id| lookup(id).is_none())
+            .collect();
+        assert_eq!(missing, ["RESTORED_BACKPACK", "FILLED_FLASK_OF_KNOWLEDGE"]);
+    }
+
+    #[test]
+    fn stock_byproducts_keep_the_paper_source_slots_counts_and_research() {
+        for (id, method, output, topic, ingredients) in [
+            (
+                "PLASTIC_SHEET",
+                HEATED_PRESSURE,
+                8,
+                "plastic_sheet",
+                &[(4, "BUCKET_OF_OIL")][..],
+            ),
+            (
+                "MAGNESIUM_SALT",
+                HEATED_PRESSURE,
+                1,
+                "magnesium_generator",
+                &[(0, "MAGNESIUM_DUST"), (1, "SALT")],
+            ),
+            (
+                "NETHER_ICE_COOLANT_CELL",
+                HEATED_PRESSURE,
+                8,
+                "nether_ice",
+                &[(0, "ENRICHED_NETHER_ICE")],
+            ),
+            ("NETHER_ICE", GEO_MINER, 1, "nether_ice", &[]),
+            (
+                "REACTOR_COLLANT_CELL",
+                FREEZER,
+                1,
+                "reactor_essentials",
+                &[(0, "minecraft:blue_ice")],
+            ),
+            (
+                "PLUTONIUM",
+                NUCLEAR_REACTOR,
+                1,
+                "reactor_essentials",
+                &[(0, "NEPTUNIUM")],
+            ),
+            (
+                "BROKEN_SPAWNER",
+                CONTAINMENT,
+                1,
+                "pickaxe_of_containment",
+                &[(4, "minecraft:spawner")],
+            ),
+        ] {
+            let entry = lookup(id).unwrap();
+            assert_eq!(entry.id, id);
+            assert_eq!(entry.recipe_type.icon, method.icon);
+            assert_eq!(entry.item.count, output);
+            assert_eq!(entry.research.unwrap().id, topic);
+            let actual: Vec<_> = entry
+                .ingredients
+                .iter()
+                .enumerate()
+                .filter_map(|(slot, item)| item.map(|item| (slot, item.kind.id())))
+                .collect();
+            assert_eq!(actual, ingredients);
+            assert!(crate::guide::locale::item_name(id).is_some());
+        }
     }
 }

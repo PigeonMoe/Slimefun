@@ -1461,6 +1461,52 @@ mod tests {
     }
 
     #[test]
+    fn every_talisman_guide_entry_localizes_all_of_its_paper_lore() {
+        use crate::network_runtime::paper_text;
+
+        mod_api::__private::initialize().unwrap();
+        let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
+        let mut host = FakeHost::new();
+        host.registries
+            .resolve_items([Identifier::parse("minecraft:emerald").unwrap()])
+            .unwrap();
+        let entries: Vec<_> = GROUPS
+            .iter()
+            .filter(|group| matches!(group.key, "talismans" | "ender_talismans"))
+            .flat_map(group_entries)
+            .collect();
+        assert_eq!(entries.len(), 32);
+        for entry in entries {
+            let Some(Tag::List(original)) = crate::talismans::lore(entry.id) else {
+                panic!("{} has no original lore", entry.id);
+            };
+            let icon = entry_icon(&host, entry, 1).unwrap();
+            let Some(Tag::List(localized)) = icon
+                .components()
+                .unwrap()
+                .as_nbt()
+                .get(&"minecraft:lore".into())
+            else {
+                panic!("{} has no guide lore", entry.id);
+            };
+            assert_eq!(localized.len(), original.len(), "{}", entry.id);
+            for (source, target) in original.iter().zip(localized) {
+                let source = paper_text(source).unwrap();
+                let target = paper_text(target).unwrap();
+                if source.is_empty() {
+                    assert!(target.is_empty(), "{}", entry.id);
+                } else {
+                    assert!(
+                        target.chars().any(|ch| ('\u{4e00}'..='\u{9fff}').contains(&ch)),
+                        "{}: {source} -> {target}",
+                        entry.id
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn energy_network_items_keep_the_paper_lore_on_stacks_and_guide_icons() {
         use crate::items::{ENERGY_CONNECTOR, ENERGY_REGULATOR};
         use crate::network_runtime::paper_text;

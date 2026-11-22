@@ -152,6 +152,24 @@
       "name": "&b机器人内存核心"
     },
     "ANGEL_TALISMAN": {
+      "lore": [
+        {
+          "source": "&fWhile you have this Talisman",
+          "target": "&f将此护身符"
+        },
+        {
+          "source": "&fin your Inventory it has a",
+          "target": "&f放在物品栏时，"
+        },
+        {
+          "source": "&f75% chance to prevent you",
+          "target": "&f有 75% 的概率使你"
+        },
+        {
+          "source": "&ffrom taking Fall Damage",
+          "target": "&f免受坠落伤害。"
+        }
+      ],
       "name": "&a天使护身符"
     },
     "ANIMAL_GROWTH_ACCELERATOR": {
@@ -1158,6 +1176,28 @@
       "name": "附魔金苹果"
     },
     "ENDER_ANGEL_TALISMAN": {
+      "lore": [
+        {
+          "source": "&7&oEnder Infused",
+          "target": "&7&o末影充能"
+        },
+        {
+          "source": "&fWhile you have this Talisman",
+          "target": "&f将此护身符"
+        },
+        {
+          "source": "&fin your Inventory it has a",
+          "target": "&f放在物品栏时，"
+        },
+        {
+          "source": "&f75% chance to prevent you",
+          "target": "&f有 75% 的概率使你"
+        },
+        {
+          "source": "&ffrom taking Fall Damage",
+          "target": "&f免受坠落伤害。"
+        }
+      ],
       "name": "&5末影天使护身符"
     },
     "ENDER_ANVIL_TALISMAN": {
@@ -1279,6 +1319,32 @@
       "name": "&5末影农夫护身符"
     },
     "ENDER_FIRE_TALISMAN": {
+      "lore": [
+        {
+          "source": "&7&oEnder Infused",
+          "target": "&7&o末影充能"
+        },
+        {
+          "source": "&fWhile you have this Talisman",
+          "target": "&f将此护身符"
+        },
+        {
+          "source": "&fin your Inventory it will",
+          "target": "&f放在物品栏时，"
+        },
+        {
+          "source": "&fgive you Fire Resistance",
+          "target": "&f会在你开始燃烧时"
+        },
+        {
+          "source": "&fas soon as you start burning",
+          "target": "&f赋予你抗火效果，"
+        },
+        {
+          "source": "&fbut will then be consumed",
+          "target": "&f随后消耗此护身符。"
+        }
+      ],
       "name": "&5末影消防员护身符"
     },
     "ENDER_HELMET": {
@@ -1291,12 +1357,86 @@
       "name": "&5&l末影头盔"
     },
     "ENDER_HUNTER_TALISMAN": {
+      "lore": [
+        {
+          "source": "&7&oEnder Infused",
+          "target": "&7&o末影充能"
+        },
+        {
+          "source": "&fWhile you have this Talisman",
+          "target": "&f将此护身符"
+        },
+        {
+          "source": "&fin your Inventory it has",
+          "target": "&f放在物品栏时，"
+        },
+        {
+          "source": "&fa 20% chance of doubling",
+          "target": "&f你击杀生物的所有掉落物有 20%"
+        },
+        {
+          "source": "&fall Drops from Mobs you kill",
+          "target": "&f的概率翻倍。"
+        }
+      ],
       "name": "&5末影猎人护身符"
     },
     "ENDER_KNIGHT_TALISMAN": {
+      "lore": [
+        {
+          "source": "&7&oEnder Infused",
+          "target": "&7&o末影灌注"
+        },
+        {
+          "source": "&fWhile you have this Talisman",
+          "target": "&f当你把这个护身符"
+        },
+        {
+          "source": "&fin your Inventory it gives",
+          "target": "&f放在物品栏中时"
+        },
+        {
+          "source": "&fyou a 30% Chance for 5 Seconds of Regeneration",
+          "target": "&f被击中有 30% 的概率"
+        },
+        {
+          "source": "&fwhenever You get hit",
+          "target": "&f获得持续 5 秒的生命恢复"
+        },
+        {
+          "source": "&fbut will then be consumed",
+          "target": "&f随后消耗护身符"
+        }
+      ],
       "name": "&5末影骑士护身符"
     },
     "ENDER_LAVA_TALISMAN": {
+      "lore": [
+        {
+          "source": "&7&oEnder Infused",
+          "target": "&7&o末影灌注"
+        },
+        {
+          "source": "&fWhile you have this Talisman",
+          "target": "&f当你把这个护身符"
+        },
+        {
+          "source": "&fin your Inventory it will",
+          "target": "&f放在物品栏中时"
+        },
+        {
+          "source": "&fgive you Fire Resistance",
+          "target": "&f接触岩浆时获得抗火"
+        },
+        {
+          "source": "&fas soon as you touch Lava",
+          "target": "&f效果随即生效"
+        },
+        {
+          "source": "&fbut will then be consumed",
+          "target": "&f护身符会被消耗"
+        }
+      ],
       "name": "&5末影岩浆行者护身符"
     },
     "ENDER_LEGGINGS": {
@@ -1336,6 +1476,28 @@
       "name": "&5末影结晶 &7- &eIII"
     },
     "ENDER_MAGICIAN_TALISMAN": {
+      "lore": [
+        {
+          "source": "&7&oEnder Infused",
+          "target": "&7&o末影充能"
+        },
+        {
+          "source": "&fWhile you have this Talisman",
+          "target": "&f将此护身符"
+        },
+        {
+          "source": "&fin your Inventory it gives",
+          "target": "&f放在物品栏时，"
+        },
+        {
+          "source": "&fyou a 80% Luck Bonus on Enchanting",
+          "target": "&f在附魔时提供 80% 的幸运加成。"
+        },
+        {
+          "source": "&fYou will sometimes get an Extra Enchantment",
+          "target": "&f你有时会额外获得一项附魔。"
+        }
+      ],
       "name": "&5末影魔法师护身符"
     },
     "ENDER_MINER_TALISMAN": {
@@ -1367,21 +1529,169 @@
       "name": "&5末影护身符"
     },
     "ENDER_TRAVELLER_TALISMAN": {
+      "lore": [
+        {
+          "source": "&7&oEnder Infused",
+          "target": "&7&o末影充能"
+        },
+        {
+          "source": "&fWhile you have this Talisman",
+          "target": "&f将此护身符"
+        },
+        {
+          "source": "&fin your Inventory it gives",
+          "target": "&f放在物品栏时，"
+        },
+        {
+          "source": "&fyou a 60% Chance for a decent",
+          "target": "&f有 60% 的概率在开始疾跑时"
+        },
+        {
+          "source": "&fSpeed Buff when you start sprinting",
+          "target": "&f获得一次速度提升。"
+        }
+      ],
       "name": "&5末影旅行者护身符"
     },
     "ENDER_WARRIOR_TALISMAN": {
+      "lore": [
+        {
+          "source": "&7&oEnder Infused",
+          "target": "&7&o末影灌注"
+        },
+        {
+          "source": "&fWhile you have this Talisman",
+          "target": "&f当你把这个护身符"
+        },
+        {
+          "source": "&fin your Inventory it gives",
+          "target": "&f放在物品栏中时"
+        },
+        {
+          "source": "&fyou Strength III whenever you get hit",
+          "target": "&f被击中会获得力量 III"
+        },
+        {
+          "source": "&fbut will then be consumed",
+          "target": "&f随后消耗护身符"
+        }
+      ],
       "name": "&5末影战士护身符"
     },
     "ENDER_WATER_TALISMAN": {
+      "lore": [
+        {
+          "source": "&7&oEnder Infused",
+          "target": "&7&o末影灌注"
+        },
+        {
+          "source": "&fWhile you have this Talisman",
+          "target": "&f当你把这个护身符"
+        },
+        {
+          "source": "&fin your Inventory it will",
+          "target": "&f放在物品栏中时"
+        },
+        {
+          "source": "&fgive you the ability",
+          "target": "&f当你开始溺水时"
+        },
+        {
+          "source": "&fto breath underwater as",
+          "target": "&f护身符会赋予你"
+        },
+        {
+          "source": "&fsoon as you start drowning",
+          "target": "&f水下呼吸能力"
+        },
+        {
+          "source": "&fbut will then be consumed",
+          "target": "&f护身符会被消耗"
+        }
+      ],
       "name": "&5末影潜水者护身符"
     },
     "ENDER_WHIRLWIND_TALISMAN": {
+      "lore": [
+        {
+          "source": "&7&oEnder Infused",
+          "target": "&7&o末影充能"
+        },
+        {
+          "source": "&fHaving this Talisman",
+          "target": "&f将此护身符"
+        },
+        {
+          "source": "&fin your Inventory will reflect",
+          "target": "&f放在物品栏时，"
+        },
+        {
+          "source": "&f60% of any projectiles fired at you.",
+          "target": "&f有 60% 的概率反弹射向你的投射物。"
+        },
+        {
+          "source": "&e&oOnly a thrown Trident can pierce",
+          "target": "&e&o只有投掷出的三叉戟"
+        },
+        {
+          "source": "&e&othrough this layer of protection",
+          "target": "&e&o能够穿透这层防护。"
+        }
+      ],
       "name": "&5末影旋风护身符"
     },
     "ENDER_WISE_TALISMAN": {
+      "lore": [
+        {
+          "source": "&7&oEnder Infused",
+          "target": "&7&o末影充能"
+        },
+        {
+          "source": "&fWhile you have this Talisman",
+          "target": "&f将此护身符"
+        },
+        {
+          "source": "&fin your inventory it gives",
+          "target": "&f放在物品栏时，"
+        },
+        {
+          "source": "&fyou a 20% chance of doubling",
+          "target": "&f你获得的经验有 20% 的概率"
+        },
+        {
+          "source": "&fany experience you obtain",
+          "target": "&f翻倍。"
+        }
+      ],
       "name": "&5末影智者的护身符"
     },
     "ENDER_WIZARD_TALISMAN": {
+      "lore": [
+        {
+          "source": "&7&oEnder Infused",
+          "target": "&7&o末影充能"
+        },
+        {
+          "source": "&fWhile you have this Talisman",
+          "target": "&f将此护身符"
+        },
+        {
+          "source": "&fin your Inventory it allows you to",
+          "target": "&f放在物品栏时，"
+        },
+        {
+          "source": "&fobtain Fortune Level 4/5 however",
+          "target": "&f能获得时运 IV 或 V，"
+        },
+        {
+          "source": "&fit also has a chance to lower the",
+          "target": "&f但也有可能降低"
+        },
+        {
+          "source": "&fLevel of some Enchantments on your Item",
+          "target": "&f物品上的部分附魔等级。"
+        }
+      ],
       "name": "&5末影巫师护身符"
     },
     "ENERGIZED_CAPACITOR": {
@@ -1738,6 +2048,28 @@
       "name": "&a学识之瓶"
     },
     "FIRE_TALISMAN": {
+      "lore": [
+        {
+          "source": "&fWhile you have this Talisman",
+          "target": "&f将此护身符"
+        },
+        {
+          "source": "&fin your Inventory it will",
+          "target": "&f放在物品栏时，"
+        },
+        {
+          "source": "&fgive you Fire Resistance",
+          "target": "&f会在你开始燃烧时"
+        },
+        {
+          "source": "&fas soon as you start burning",
+          "target": "&f赋予你抗火效果，"
+        },
+        {
+          "source": "&fbut will then be consumed",
+          "target": "&f随后消耗此护身符。"
+        }
+      ],
       "name": "&a消防员护身符"
     },
     "FISH_JERKY": {
@@ -2163,6 +2495,24 @@
       "name": "&b钩子"
     },
     "HUNTER_TALISMAN": {
+      "lore": [
+        {
+          "source": "&fWhile you have this Talisman",
+          "target": "&f将此护身符"
+        },
+        {
+          "source": "&fin your Inventory it has",
+          "target": "&f放在物品栏时，"
+        },
+        {
+          "source": "&fa 20% chance of doubling",
+          "target": "&f你击杀生物的所有掉落物有 20%"
+        },
+        {
+          "source": "&fall Drops from Mobs you kill",
+          "target": "&f的概率翻倍。"
+        }
+      ],
       "name": "&a猎人护身符"
     },
     "ICY_BOW": {
@@ -2257,6 +2607,28 @@
       "name": "&2海带曲奇"
     },
     "KNIGHT_TALISMAN": {
+      "lore": [
+        {
+          "source": "&fWhile you have this Talisman",
+          "target": "&f当你把这个护身符"
+        },
+        {
+          "source": "&fin your Inventory it gives",
+          "target": "&f放在物品栏中时"
+        },
+        {
+          "source": "&fyou a 30% Chance for 5 Seconds of Regeneration",
+          "target": "&f被击中有 30% 的概率"
+        },
+        {
+          "source": "&fwhenever You get hit",
+          "target": "&f获得持续 5 秒的生命恢复"
+        },
+        {
+          "source": "&fbut will then be consumed",
+          "target": "&f随后消耗护身符"
+        }
+      ],
       "name": "&a骑士护身符"
     },
     "LARGE_BACKPACK": {
@@ -2295,6 +2667,28 @@
       "name": "&4岩浆发电机 &7(&eII&7)"
     },
     "LAVA_TALISMAN": {
+      "lore": [
+        {
+          "source": "&fWhile you have this Talisman",
+          "target": "&f当你把这个护身符"
+        },
+        {
+          "source": "&fin your Inventory it will",
+          "target": "&f放在物品栏中时"
+        },
+        {
+          "source": "&fgive you Fire Resistance",
+          "target": "&f接触岩浆时获得抗火"
+        },
+        {
+          "source": "&fas soon as you touch Lava",
+          "target": "&f效果随即生效"
+        },
+        {
+          "source": "&fbut will then be consumed",
+          "target": "&f护身符会被消耗"
+        }
+      ],
       "name": "&a岩浆行者护身符"
     },
     "LEAD_DUST": {
@@ -2334,6 +2728,24 @@
       "name": "&6还魂丹"
     },
     "MAGICIAN_TALISMAN": {
+      "lore": [
+        {
+          "source": "&fWhile you have this Talisman",
+          "target": "&f将此护身符"
+        },
+        {
+          "source": "&fin your Inventory it gives",
+          "target": "&f放在物品栏时，"
+        },
+        {
+          "source": "&fyou a 80% Luck Bonus on Enchanting",
+          "target": "&f在附魔时提供 80% 的幸运加成。"
+        },
+        {
+          "source": "&fYou will sometimes get an Extra Enchantment",
+          "target": "&f你有时会额外获得一项附魔。"
+        }
+      ],
       "name": "&a魔法师护身符"
     },
     "MAGIC_EYE_OF_ENDER": {
@@ -3699,6 +4111,24 @@
       "name": "&3垃圾箱"
     },
     "TRAVELLER_TALISMAN": {
+      "lore": [
+        {
+          "source": "&fWhile you have this Talisman",
+          "target": "&f将此护身符"
+        },
+        {
+          "source": "&fin your Inventory it gives",
+          "target": "&f放在物品栏时，"
+        },
+        {
+          "source": "&fyou a 60% Chance for a decent",
+          "target": "&f有 60% 的概率在开始疾跑时"
+        },
+        {
+          "source": "&fSpeed Buff when you start sprinting",
+          "target": "&f获得一次速度提升。"
+        }
+      ],
       "name": "&a旅行者护身符"
     },
     "TREE_GROWTH_ACCELERATOR": {
@@ -3749,18 +4179,102 @@
       "name": "&c维他命"
     },
     "WARRIOR_TALISMAN": {
+      "lore": [
+        {
+          "source": "&fWhile you have this Talisman",
+          "target": "&f当你把这个护身符"
+        },
+        {
+          "source": "&fin your Inventory it gives",
+          "target": "&f放在物品栏中时"
+        },
+        {
+          "source": "&fyou Strength III whenever you get hit",
+          "target": "&f被击中会获得力量 III"
+        },
+        {
+          "source": "&fbut will then be consumed",
+          "target": "&f随后消耗护身符"
+        }
+      ],
       "name": "&a战士护身符"
     },
     "WATER_TALISMAN": {
+      "lore": [
+        {
+          "source": "&fWhile you have this Talisman",
+          "target": "&f当你把这个护身符"
+        },
+        {
+          "source": "&fin your Inventory it will",
+          "target": "&f放在物品栏中时"
+        },
+        {
+          "source": "&fgive you the ability",
+          "target": "&f当你开始溺水时"
+        },
+        {
+          "source": "&fto breath underwater as",
+          "target": "&f护身符会赋予你"
+        },
+        {
+          "source": "&fsoon as you start drowning",
+          "target": "&f水下呼吸能力"
+        },
+        {
+          "source": "&fbut will then be consumed",
+          "target": "&f护身符会被消耗"
+        }
+      ],
       "name": "&a潜水者护身符"
     },
     "WHEAT_FLOUR": {
       "name": "&r小麦粉"
     },
     "WHIRLWIND_TALISMAN": {
+      "lore": [
+        {
+          "source": "&fHaving this Talisman",
+          "target": "&f将此护身符"
+        },
+        {
+          "source": "&fin your Inventory will reflect",
+          "target": "&f放在物品栏时，"
+        },
+        {
+          "source": "&f60% of any projectiles fired at you.",
+          "target": "&f有 60% 的概率反弹射向你的投射物。"
+        },
+        {
+          "source": "&e&oOnly a thrown Trident can pierce",
+          "target": "&e&o只有投掷出的三叉戟"
+        },
+        {
+          "source": "&e&othrough this layer of protection",
+          "target": "&e&o能够穿透这层防护。"
+        }
+      ],
       "name": "&a旋风护身符"
     },
     "WISE_TALISMAN": {
+      "lore": [
+        {
+          "source": "&fWhile you have this Talisman",
+          "target": "&f将此护身符"
+        },
+        {
+          "source": "&fin your inventory it gives",
+          "target": "&f放在物品栏时，"
+        },
+        {
+          "source": "&fyou a 20% chance of doubling",
+          "target": "&f你获得的经验有 20% 的概率"
+        },
+        {
+          "source": "&fany experience you obtain",
+          "target": "&f翻倍。"
+        }
+      ],
       "name": "&a智者的护身符"
     },
     "WITHER_ASSEMBLER": {
@@ -3803,6 +4317,28 @@
       "name": "&5防凋灵黑曜石"
     },
     "WIZARD_TALISMAN": {
+      "lore": [
+        {
+          "source": "&fWhile you have this Talisman",
+          "target": "&f将此护身符"
+        },
+        {
+          "source": "&fin your Inventory it allows you to",
+          "target": "&f放在物品栏时，"
+        },
+        {
+          "source": "&fobtain Fortune Level 4/5 however",
+          "target": "&f能获得时运 IV 或 V，"
+        },
+        {
+          "source": "&fit also has a chance to lower the",
+          "target": "&f但也有可能降低"
+        },
+        {
+          "source": "&fLevel of some Enchantments on your Item",
+          "target": "&f物品上的部分附魔等级。"
+        }
+      ],
       "name": "&a巫师护身符"
     },
     "WOVEN_BACKPACK": {

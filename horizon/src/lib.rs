@@ -863,6 +863,14 @@ impl Hooks for Slimefun {
         }
     }
 
+    fn mob_death_bonus_drops(
+        &self,
+        host: &mut dyn ServerHost,
+        event: &mut mod_api::MobDeathBonusDropsEvent<'_>,
+    ) {
+        self.talismans.hunter_drops(host, event, &self.rolls);
+    }
+
     fn living_drops(
         &self,
         host: &mut dyn ServerHost,
@@ -1788,6 +1796,21 @@ impl Hooks for Slimefun {
     }
 
     #[listener(priority = -100)]
+    fn player_entity_damage_pre(
+        &self,
+        host: &mut dyn ServerHost,
+        event: &mut mod_api::PlayerEntityDamagePreEvent<'_>,
+    ) -> Flow {
+        let reflected =
+            event.projectile && self.talismans.whirlwind(host, event.player, &self.rolls);
+        if reflected || talismans::melee::react(host, &self.talismans, event, &self.rolls) {
+            Flow::Cancel
+        } else {
+            Flow::Continue
+        }
+    }
+
+    #[listener(priority = -100)]
     fn player_environment_damage_pre(
         &self,
         host: &mut dyn ServerHost,
@@ -1797,14 +1820,13 @@ impl Hooks for Slimefun {
             "minecraft:fall" => self
                 .talismans
                 .protect_from_fall(host, event.player, &self.rolls),
-            "minecraft:in_fire" => self
-                .talismans
-                .protect_from_fire(host, event.player, event.damage_type),
             "minecraft:starve" => {
                 self.cooler_feed.check(host, event.player);
                 false
             }
-            _ => false,
+            _ => self
+                .talismans
+                .protect_from_environment(host, event.player, event.damage_type),
         };
         if protected {
             Flow::Cancel
