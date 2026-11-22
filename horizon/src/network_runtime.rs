@@ -625,16 +625,29 @@ impl Networks {
         {
             return Err("The Paper GPS device is missing a valid owner UUID.".into());
         }
-        if let Some(cargo) = &mut data.cargo
+        let cargo_receipt = if let Some(cargo) = &mut data.cargo
             && node.filters_items()
             && row.contains_key("paper_inventory")
         {
             crate::storage::validate_block_inventory_preset(row, id)?;
-            if let Some(items) = crate::storage::decode_inventory(host, row)? {
-                cargo.filters = paper_cargo_filters(host, items)?;
-                cargo.imported_paper = true;
+            let items = crate::storage::decode_archived_slots(host, row, 54)?;
+            cargo.filters = paper_cargo_filters(host, items)?;
+            cargo.imported_paper = true;
+            if !level.in_place(host) {
+                return Err(
+                    "Load the matching Paper network block in the active dimension.".into(),
+                );
             }
-        }
+            let Some(receipt) = crate::storage::prepare_paired_menu_receipt(host, pos, row, id)?
+            else {
+                return Ok(format!(
+                    "The Paper inventory for {id} was already restored."
+                ));
+            };
+            Some(receipt)
+        } else {
+            None
+        };
         if crate::auto_crafter::is_machine(id) {
             host.transaction(|host, _| {
                 crate::auto_crafter::restore_paper(host, level, pos, id, row)?;
@@ -651,6 +664,11 @@ impl Networks {
         } else if node.component == Component::TrashCan {
             host.transaction(|host, _| {
                 trash::restore(host, pos, row)?;
+                self.register(host, level, pos, node, data, true)
+            })?;
+        } else if let Some(receipt) = cargo_receipt {
+            host.transaction(|host, _| {
+                receipt.save(host)?;
                 self.register(host, level, pos, node, data, true)
             })?;
         } else {

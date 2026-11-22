@@ -492,7 +492,7 @@ fn menu_receipt_key([x, y, z]: [i32; 3]) -> String {
     format!("{x},{y},{z}")
 }
 
-fn factory_menu_receipt(row: &toml::Table, id: &str) -> Result<Tag, String> {
+fn paired_menu_signature(row: &toml::Table, id: &str) -> Result<Tag, String> {
     // Hash the validated archived slots, independently of world state or a
     // later DataFixer version. The exporter already normalizes component keys.
     let mut items: Vec<_> = row
@@ -509,6 +509,46 @@ fn factory_menu_receipt(row: &toml::Table, id: &str) -> Result<Tag, String> {
         ("id", Tag::String(id.into())),
         ("slots_sha256", Tag::String(digest.as_str().into())),
     ]))
+}
+
+pub(crate) struct PreparedMenuReceipt {
+    holder: Holder,
+    entries: Compound,
+}
+
+impl PreparedMenuReceipt {
+    pub(crate) fn save(self, host: &mut dyn ServerHost) -> Result<(), String> {
+        MENU_RECEIPTS
+            .set(host, self.holder, self.entries)
+            .map_err(|_| "Could not save the Paper inventory receipt.".into())
+    }
+}
+
+/// Prepare the receipt for a validated menu in the active level. An identical
+/// archive has already been used, so repeat callers leave the block alone.
+pub(crate) fn prepare_paired_menu_receipt(
+    host: &mut dyn ServerHost,
+    pos: [i32; 3],
+    row: &toml::Table,
+    id: &str,
+) -> Result<Option<PreparedMenuReceipt>, String> {
+    let holder = Holder::Chunk(column(pos));
+    let mut entries = MENU_RECEIPTS
+        .get_existing(host, holder)
+        .map_err(|_| "Could not read the Paper inventory receipts.")?
+        .unwrap_or_default();
+    let key = menu_receipt_key(pos);
+    let receipt = paired_menu_signature(row, id)?;
+    let legacy = Tag::String(id.into());
+    if let Some(previous) = entries.get(&key.as_str().into()) {
+        return if previous == &receipt || previous == &legacy {
+            Ok(None)
+        } else {
+            Err("This position already has a receipt for a different Paper inventory.".into())
+        };
+    }
+    entries.insert(key.as_str().into(), receipt);
+    Ok(Some(PreparedMenuReceipt { holder, entries }))
 }
 
 fn orphan_preset(row: &toml::Table) -> Result<Option<&str>, String> {
@@ -623,25 +663,12 @@ fn restore_network(
         if !level.in_place(host) {
             return Err("The electric machine is not supported in this level.".into());
         }
-        let holder = Holder::Chunk(column(pos));
-        let mut receipts = MENU_RECEIPTS
-            .get_existing(host, holder)
-            .map_err(|_| "Could not read the Paper inventory receipts.")?
-            .unwrap_or_default();
-        let key = menu_receipt_key(pos);
-        let receipt = factory_menu_receipt(row, id)?;
-        let legacy = Tag::String(id.into());
-        if let Some(previous) = receipts.get(&key.as_str().into()) {
-            return if previous == &receipt || previous == &legacy {
-                Ok(format!(
-                    "The Paper inventory for {id} was already restored."
-                ))
-            } else {
-                Err("This position already has a receipt for a different Paper inventory.".into())
-            };
-        }
-        receipts.insert(key.as_str().into(), receipt);
-        Some((holder, receipts))
+        let Some(receipt) = prepare_paired_menu_receipt(host, pos, row, id)? else {
+            return Ok(format!(
+                "The Paper inventory for {id} was already restored."
+            ));
+        };
+        Some(receipt)
     } else {
         None
     };
@@ -655,10 +682,8 @@ fn restore_network(
     let count = prepared.len();
     host.transaction(|host, _| {
         let has_archive = pending_receipts.is_some();
-        if let Some((holder, receipts)) = pending_receipts {
-            MENU_RECEIPTS
-                .set(host, holder, receipts)
-                .map_err(|_| "Could not save the Paper inventory receipt.")?;
+        if let Some(receipt) = pending_receipts {
+            receipt.save(host)?;
         }
         let restored = networks.restore(host, level, pos, id, metadata, row)?;
         crate::factory::restore_paper_assembler_controls(host, level, pos, id, metadata)?;
