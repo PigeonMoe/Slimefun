@@ -97,6 +97,7 @@ mod soulbound_gear;
 mod soulbound_rune;
 mod seismic_axe;
 mod stomper;
+mod storm_staff;
 mod storage;
 mod talismans;
 mod tape_measure;
@@ -104,6 +105,7 @@ mod teleposition_scroll;
 mod thermal_machines;
 mod ticker_policy;
 mod universal_storage;
+mod villager_rune;
 mod zombie_pills;
 
 use compressor::DelayedCrafts;
@@ -139,6 +141,7 @@ struct Slimefun {
     ore_tools: ore_tools::OreTools,
     nether_goo: nether_goo::NetherGoo,
     talismans: talismans::Talismans,
+    anvil_repairs: talismans::anvil::Repairs,
     teleposition_scroll: teleposition_scroll::Scroll,
     explosive_tools: explosive_tools::ExplosiveTools,
     rolls: Rolls,
@@ -184,6 +187,7 @@ impl Default for Slimefun {
             ore_tools: ore_tools::OreTools::default(),
             nether_goo: nether_goo::NetherGoo::default(),
             talismans: talismans::Talismans::default(),
+            anvil_repairs: talismans::anvil::Repairs::default(),
             teleposition_scroll: teleposition_scroll::Scroll::default(),
             explosive_tools: explosive_tools::ExplosiveTools::default(),
             rolls: Rolls::default(),
@@ -481,6 +485,7 @@ impl Hooks for Slimefun {
         factory::register(registrar);
         backpacks::register(registrar);
         ancient_altar::register(registrar);
+        villager_rune::register(registrar);
         self.spawners.register(registrar);
         self.magic_weapons.register(registrar);
         rainbow::register(registrar);
@@ -517,7 +522,7 @@ impl Hooks for Slimefun {
         self.read_config(event.config, false);
     }
 
-    #[listener(priority = -100)]
+    #[listener(priority = -100, receive_cancelled)]
     fn break_block(
         &self,
         host: &mut dyn ServerHost,
@@ -529,6 +534,10 @@ impl Hooks for Slimefun {
         let Some(level) = player.entity().level(host) else {
             return Flow::Continue;
         };
+        self.talismans.caveman(host, player, level, event.state, &self.rolls);
+        if event.cancelled {
+            return Flow::Continue;
+        }
         if !multi_tool::is_pan_break(player, level, event.pos)
             && multi_tool::main_hand_has_tool(host, player)
         {
@@ -561,6 +570,16 @@ impl Hooks for Slimefun {
         self.spawners.destroyed(host, event);
         self.smelters_pickaxes.destroyed(host, event, &self.rolls);
         lumber_axe::destroyed(host, event);
+    }
+
+    fn player_block_drops_post(
+        &self,
+        host: &mut dyn ServerHost,
+        event: &mut mod_api::PlayerBlockDropsPostEvent<'_>,
+    ) {
+        self.talismans.harvest_drops(
+            host, event.player, event.pos, event.state, event.drops, &self.rolls,
+        );
     }
 
     fn living_incoming_damage(
@@ -677,8 +696,9 @@ impl Hooks for Slimefun {
         let HostSide::Server(host) = host else {
             return None;
         };
-        if let Some(result) =
-            nether_goo::interact(host, event).or_else(|| zombie_pills::interact(host, event))
+        if let Some(result) = nether_goo::interact(host, event)
+            .or_else(|| zombie_pills::interact(host, event))
+            .or_else(|| villager_rune::interact(host, event, &self.rolls))
         {
             return Some(result);
         }
@@ -1214,6 +1234,13 @@ impl Hooks for Slimefun {
                 *event.cancellation_result = InteractionResult::Consume;
                 return Flow::Cancel;
             }
+            if let Some(cancel) = storm_staff::use_held(host, player, event.click.hand, held) {
+                self.item_clicks.record_block_use(host, event.click.player, event.click.hand, held);
+                if cancel {
+                    *event.cancellation_result = InteractionResult::Consume;
+                    return Flow::Cancel;
+                }
+            }
             if self.teleposition_scroll.use_held(host, player, held)
                 || snacks::use_sugar(host, player, event.click.hand, held, Some(event.click.pos))
                 || elemental_staves::use_staff(host, player, held, || {
@@ -1473,6 +1500,7 @@ impl Hooks for Slimefun {
             )
             || self.teleposition_scroll.use_held(host, player, event.click.stack)
             || snacks::use_sugar(host, player, event.click.hand, event.click.stack, None)
+            || storm_staff::use_held(host, player, event.click.hand, event.click.stack) == Some(true)
             || elemental_staves::use_staff(host, player, event.click.stack, || {
                 self.settings.lock().unwrap().wind_power
             })
@@ -1715,6 +1743,20 @@ impl Hooks for Slimefun {
             let _ = player.tell(host, warning);
         }
         Flow::Cancel
+    }
+
+    fn player_item_break_snapshot(
+        &self,
+        host: &mut dyn ServerHost,
+        event: &mut mod_api::PlayerItemBreakSnapshotEvent<'_>,
+    ) {
+        self.anvil_repairs.broke(
+            host,
+            &self.talismans,
+            event.player,
+            event.inventory_slot,
+            event.stack,
+        );
     }
 
     fn player_enchant_item_pre(
@@ -1992,6 +2034,7 @@ impl Hooks for Slimefun {
         self.jetpacks.due(event);
         self.smelters_pickaxes.due(host, event);
         self.soulbound_rituals.due(host, event);
+        self.anvil_repairs.due(host, event.owner, event.id);
         self.elevators.due(host, event);
         self.block_placers.due(host, event, &self.networks);
         self.delayed_crafts.scheduled_task(host, event);
@@ -2020,6 +2063,7 @@ impl Hooks for Slimefun {
         self.grapple.clear(host);
         self.smelters_pickaxes.clear();
         self.soulbound_rituals.clear();
+        self.anvil_repairs.clear();
         self.elevators.clear();
         self.block_placers.clear();
         self.radiation.clear();

@@ -87,6 +87,28 @@
       "name": "&7古代符文 &8&l[&b&l灵魂绑定&8&l]"
     },
     "ANCIENT_RUNE_VILLAGERS": {
+      "lore": [
+        {
+          "source": "&eRight click a villager to clear",
+          "target": "&e右键点击村民可清除"
+        },
+        {
+          "source": "&etheir current job and trades.",
+          "target": "&e村民当前的职业和交易。"
+        },
+        {
+          "source": "&eThe villager will start looking",
+          "target": "&e等待一段时间后，"
+        },
+        {
+          "source": "&efor a job again after some",
+          "target": "&e这名村民会重新寻找"
+        },
+        {
+          "source": "&etime has passed.",
+          "target": "&e工作。"
+        }
+      ],
       "name": "&7古代符文 &8&l[&b&l村民&8&l]"
     },
     "ANCIENT_RUNE_WATER": {
@@ -142,6 +164,36 @@
       "name": "&b动物生长加速器"
     },
     "ANVIL_TALISMAN": {
+      "lore": [
+        {
+          "source": "&fEach Talisman can prevent",
+          "target": "&f每个护身符可防止"
+        },
+        {
+          "source": "&f1 Tool from breaking, but will then",
+          "target": "&f一件工具损坏，使用后"
+        },
+        {
+          "source": "&fbe consumed",
+          "target": "&f护身符会被消耗"
+        },
+        {
+          "source": "&4&lWARNING:",
+          "target": "&4&l警告："
+        },
+        {
+          "source": "&4This Talisman does not work on",
+          "target": "&4此护身符无法保护"
+        },
+        {
+          "source": "&4Tools which are too powerful",
+          "target": "&4构造过于复杂的"
+        },
+        {
+          "source": "&4due to their complexity",
+          "target": "&4强力工具"
+        }
+      ],
       "name": "&a铁砧护身符"
     },
     "APPLE_JUICE": {
@@ -593,6 +645,24 @@
       "name": "&6胡萝卜派"
     },
     "CAVEMAN_TALISMAN": {
+      "lore": [
+        {
+          "source": "&fWhile you have this Talisman",
+          "target": "&f当你把这个护身符"
+        },
+        {
+          "source": "&fin your inventory it gives",
+          "target": "&f放在物品栏中时"
+        },
+        {
+          "source": "&fyou a 50% chance for a decent",
+          "target": "&f挖掘任意矿石有 50% 的概率"
+        },
+        {
+          "source": "&fHaste buff when you mine any ore",
+          "target": "&f获得急迫效果"
+        }
+      ],
       "name": "&a穴居人护身符"
     },
     "CHAIN": {
@@ -1091,6 +1161,40 @@
       "name": "&5末影天使护身符"
     },
     "ENDER_ANVIL_TALISMAN": {
+      "lore": [
+        {
+          "source": "&7&oEnder Infused",
+          "target": "&7&o末影灌注"
+        },
+        {
+          "source": "&fEach Talisman can prevent",
+          "target": "&f每个护身符可防止"
+        },
+        {
+          "source": "&f1 Tool from breaking, but will then",
+          "target": "&f一件工具损坏，使用后"
+        },
+        {
+          "source": "&fbe consumed",
+          "target": "&f护身符会被消耗"
+        },
+        {
+          "source": "&4&lWARNING:",
+          "target": "&4&l警告："
+        },
+        {
+          "source": "&4This Talisman does not work on",
+          "target": "&4此护身符无法保护"
+        },
+        {
+          "source": "&4Tools which are too powerful",
+          "target": "&4构造过于复杂的"
+        },
+        {
+          "source": "&4due to their complexity",
+          "target": "&4强力工具"
+        }
+      ],
       "name": "&5末影铁砧护身符"
     },
     "ENDER_BACKPACK": {
@@ -1116,6 +1220,28 @@
       "name": "&5&l末影靴子"
     },
     "ENDER_CAVEMAN_TALISMAN": {
+      "lore": [
+        {
+          "source": "&7&oEnder Infused",
+          "target": "&7&o末影灌注"
+        },
+        {
+          "source": "&fWhile you have this Talisman",
+          "target": "&f当你把这个护身符"
+        },
+        {
+          "source": "&fin your inventory it gives",
+          "target": "&f放在物品栏中时"
+        },
+        {
+          "source": "&fyou a 50% chance for a decent",
+          "target": "&f挖掘任意矿石有 50% 的概率"
+        },
+        {
+          "source": "&fHaste buff when you mine any ore",
+          "target": "&f获得急迫效果"
+        }
+      ],
       "name": "&5末影穴居人护身符"
     },
     "ENDER_CHESTPLATE": {
@@ -1128,6 +1254,28 @@
       "name": "&5&l末影胸甲"
     },
     "ENDER_FARMER_TALISMAN": {
+      "lore": [
+        {
+          "source": "&7&oEnder Infused",
+          "target": "&7&o末影灌注"
+        },
+        {
+          "source": "&fWhile you have this Talisman",
+          "target": "&f当你把这个护身符"
+        },
+        {
+          "source": "&fin your Inventory it has",
+          "target": "&f放在物品栏中时"
+        },
+        {
+          "source": "&fa 20% chance of doubling",
+          "target": "&f收获作物有 20% 的概率"
+        },
+        {
+          "source": "&fall crops you harvest",
+          "target": "&f获得双倍掉落"
+        }
+      ],
       "name": "&5末影农夫护身符"
     },
     "ENDER_FIRE_TALISMAN": {
@@ -1191,6 +1339,28 @@
       "name": "&5末影魔法师护身符"
     },
     "ENDER_MINER_TALISMAN": {
+      "lore": [
+        {
+          "source": "&7&oEnder Infused",
+          "target": "&7&o末影灌注"
+        },
+        {
+          "source": "&fWhile you have this Talisman",
+          "target": "&f当你把这个护身符"
+        },
+        {
+          "source": "&fin your Inventory it has",
+          "target": "&f放在物品栏中时"
+        },
+        {
+          "source": "&fa 20% chance of doubling",
+          "target": "&f挖掘矿石有 20% 的概率"
+        },
+        {
+          "source": "&fall Ores you mine",
+          "target": "&f获得双倍掉落"
+        }
+      ],
       "name": "&5末影矿工护身符"
     },
     "ENDER_TALISMAN": {
@@ -1499,6 +1669,24 @@
       "name": "&e农夫的靴子"
     },
     "FARMER_TALISMAN": {
+      "lore": [
+        {
+          "source": "&fWhile you have this Talisman",
+          "target": "&f当你把这个护身符"
+        },
+        {
+          "source": "&fin your Inventory it has",
+          "target": "&f放在物品栏中时"
+        },
+        {
+          "source": "&fa 20% chance of doubling",
+          "target": "&f收获作物有 20% 的概率"
+        },
+        {
+          "source": "&fall crops you harvest",
+          "target": "&f获得双倍掉落"
+        }
+      ],
       "name": "&a农夫护身符"
     },
     "FERROSILICON": {
@@ -2257,6 +2445,24 @@
       "name": "&c西瓜汁"
     },
     "MINER_TALISMAN": {
+      "lore": [
+        {
+          "source": "&fWhile you have this Talisman",
+          "target": "&f当你把这个护身符"
+        },
+        {
+          "source": "&fin your Inventory it has",
+          "target": "&f放在物品栏中时"
+        },
+        {
+          "source": "&fa 20% chance of doubling",
+          "target": "&f挖掘矿石有 20% 的概率"
+        },
+        {
+          "source": "&fall Ores you mine",
+          "target": "&f获得双倍掉落"
+        }
+      ],
       "name": "&a矿工护身符"
     },
     "MONSTER_JERKY": {

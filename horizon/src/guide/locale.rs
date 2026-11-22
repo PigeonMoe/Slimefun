@@ -102,6 +102,10 @@ pub(crate) fn localize_item_components(id: &str, components: &mut Compound) {
             .or_else(|| shared_lore(&displayed));
         if let Some(target) = translated {
             *line = colored_lore(target);
+        } else if id == "STAFF_ELEMENTAL_STORM"
+            && let Some(target) = styled.as_deref().and_then(crate::storm_staff::localize_uses)
+        {
+            *line = target;
         } else if let Some(target) = styled.as_deref().and_then(crate::machine_lore::localize) {
             *line = colored_lore(&target);
         }

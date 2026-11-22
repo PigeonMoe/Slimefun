@@ -3,19 +3,27 @@
 use std::{collections::BTreeSet, sync::Mutex};
 
 use mod_api::{
-    ActiveEffect, Host, HostSide, HostTransaction, InteractionResult, ItemPart, ItemStack,
-    LevelRef, PlayerRef, Registrar, ServerHost, Tag, Text, UseOnEvent,
+    ActiveEffect, BlockState, Hand, Host, HostSide, HostTransaction, InteractionResult, ItemDrop,
+    ItemPart, ItemStack, LevelRef, PlayerRef, Registrar, ServerHost, Tag, Text, UseOnEvent,
 };
 
 use crate::{
+    ancient_altar::ANCIENT_RUNE_EARTH,
     elemental_staves::{LAVA_CRYSTAL, STAFF_ELEMENTAL_WIND},
     factory::experience_collector::FILLED_FLASK_OF_KNOWLEDGE,
-    items::{ENDER_LUMP_3, GOLD_8K, GOLD_DUST, Kind, MAGIC_LUMP_2, MAGIC_LUMP_3, item, text},
+    items::{
+        ENDER_LUMP_3, GOLD_8K, GOLD_DUST, Kind, MAGIC_LUMP_2, MAGIC_LUMP_3, SIFTED_ORE, item, text,
+    },
     magic_eye::MAGIC_EYE_OF_ENDER,
-    random::Rolls,
+    network_recipes::SYNTHETIC_SAPPHIRE,
+    random::{Rolls, natural_drop_position},
     recipes::{CraftingRecipe, Research, Stack},
     research,
+    smelters_pickaxe::{enchantment, fortune_amount, ore},
 };
+
+#[path = "anvil_talisman.rs"]
+pub(crate) mod anvil;
 
 item!(
     COMMON_TALISMAN,
@@ -130,6 +138,54 @@ item!(
     None,
     None
 );
+item!(
+    MINER_TALISMAN,
+    "emerald",
+    "Talisman of the Miner",
+    "green",
+    None,
+    None
+);
+item!(
+    ENDER_MINER_TALISMAN,
+    "emerald",
+    "Ender Talisman of the Miner",
+    "dark_purple",
+    None,
+    None
+);
+item!(
+    FARMER_TALISMAN,
+    "emerald",
+    "Talisman of the Farmer",
+    "green",
+    None,
+    None
+);
+item!(
+    ENDER_FARMER_TALISMAN,
+    "emerald",
+    "Ender Talisman of the Farmer",
+    "dark_purple",
+    None,
+    None
+);
+item!(
+    CAVEMAN_TALISMAN,
+    "emerald",
+    "Talisman of the Caveman",
+    "green",
+    None,
+    None
+);
+item!(
+    ENDER_CAVEMAN_TALISMAN,
+    "emerald",
+    "Ender Talisman of the Caveman",
+    "dark_purple",
+    None,
+    None
+);
 
 const FIRE_RESEARCH: Research = Research {
     id: "fire_talisman",
@@ -144,6 +200,21 @@ const ANGEL_RESEARCH: Research = Research {
 const TRAVELLER_RESEARCH: Research = Research {
     id: "traveller_talisman",
     name: "Talisman of the Traveller",
+    cost: 20,
+};
+const MINER_RESEARCH: Research = Research {
+    id: "miner_talisman",
+    name: "Talisman of the Miner",
+    cost: 18,
+};
+const FARMER_RESEARCH: Research = Research {
+    id: "farmer_talisman",
+    name: "Talisman of the Farmer",
+    cost: 18,
+};
+const CAVEMAN_RESEARCH: Research = Research {
+    id: "caveman_talisman",
+    name: "Talisman of the Caveman",
     cost: 20,
 };
 const COMMON_RESEARCH: Research = Research {
@@ -178,6 +249,7 @@ const ENDER_RESEARCH: Research = Research {
 };
 pub(crate) const RESEARCHES: &[&Research] = &[
     &COMMON_RESEARCH,
+    &anvil::RESEARCH,
     &GLASS_RESEARCH,
     &MAGICIAN_RESEARCH,
     &WIZARD_RESEARCH,
@@ -185,6 +257,9 @@ pub(crate) const RESEARCHES: &[&Research] = &[
     &FIRE_RESEARCH,
     &ANGEL_RESEARCH,
     &TRAVELLER_RESEARCH,
+    &MINER_RESEARCH,
+    &FARMER_RESEARCH,
+    &CAVEMAN_RESEARCH,
     &ENDER_RESEARCH,
 ];
 
@@ -367,6 +442,57 @@ pub(crate) const CRAFTING: &[CraftingRecipe] = &[
     ),
     infused(ENDER_ANGEL_TALISMAN, ANGEL_TALISMAN, 1),
     infused(ENDER_TRAVELLER_TALISMAN, TRAVELLER_TALISMAN, 1),
+    recipe(
+        MINER_TALISMAN,
+        &MINER_RESEARCH,
+        1,
+        [
+            LUMP_3,
+            None,
+            LUMP_3,
+            Some(SYNTHETIC_SAPPHIRE),
+            Some(COMMON_TALISMAN),
+            Some(SIFTED_ORE),
+            LUMP_3,
+            None,
+            LUMP_3,
+        ],
+    ),
+    infused(ENDER_MINER_TALISMAN, MINER_TALISMAN, 1),
+    recipe(
+        FARMER_TALISMAN,
+        &FARMER_RESEARCH,
+        1,
+        [
+            LUMP_3,
+            None,
+            LUMP_3,
+            Some(Kind::Vanilla("minecraft:diamond_hoe")),
+            Some(COMMON_TALISMAN),
+            Some(Kind::Vanilla("minecraft:diamond_hoe")),
+            LUMP_3,
+            None,
+            LUMP_3,
+        ],
+    ),
+    infused(ENDER_FARMER_TALISMAN, FARMER_TALISMAN, 1),
+    recipe(
+        CAVEMAN_TALISMAN,
+        &CAVEMAN_RESEARCH,
+        1,
+        [
+            LUMP_3,
+            None,
+            LUMP_3,
+            Some(Kind::Vanilla("minecraft:golden_pickaxe")),
+            Some(MINER_TALISMAN),
+            Some(ANCIENT_RUNE_EARTH),
+            LUMP_3,
+            None,
+            LUMP_3,
+        ],
+    ),
+    infused(ENDER_CAVEMAN_TALISMAN, CAVEMAN_TALISMAN, 1),
 ];
 
 const MAGICIAN: Talisman = Talisman {
@@ -452,6 +578,45 @@ const TRAVELLER: Talisman = Talisman {
         "Speed Buff when you start sprinting",
     ],
 };
+const MINER: Talisman = Talisman {
+    normal: MINER_TALISMAN,
+    ender: ENDER_MINER_TALISMAN,
+    research: &MINER_RESEARCH,
+    chance: 20,
+    message: "Your Talisman just doubled your drops",
+    lore: &[
+        "While you have this Talisman",
+        "in your Inventory it has",
+        "a 20% chance of doubling",
+        "all Ores you mine",
+    ],
+};
+const FARMER: Talisman = Talisman {
+    normal: FARMER_TALISMAN,
+    ender: ENDER_FARMER_TALISMAN,
+    research: &FARMER_RESEARCH,
+    chance: 20,
+    message: "Your Talisman just doubled your drops",
+    lore: &[
+        "While you have this Talisman",
+        "in your Inventory it has",
+        "a 20% chance of doubling",
+        "all crops you harvest",
+    ],
+};
+const CAVEMAN: Talisman = Talisman {
+    normal: CAVEMAN_TALISMAN,
+    ender: ENDER_CAVEMAN_TALISMAN,
+    research: &CAVEMAN_RESEARCH,
+    chance: 50,
+    message: "Your Talisman gave you haste",
+    lore: &[
+        "While you have this Talisman",
+        "in your inventory it gives",
+        "you a 50% chance for a decent",
+        "Haste buff when you mine any ore",
+    ],
+};
 
 struct Talisman {
     normal: Kind,
@@ -463,6 +628,9 @@ struct Talisman {
 }
 
 pub(crate) fn lore(id: &str) -> Option<Tag> {
+    if let Some(lore) = anvil::lore(id) {
+        return Some(lore);
+    }
     let blank = || Tag::String("".into());
     if id == MAGICAL_GLASS.id() {
         return Some(Tag::List(vec![
@@ -470,9 +638,11 @@ pub(crate) fn lore(id: &str) -> Option<Tag> {
             text("Used for various Magical Gadgets", "green", true),
         ]));
     }
-    let talisman = [&MAGICIAN, &WIZARD, &WISE, &FIRE, &ANGEL, &TRAVELLER]
-        .into_iter()
-        .find(|talisman| [talisman.normal.id(), talisman.ender.id()].contains(&id))?;
+    let talisman = [
+        &MAGICIAN, &WIZARD, &WISE, &FIRE, &ANGEL, &TRAVELLER, &MINER, &FARMER, &CAVEMAN,
+    ]
+    .into_iter()
+    .find(|talisman| [talisman.normal.id(), talisman.ender.id()].contains(&id))?;
     let mut lines = Vec::new();
     if talisman.ender.id() == id {
         lines.push(text("Ender Infused", "gray", true));
@@ -526,6 +696,90 @@ impl Default for Rules {
 pub(crate) struct Talismans(Mutex<Rules>);
 
 impl Talismans {
+    pub(crate) fn caveman(
+        &self,
+        host: &mut dyn ServerHost,
+        player: PlayerRef,
+        level: LevelRef,
+        state: BlockState,
+        rolls: &Rolls,
+    ) {
+        if !ore(&state.block().id(host)) {
+            return;
+        }
+        let (Some(living), Some(haste)) = (
+            host.living(player.entity()),
+            host.effect_key("minecraft:haste"),
+        ) else {
+            return;
+        };
+        if !chance(host, level, &CAVEMAN, rolls)
+            || living.effect(host, haste).is_some()
+            || !present(host, player, &CAVEMAN)
+        {
+            return;
+        }
+        let effect = ActiveEffect::new(haste, 800, 2, true, true, true);
+        if living.add_effect(host, &effect) {
+            let actionbar = self.0.lock().unwrap().actionbar;
+            notify(host, player, &CAVEMAN, actionbar);
+        }
+    }
+
+    pub(crate) fn harvest_drops(
+        &self,
+        host: &mut dyn ServerHost,
+        player: PlayerRef,
+        pos: [i32; 3],
+        state: BlockState,
+        drops: &[ItemDrop],
+        rolls: &Rolls,
+    ) {
+        let key = state.block();
+        let block = key.id(host);
+        let in_crops = host.block_in_tag(key, "minecraft:crops") == Some(true);
+        let talismans = harvest_talismans(&block, in_crops);
+        if talismans.iter().all(Option::is_none) {
+            return;
+        }
+        let Some(level) = player.level(host) else {
+            return;
+        };
+        let Some(tool) = host
+            .living(player.entity())
+            .and_then(|living| living.hand_item(host, Hand::Main))
+        else {
+            return;
+        };
+        if enchantment(host, &tool, "minecraft:silk_touch") != 0 {
+            return;
+        }
+        let fortune = enchantment(host, &tool, "minecraft:fortune");
+        // Paper tries Miner first, then Farmer, always against the original event drops.
+        for talisman in talismans.into_iter().flatten() {
+            if !chance(host, level, talisman, rolls) || !present(host, player, talisman) {
+                continue;
+            }
+            let amount = fortune_amount(fortune, false, &block, |bound| {
+                rolls.next(host, level, bound).unwrap_or(0)
+            });
+            let mut doubled = false;
+            for drop in drops {
+                let is_block = host.block_key(&drop.stack.item().id(host)).is_some();
+                if let Some(stack) = harvest_bonus(&drop.stack, amount, is_block) {
+                    let [x, y, z] = natural_drop_position(host, level, pos);
+                    if matches!(level.spawn_item(host, x, y, z, stack, 10), Ok(Some(_))) {
+                        doubled = true;
+                    }
+                }
+            }
+            if doubled {
+                let actionbar = self.0.lock().unwrap().actionbar;
+                notify(host, player, talisman, actionbar);
+            }
+        }
+    }
+
     pub(crate) fn configure(&self, table: &toml::Table) {
         let mut rules = Rules::default();
         if let Some(actionbar) = table
@@ -648,13 +902,7 @@ impl Talismans {
             return false;
         }
         let activated = host.transaction(|host, _| {
-            let (slot, current) = carried_talisman(host, player, &FIRE).ok_or(())?;
-            let remainder = current.shrink(1);
-            match slot {
-                StorageSlot::Inventory(slot) => player.set_inventory_slot(host, slot, remainder),
-                StorageSlot::EnderChest(slot) => player.set_ender_chest_slot(host, slot, remainder),
-            }
-            .map_err(|_| ())?;
+            consume_carried(host, player, &FIRE)?;
             let resistance = ActiveEffect::new(effect, 3600, 4, false, true, true);
             living.add_effect(host, &resistance).then_some(()).ok_or(())
         });
@@ -761,6 +1009,38 @@ fn present(host: &dyn ServerHost, player: PlayerRef, spec: &Talisman) -> bool {
     carried_talisman(host, player, spec).is_some() && learned(host, player, spec)
 }
 
+fn miner_triggers(block: &str) -> bool {
+    block == "minecraft:gilded_blackstone" || (block != "minecraft:ancient_debris" && ore(block))
+}
+
+fn harvest_talismans(block: &str, in_crops: bool) -> [Option<&'static Talisman>; 2] {
+    let farmer = in_crops
+        || matches!(
+            block,
+            "minecraft:beetroots"
+                | "minecraft:carrots"
+                | "minecraft:potatoes"
+                | "minecraft:wheat"
+                | "minecraft:cocoa"
+                | "minecraft:sweet_berry_bush"
+                | "minecraft:melon"
+        );
+    [
+        miner_triggers(block).then_some(&MINER),
+        farmer.then_some(&FARMER),
+    ]
+}
+
+fn harvest_bonus(original: &ItemStack, amount: u32, is_block: bool) -> Option<ItemStack> {
+    if is_block {
+        return None;
+    }
+    let count = (amount * 2).saturating_sub(original.count()).max(1);
+    let mut stack = original.clone();
+    stack.set_count(count).ok()?;
+    Some(stack)
+}
+
 fn learned(host: &dyn ServerHost, player: PlayerRef, spec: &Talisman) -> bool {
     player
         .persistent_data(host)
@@ -792,6 +1072,16 @@ fn carried_talisman(
     let ender = player.ender_chest(host).unwrap_or_default();
     first_matching(host, ender, 27, spec.ender)
         .map(|(slot, stack)| (StorageSlot::EnderChest(slot), stack))
+}
+
+fn consume_carried(host: &mut dyn ServerHost, player: PlayerRef, spec: &Talisman) -> Result<(), ()> {
+    let (slot, current) = carried_talisman(host, player, spec).ok_or(())?;
+    let remainder = current.shrink(1);
+    match slot {
+        StorageSlot::Inventory(slot) => player.set_inventory_slot(host, slot, remainder),
+        StorageSlot::EnderChest(slot) => player.set_ender_chest_slot(host, slot, remainder),
+    }
+    .map_err(|_| ())
 }
 
 fn first_matching(
@@ -842,6 +1132,180 @@ fn notify(host: &mut dyn ServerHost, player: PlayerRef, spec: &Talisman, actionb
 mod tests {
     use super::*;
     use mod_api::testing::FakeHost;
+
+    #[test]
+    fn miner_augments_each_nonblock_drop_with_papers_fortune_amount() {
+        let mut host = FakeHost::new();
+        host.registries
+            .resolve_items([mod_api::Identifier::parse("minecraft:lapis_lazuli").unwrap()])
+            .unwrap();
+        let mut original = Kind::Vanilla("minecraft:lapis_lazuli")
+            .stack(&host, 23)
+            .unwrap();
+        original
+            .apply_components(&mod_api::Compound::from([(
+                "minecraft:custom_name".into(),
+                Tag::String("Mining sample".into()),
+            )]))
+            .unwrap();
+        let mut draws = [(5, 4), (5, 1)].into_iter();
+        let amount = fortune_amount(3, false, "minecraft:lapis_ore", |bound| {
+            let (expected, value) = draws.next().unwrap();
+            assert_eq!(bound, expected);
+            value
+        });
+        let extra = harvest_bonus(&original, amount, false).unwrap();
+        assert_eq!(amount, 20);
+        assert_eq!(extra.count(), 17);
+        assert_eq!(
+            extra.components().unwrap().as_nbt(),
+            original.components().unwrap().as_nbt()
+        );
+        assert_eq!(original.count(), 23);
+        assert_eq!(harvest_bonus(&original, 1, false).unwrap().count(), 1);
+        assert!(harvest_bonus(&original, amount, true).is_none());
+        assert!(roll_succeeds(&MINER, 20));
+        assert!(!roll_succeeds(&MINER, 21));
+    }
+
+    #[test]
+    fn farmer_uses_paper_crop_tags_and_keeps_miner_first_when_tags_overlap() {
+        let markers = |block, tagged| {
+            harvest_talismans(block, tagged).map(|entry| entry.map(|talisman| talisman.normal.id()))
+        };
+        for block in [
+            "minecraft:beetroots",
+            "minecraft:carrots",
+            "minecraft:potatoes",
+            "minecraft:wheat",
+            "minecraft:cocoa",
+            "minecraft:sweet_berry_bush",
+            "minecraft:melon",
+        ] {
+            assert_eq!(markers(block, false), [None, Some("FARMER_TALISMAN")]);
+        }
+        assert_eq!(markers("minecraft:pumpkin", false), [None, None]);
+        assert_eq!(
+            markers("minecraft:nether_wart", true),
+            [None, Some("FARMER_TALISMAN")]
+        );
+        assert_eq!(
+            markers("minecraft:diamond_ore", true),
+            [Some("MINER_TALISMAN"), Some("FARMER_TALISMAN")]
+        );
+        assert!(roll_succeeds(&FARMER, 20));
+        assert!(!roll_succeeds(&FARMER, 21));
+    }
+
+    #[test]
+    fn farmer_research_recipes_and_localized_lore_cover_both_tiers() {
+        let recipe = |output| {
+            CRAFTING
+                .iter()
+                .find(|recipe| recipe.output.kind == output)
+                .unwrap()
+        };
+        let base = recipe(FARMER_TALISMAN);
+        let ender = recipe(ENDER_FARMER_TALISMAN);
+        let hoe = Some(Kind::Vanilla("minecraft:diamond_hoe"));
+        assert_eq!(
+            base.inputs,
+            [
+                LUMP_3,
+                None,
+                LUMP_3,
+                hoe,
+                Some(COMMON_TALISMAN),
+                hoe,
+                LUMP_3,
+                None,
+                LUMP_3
+            ]
+        );
+        assert_eq!(
+            ender.inputs,
+            [
+                ENDER,
+                None,
+                ENDER,
+                None,
+                Some(FARMER_TALISMAN),
+                None,
+                ENDER,
+                None,
+                ENDER
+            ]
+        );
+        assert_eq!(
+            (base.output.count, base.research.id, base.research.cost),
+            (1, "farmer_talisman", 18)
+        );
+        assert_eq!(
+            (ender.output.count, ender.research.id),
+            (1, "ender_talismans")
+        );
+        for id in [FARMER_TALISMAN.id(), ENDER_FARMER_TALISMAN.id()] {
+            let original = lore(id).unwrap();
+            let mut components = mod_api::Compound::from([("minecraft:lore".into(), original)]);
+            crate::guide::localize_item_components(id, &mut components);
+            let Tag::List(lines) = components.get(&"minecraft:lore".into()).unwrap() else {
+                panic!("talisman lore must be a list");
+            };
+            let translated = lines
+                .iter()
+                .filter_map(crate::network_runtime::paper_text)
+                .collect::<Vec<_>>();
+            assert!(
+                translated
+                    .iter()
+                    .any(|line| line.contains("收获作物有 20% 的概率"))
+            );
+            assert!(translated.iter().any(|line| line.contains("获得双倍掉落")));
+            assert_eq!(
+                translated.iter().any(|line| line.contains("末影灌注")),
+                id.starts_with("ENDER_")
+            );
+        }
+    }
+
+    #[test]
+    fn caveman_uses_the_miner_recipe_chain_and_its_own_ore_tag() {
+        assert!(ore("minecraft:ancient_debris"));
+        assert!(!miner_triggers("minecraft:ancient_debris"));
+        assert!(!ore("minecraft:gilded_blackstone"));
+        assert!(miner_triggers("minecraft:gilded_blackstone"));
+        assert!(ore("minecraft:deepslate_diamond_ore"));
+        assert!(miner_triggers("minecraft:deepslate_diamond_ore"));
+        assert!(roll_succeeds(&CAVEMAN, 50));
+        assert!(!roll_succeeds(&CAVEMAN, 51));
+        let recipe = |output| CRAFTING.iter().find(|r| r.output.kind == output).unwrap();
+        let mineral = recipe(MINER_TALISMAN);
+        let cave = recipe(CAVEMAN_TALISMAN);
+        assert_eq!(
+            mineral.inputs[3..6],
+            [
+                Some(SYNTHETIC_SAPPHIRE),
+                Some(COMMON_TALISMAN),
+                Some(SIFTED_ORE)
+            ]
+        );
+        assert_eq!(
+            cave.inputs[3..6],
+            [
+                Some(Kind::Vanilla("minecraft:golden_pickaxe")),
+                Some(MINER_TALISMAN),
+                Some(ANCIENT_RUNE_EARTH)
+            ]
+        );
+        for spec in [&MINER, &CAVEMAN] {
+            let base = recipe(spec.normal);
+            let ender = recipe(spec.ender);
+            assert_eq!(ender.inputs[4], Some(spec.normal));
+            assert_eq!(ender.research.id, ENDER_RESEARCH.id);
+            assert_eq!(base.research.id, spec.research.id);
+            assert_eq!((base.output.count, ender.output.count), (1, 1));
+        }
+    }
 
     #[test]
     fn paper_storage_ignores_wrong_tiers_and_equipment() {

@@ -250,6 +250,7 @@ pub(crate) fn magic_crafting() -> impl Iterator<Item = &'static CraftingRecipe> 
         .chain(crate::explosive_tools::CRAFTING)
         .chain([&crate::teleposition_scroll::CRAFTING])
         .chain(crate::talismans::CRAFTING)
+        .chain(&crate::talismans::anvil::CRAFTING)
         .chain([&crate::knowledge_tome::CRAFTING])
         .chain([&crate::infused::MAGIC, &crate::zombie_pills::CRAFTING])
         .chain([&CHRISTMAS_PRESENT_RECIPE])

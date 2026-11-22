@@ -66,7 +66,7 @@ fn shift(cell: &mut Cell, axis: usize, step: [i32; 3]) {
 
 // Bukkit's BlockIterator takes one step on the dominant axis, then any
 // crossed secondary axes in crossing order. At a tie the third axis wins.
-fn sight_cells(eye: Point, direction: Point) -> Vec<Cell> {
+pub(crate) fn sight_cells(eye: Point, direction: Point, range: f64) -> Vec<Cell> {
     let speed = direction.map(f64::abs);
     let mut main = 0;
     for axis in 1..3 {
@@ -107,7 +107,7 @@ fn sight_cells(eye: Point, direction: Point) -> Vec<Cell> {
         + speed[side[0]] * speed[side[0]]
         + speed[side[1]] * speed[side[1]])
         .sqrt();
-    let slices = (RANGE / (length / speed[main])).round() as usize;
+    let slices = (range / (length / speed[main])).round() as usize;
     let mut cells = Vec::with_capacity(1 + slices * 3);
     for _ in 0..=slices {
         shift(&mut cell, main, sign);
@@ -135,7 +135,7 @@ fn sight_cells(eye: Point, direction: Point) -> Vec<Cell> {
     cells
 }
 
-fn direction([yaw, pitch]: [f32; 2]) -> Point {
+pub(crate) fn direction([yaw, pitch]: [f32; 2]) -> Point {
     let (sin_yaw, cos_yaw) = f64::from(yaw).to_radians().sin_cos();
     let (sin_pitch, cos_pitch) = f64::from(pitch).to_radians().sin_cos();
     [-cos_pitch * sin_yaw, -sin_pitch, cos_pitch * cos_yaw]
@@ -258,7 +258,7 @@ fn shockwave(host: &mut dyn ServerHost, player: PlayerRef, level: LevelRef) -> O
             Material::Solid
         })
     };
-    let line = line_of_sight(sight_cells(entity.eye_position(host)?, view), |cell| {
+    let line = line_of_sight(sight_cells(entity.eye_position(host)?, view, RANGE), |cell| {
         material_at(host, cell)
     });
     let targets = level
@@ -338,7 +338,7 @@ mod tests {
     fn traverses_the_paper_block_iterator_cells_and_includes_the_first_obstacle() {
         // Captured from Paper 26.2 build 132's org.bukkit.util.BlockIterator.
         assert_eq!(
-            sight_cells([0.0, 64.0, 0.0], [1.0, 1.0, 1.0]),
+            sight_cells([0.0, 64.0, 0.0], [1.0, 1.0, 1.0], RANGE),
             [
                 [0, 64, 0],
                 [1, 64, 0],
@@ -362,7 +362,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            sight_cells([-2.75, 0.5, 5.125], [-1.0, 0.35, 0.5]),
+            sight_cells([-2.75, 0.5, 5.125], [-1.0, 0.35, 0.5], RANGE),
             [
                 [-3, 0, 5],
                 [-4, 0, 5],
@@ -383,7 +383,7 @@ mod tests {
                 [-12, 3, 9],
             ]
         );
-        let east = sight_cells([0.5, 64.62, 0.5], [1.0, 0.0, 0.0]);
+        let east = sight_cells([0.5, 64.62, 0.5], [1.0, 0.0, 0.0], RANGE);
         let line = line_of_sight(east, |[x, _, _]| {
             Some(match x {
                 1 | 2 => Material::OtherAir,

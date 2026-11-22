@@ -95,7 +95,7 @@ const FIERY: Research = Research {
     cost: 14,
 };
 pub(crate) const RESEARCHES: &[&Research] =
-    &[&BOOK_BINDING, &ELEMENTAL, &WIND, &WATER, &FIRE, &FIERY];
+    &[&BOOK_BINDING, &ELEMENTAL, &WIND, &WATER, &FIRE, &FIERY, &crate::storm_staff::RESEARCH];
 
 const BOOK: Option<Kind> = Some(Kind::Vanilla("minecraft:book"));
 const STICK: Option<Kind> = Some(Kind::Vanilla("minecraft:stick"));

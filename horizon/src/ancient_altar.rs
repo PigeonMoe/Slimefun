@@ -269,9 +269,11 @@ pub(crate) const CRAFTING: &[CraftingRecipe] = &[
     ),
     crate::infused::ALTAR,
     crate::spawner_repair::ALTAR,
+    crate::storm_staff::ALTAR,
     crate::infernal_bonemeal::ALTAR,
     crate::enchantment_rune::CRAFTING[0],
     crate::enchantment_rune::CRAFTING[1],
+    crate::villager_rune::ALTAR,
     altar_recipe(
         [
             MAGIC_LUMP_3,
@@ -1259,6 +1261,9 @@ pub(crate) fn decorate(id: &str, components: &mut Compound) {
     if id == "ANCIENT_RUNE_ENCHANTMENT" {
         components.insert("minecraft:lore".into(), crate::enchantment_rune::lore());
     }
+    if id == "ANCIENT_RUNE_VILLAGERS" {
+        components.insert("minecraft:lore".into(), crate::villager_rune::lore());
+    }
     let (element, element_color, rgb) = match id {
         "BLANK_RUNE" => ("", "dark_gray", 0),
         "ANCIENT_RUNE_AIR" => ("Air", "aqua", 0x00ffff),
@@ -1270,6 +1275,7 @@ pub(crate) fn decorate(id: &str, components: &mut Compound) {
         "ANCIENT_RUNE_SOULBOUND" => ("Soulbound", "dark_purple", 0x2f0075),
         "ANCIENT_RUNE_LIGHTNING" => ("Lightning", "yellow", 0xffff5f),
         "ANCIENT_RUNE_ENCHANTMENT" => ("Enchantment", "gold", 0xffd919),
+        "ANCIENT_RUNE_VILLAGERS" => ("Villagers", "dark_red", 0xa01405),
         _ => return,
     };
     components.insert(
