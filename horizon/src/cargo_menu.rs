@@ -46,6 +46,7 @@ pub(crate) fn use_node(
         | Component::EnergyRegulator
         | Component::EnergyConnector
         | Component::Capacitor(_)
+        | Component::EnhancedFurnace
         | Component::CargoConnector => return false,
         Component::CargoManager => {
             data.cargo_visualizer_disabled = !data.cargo_visualizer_disabled;
