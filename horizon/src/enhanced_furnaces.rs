@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use mod_api::{
-    ComponentId, Compound, FurnaceProcessEvent, FurnaceProcessStage, Host, ItemResource, ItemStack,
-    Tag,
+    BlockEntityRef, ComponentId, Compound, FurnaceProcessEvent, FurnaceProcessStage, Host,
+    ItemResource, ItemStack, ServerHost, Tag,
 };
 
 use crate::{
@@ -271,11 +271,20 @@ impl Furnace {
         }
     }
 
-    pub(crate) fn progress(self, game_time: i64, elapsed: i32, total: i32) -> i32 {
-        if game_time % 10 != 0 || elapsed <= 0 || total <= elapsed {
+    fn progress(self, elapsed: i32, total: i32) -> i32 {
+        if elapsed <= 0 || total <= 0 {
             return elapsed;
         }
         elapsed.saturating_add((self.speed - 1) * 10).min(total - 1)
+    }
+
+    pub(crate) fn tick(self, host: &mut dyn ServerHost, entity: BlockEntityRef) {
+        if let Some((elapsed, total)) = entity.furnace_cooking(host) {
+            let updated = self.progress(elapsed, total);
+            if updated != elapsed {
+                let _ = entity.set_furnace_cook_time(host, updated);
+            }
+        }
     }
 
     /// Paper's tag includes raw items and the three ore groups. Ancient debris
@@ -364,13 +373,12 @@ mod tests {
         );
         let third = by_id("ENHANCED_FURNACE_3").unwrap();
         assert_eq!(third.fuel(1600), 1600);
-        assert_eq!(third.progress(20, 85, 100), 95);
-        assert_eq!(third.progress(21, 85, 100), 85);
+        assert_eq!(third.progress(85, 100), 95);
         let final_tier = by_id("CARBONADO_EDGED_FURNACE").unwrap();
         assert_eq!(final_tier.fuel(20_000), 32766);
-        assert_eq!(final_tier.progress(20, 5, 200), 195);
-        assert_eq!(final_tier.progress(20, 9, 200), 199);
-        assert_eq!(final_tier.progress(20, 0, 200), 0);
+        assert_eq!(final_tier.progress(5, 200), 195);
+        assert_eq!(final_tier.progress(9, 200), 199);
+        assert_eq!(final_tier.progress(0, 200), 0);
         assert_eq!(
             final_tier.quantity("minecraft:deepslate_gold_ore", 2, |bound| Some(bound - 1)),
             2
@@ -400,18 +408,16 @@ mod tests {
 }
 
 pub(crate) fn process(host: &dyn Host, event: &mut FurnaceProcessEvent<'_>, rolls: &Rolls) {
-    if matches!(event.stage, FurnaceProcessStage::Progress { .. }) && event.game_time % 10 != 0 {
+    if !matches!(
+        event.stage,
+        FurnaceProcessStage::Fuel { .. } | FurnaceProcessStage::Result { .. }
+    ) {
         return;
     }
     let Some(furnace) = crate::network_runtime::enhanced_furnace(host, event.entity) else {
         return;
     };
-    let disabled = if matches!(event.stage, FurnaceProcessStage::Progress { .. }) {
-        !crate::availability::globally_enabled(furnace.item.id())
-    } else {
-        crate::availability::use_denial(host.dimension(), furnace.item.id()).is_some()
-    };
-    if disabled {
+    if crate::availability::use_denial(host.dimension(), furnace.item.id()).is_some() {
         return;
     }
     let Some(level) = event.entity.level(host) else {
@@ -429,9 +435,6 @@ pub(crate) fn process(host: &dyn Host, event: &mut FurnaceProcessEvent<'_>, roll
     match event.stage {
         FurnaceProcessStage::Fuel { duration, .. } => {
             *duration = furnace.fuel(*duration);
-        }
-        FurnaceProcessStage::Progress { elapsed, total } => {
-            *elapsed = furnace.progress(event.game_time, *elapsed, *total);
         }
         FurnaceProcessStage::Result {
             input,

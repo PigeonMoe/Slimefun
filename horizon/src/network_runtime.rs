@@ -1376,6 +1376,38 @@ pub(crate) fn toggle_reactor_focus(host: &mut dyn ServerHost, level: LevelRef, p
     }
 }
 
+pub(crate) fn tick_enhanced_furnaces(
+    networks: &Mutex<Networks>,
+    host: &mut dyn ServerHost,
+    level: LevelRef,
+    profile: &mut crate::timings::Cycle,
+) {
+    if !crate::ticker_policy::Tickers::current().enabled() {
+        return;
+    }
+    let Ok(nodes) = networks.lock().unwrap().nodes(host, &profile.dimension) else {
+        return;
+    };
+    for (&pos, node) in nodes
+        .iter()
+        .filter(|(_, node)| node.component == Component::EnhancedFurnace)
+    {
+        if !crate::availability::globally_enabled(&node.id) || !node.accepts_block(host, level, pos)
+        {
+            continue;
+        }
+        let Some(entity) = host.block_entity(level, pos) else {
+            continue;
+        };
+        let Some(furnace) =
+            enhanced_furnace(host, entity).filter(|furnace| furnace.item.id() == node.id)
+        else {
+            continue;
+        };
+        profile.measure(host, &node.id, pos, |host| furnace.tick(host, entity));
+    }
+}
+
 pub(crate) fn tick(
     networks: &Mutex<Networks>,
     host: &mut dyn ServerHost,

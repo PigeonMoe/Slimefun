@@ -53,11 +53,11 @@ pub(crate) struct Cycle {
 }
 
 impl Cycle {
-    pub(crate) fn for_level(host: &dyn ServerHost, level: LevelRef, interval: u32) -> Option<Self> {
+    fn for_level(host: &dyn ServerHost, level: LevelRef, time: i64, interval: u32) -> Option<Self> {
         if !level.in_place(host) {
             return None;
         }
-        let round = round_at(level.game_time(host)?, interval)?;
+        let round = round_at(time, interval)?;
         let dimension = level.dimension().id(host)?;
         Some(Self::new(dimension, round))
     }
@@ -112,6 +112,7 @@ fn round_at(time: i64, interval: u32) -> Option<i64> {
 
 #[derive(Default)]
 struct State {
+    upcoming_tick: Option<i64>,
     running: Vec<Cycle>,
     completed: Vec<Cycle>,
 }
@@ -120,8 +121,35 @@ struct State {
 pub(crate) struct Profiler(Mutex<State>);
 
 impl Profiler {
-    pub(crate) fn begin_tick(&self) {
-        self.0.lock().unwrap().running.clear();
+    pub(crate) fn begin_tick(&self, time: Option<i64>) {
+        let mut state = self.0.lock().unwrap();
+        state.upcoming_tick = time.and_then(|time| time.checked_add(1));
+        state.running.clear();
+    }
+
+    pub(crate) fn before_level(
+        &self,
+        host: &dyn ServerHost,
+        level: LevelRef,
+        interval: u32,
+    ) -> Option<Cycle> {
+        let time = self.0.lock().unwrap().upcoming_tick?;
+        Cycle::for_level(host, level, time, interval)
+    }
+
+    pub(crate) fn after_level(
+        &self,
+        host: &dyn ServerHost,
+        level: LevelRef,
+        interval: u32,
+    ) -> Option<Cycle> {
+        let fresh = Cycle::for_level(host, level, level.game_time(host)?, interval)?;
+        let mut state = self.0.lock().unwrap();
+        let earlier = state
+            .running
+            .iter()
+            .position(|cycle| cycle.dimension == fresh.dimension && cycle.round == fresh.round);
+        Some(earlier.map_or(fresh, |index| state.running.swap_remove(index)))
     }
 
     pub(crate) fn collect(&self, cycle: Cycle) {
@@ -210,7 +238,7 @@ fn summarize(cycles: &[Cycle], options: Options, interval: u32) -> Vec<String> {
 
     let mut lines = vec![
         "远古工艺性能报告 · 最近一轮已完成的采样".into(),
-        "采样范围包括网络设备、发电与货运节点，以及彩虹方块换色。".into(),
+        "采样范围包括网络设备、发电与货运节点、强化熔炉，以及彩虹方块换色。".into(),
         format!(
             "设备周期 {interval} 刻 · {} 个已采样方块 · 总耗时 {}",
             total.blocks,
@@ -302,6 +330,39 @@ fn millis(nanos: u128) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mod_api::{
+        __private::game::BackendRefOf, Backend, BackendRef, DimensionKey, Host,
+        prelude::LevelsBackend, testing::FakeLevel,
+    };
+
+    struct ClockHost {
+        level: FakeLevel,
+        dimension: &'static str,
+        time: i64,
+    }
+
+    impl Host for ClockHost {
+        fn backend(&self) -> Option<BackendRef<'_>> {
+            Some(BackendRef::of(self))
+        }
+    }
+    impl ServerHost for ClockHost {}
+    impl Backend for ClockHost {}
+    mod_api::impl_host_areas!(ClockHost);
+    mod_api::impl_server_host_areas!(ClockHost);
+    mod_api::impl_backend_areas!(ClockHost, except(levels));
+
+    impl LevelsBackend for ClockHost {
+        fn dimension_key_id(&self, key: DimensionKey) -> Option<String> {
+            (key == self.level.level().dimension()).then(|| self.dimension.into())
+        }
+        fn level_in_place(&self, level: LevelRef) -> bool {
+            level == self.level.level()
+        }
+        fn level_game_time(&self, level: LevelRef) -> Option<i64> {
+            self.level_in_place(level).then_some(self.time)
+        }
+    }
 
     #[test]
     fn flags_match_papers_precedence_and_report_all_unknown_flags() {
@@ -328,6 +389,50 @@ mod tests {
         assert_eq!(round_at(25, 25), Some(25));
         assert_eq!(round_at(50, 25), Some(50));
         assert_eq!(round_at(-25, 25), Some(-25));
+    }
+
+    #[test]
+    fn the_next_shared_round_is_available_before_any_level_ticks() {
+        mod_api::__private::initialize().unwrap();
+        let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
+        let profiler = Profiler::default();
+        let mut host = ClockHost {
+            level: FakeLevel::new("minecraft:overworld"),
+            dimension: "minecraft:overworld",
+            time: 24,
+        };
+        profiler.begin_tick(Some(23));
+        assert!(
+            profiler
+                .before_level(&host, host.level.level(), 25)
+                .is_none()
+        );
+
+        profiler.begin_tick(Some(24));
+        let mut overworld = profiler
+            .before_level(&host, host.level.level(), 25)
+            .unwrap();
+        overworld.record("ENHANCED_FURNACE_2", [1, 64, 1], 100);
+        profiler.collect(overworld);
+        host.time = 25;
+        let overworld = profiler.after_level(&host, host.level.level(), 25).unwrap();
+        assert_eq!(overworld.locations[&[1, 64, 1]].1, 100);
+
+        host.level = FakeLevel::new("minecraft:the_nether");
+        host.dimension = "minecraft:the_nether";
+        let nether = profiler
+            .before_level(&host, host.level.level(), 25)
+            .unwrap();
+        assert_eq!(overworld.round, 25);
+        assert_eq!(nether.round, 25);
+        assert_ne!(overworld.dimension, nether.dimension);
+
+        profiler.begin_tick(None);
+        assert!(
+            profiler
+                .before_level(&host, host.level.level(), 25)
+                .is_none()
+        );
     }
 
     #[test]
