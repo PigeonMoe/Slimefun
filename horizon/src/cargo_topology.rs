@@ -847,7 +847,8 @@ fn move_to_first(
     stack: &ItemStack,
     mut permit: impl FnMut(&mut dyn ServerHost, Position, Position, &ItemStack) -> bool,
 ) -> u32 {
-    let resource = ItemResource::of(stack);
+    let source_resource = ItemResource::of(stack);
+    let source_id = item_id(stack);
     host.transaction(|host, tx| {
         let source = level
             .capability(host, &ITEMS, input.inventory, None)
@@ -885,16 +886,23 @@ fn move_to_first(
             let direct_ingredient = matches!(output.kind, InventoryKind::Brewer)
                 && slot == 3
                 && destination.owner() == "the game";
-            let current = destination
-                .resource(host, slot)
-                .and_then(|item| item.to_stack(destination.amount(host, slot)));
-            if let Some(current) = &current {
-                if !similar(host, current, stack, true) {
+            let stored = destination.resource(host, slot);
+            let mut insert_resource = &source_resource;
+            if let Some(held) = &stored
+                && let Some(current) = held.to_stack(destination.amount(host, slot))
+            {
+                if !similar(host, &current, stack, true) {
                     continue;
+                }
+                // For a matching Slimefun ID, Paper grows the existing stack in place.
+                // Use its components for capacity and insertion and keep the source's
+                // components for the withdrawal.
+                if source_id.is_some() && item_id(&current) == source_id {
+                    insert_resource = held;
                 }
                 if !direct_ingredient
                     && input.options.smart_fill
-                    && current.count() >= destination.capacity(host, slot, &resource)
+                    && current.count() >= destination.capacity(host, slot, insert_resource)
                 {
                     return Ok(0);
                 }
@@ -909,17 +917,22 @@ fn move_to_first(
             {
                 continue;
             }
+            if insert_resource != &source_resource
+                && destination.resource(host, slot).as_ref() != Some(insert_resource)
+            {
+                return Err(());
+            }
             let moved = if direct_ingredient {
                 // Paper writes the brewer's inventory directly. ITEMS follows hopper rules
                 // and rejects non-reagents even though Paper cargo sends them to this slot.
                 let brewer = host.block_entity(level, to).ok_or(())?;
                 let held = brewer.item_slot(host, 3).map_err(|_| ())?;
-                insert_brewing_ingredient(stack, &resource, held, |replacement| {
+                insert_brewing_ingredient(stack, insert_resource, held, |replacement| {
                     brewer.set_item_slot(host, tx, 3, Some(replacement))
                 })
                 .map_err(|_| ())?
             } else {
-                destination.insert(host, tx, slot, &resource, stack.count())
+                destination.insert(host, tx, slot, insert_resource, stack.count())
             };
             if moved == 0 {
                 // A brewer has no other ingredient slot. A full matching stack
@@ -929,7 +942,7 @@ fn move_to_first(
                 }
                 continue;
             }
-            return if source.extract(host, tx, source_slot, &resource, moved) == moved {
+            return if source.extract(host, tx, source_slot, &source_resource, moved) == moved {
                 Ok(moved)
             } else {
                 Err(())
@@ -1428,6 +1441,194 @@ mod tests {
             pressure_slots(4, 2, |slot| [Some(12), Some(3)][slot]),
             [1, 0]
         );
+    }
+
+    #[test]
+    fn cargo_merges_english_paper_dust_into_the_localized_stack_without_replacing_its_data() {
+        use crate::items::{TIN_DUST, ZINC_DUST, text};
+
+        let mut host = FakeHost::new();
+        let level = host.level.level();
+        host.registries
+            .resolve_items(
+                [TIN_DUST.material(), "minecraft:stone"].map(|id| Identifier::parse(id).unwrap()),
+            )
+            .unwrap();
+        let source = [3, 70, 4];
+        let target = [5, 70, 4];
+        let terminal = |pos| Terminal {
+            pos,
+            inventory: pos,
+            kind: InventoryKind::Ordinary,
+            options: CargoSettings::legacy(0, true),
+            filter: Filter {
+                items: Vec::new(),
+                blacklist: true,
+                lore: false,
+            },
+        };
+        let input = terminal(source);
+        let mut smart_input = terminal(source);
+        smart_input.options.smart_fill = true;
+        let output = terminal(target);
+
+        let paper_data = |batch: &'static str| {
+            Tag::compound([(
+                "PublicBukkitValues",
+                Tag::compound([
+                    ("slimefun:slimefun_item", Tag::String("TIN_DUST".into())),
+                    ("pigeonqa:batch", Tag::String(batch.into())),
+                ]),
+            )])
+        };
+        let mut incoming = TIN_DUST.stack(&host, 8).unwrap();
+        incoming
+            .apply_components(&Compound::from([
+                (
+                    "minecraft:custom_name".into(),
+                    text("Tin Dust", "gold", false),
+                ),
+                (
+                    "minecraft:lore".into(),
+                    Tag::List(vec![text("Paper warehouse", "gray", false)]),
+                ),
+                ("minecraft:custom_data".into(), paper_data("source")),
+                // The original stack's own limit must not be used for the held target.
+                ("minecraft:max_stack_size".into(), Tag::Int(16)),
+            ]))
+            .unwrap();
+        let mut held = TIN_DUST.stack(&host, 60).unwrap();
+        held.apply_components(&Compound::from([
+            (
+                "minecraft:lore".into(),
+                Tag::List(vec![text("锡粉仓库", "gray", false)]),
+            ),
+            ("minecraft:custom_data".into(), paper_data("target")),
+        ]))
+        .unwrap();
+        assert!(
+            paper_text(component(&held, "minecraft:custom_name").unwrap())
+                .unwrap()
+                .contains("锡粉")
+        );
+        assert!(similar(&host, &held, &incoming, true));
+        assert!(!ItemResource::of(&incoming).matches(&held));
+        let blocker = ItemStack::new(item_key(&host, "minecraft:stone").unwrap(), 64).unwrap();
+        host.level.block_entity(source).with_items(1);
+        let slots = &mut host
+            .level
+            .block_entity(target)
+            .with_items(4)
+            .items
+            .as_mut()
+            .unwrap()
+            .slots;
+        slots.fill(Some(blocker));
+        let put = |host: &mut FakeHost, pos, stack| {
+            host.level.block_entity(pos).items.as_mut().unwrap().slots[0] = Some(stack);
+        };
+        let slot = |host: &FakeHost, pos| {
+            host.level
+                .block_entity_at(pos)
+                .unwrap()
+                .items
+                .as_ref()
+                .unwrap()
+                .slots[0]
+                .clone()
+        };
+        let deliver = |host: &mut FakeHost, input: &Terminal, stack: &ItemStack| {
+            move_to_first(
+                host,
+                level,
+                input,
+                0,
+                &output,
+                stack,
+                |_, from, to, offered| {
+                    assert_eq!((from, to, offered), (source, target, stack));
+                    true
+                },
+            )
+        };
+        let remaining = incoming.clone().shrink(4).unwrap();
+        let target_resource = ItemResource::of(&held);
+        let full = target_resource.to_stack(64);
+        for input in [&input, &smart_input] {
+            put(&mut host, source, incoming.clone());
+            put(&mut host, target, held.clone());
+            assert_eq!(deliver(&mut host, input, &incoming), 4);
+            assert_eq!(slot(&host, source), Some(remaining.clone()));
+            assert_eq!(slot(&host, target), full);
+        }
+
+        // A stale offer is allowed to attempt the insert, then the insufficient
+        // matching source causes the enclosing transaction to restore both sides.
+        let partly_empty = ItemResource::of(&held).to_stack(58).unwrap();
+        put(&mut host, target, partly_empty.clone());
+        assert_eq!(deliver(&mut host, &input, &incoming), 0);
+        assert_eq!(slot(&host, source), Some(remaining.clone()));
+        assert_eq!(slot(&host, target), Some(partly_empty));
+
+        // Refuse to copy the earlier target's components into a newly emptied slot.
+        put(&mut host, target, held.clone());
+        assert_eq!(
+            move_to_first(
+                &mut host,
+                level,
+                &input,
+                0,
+                &output,
+                &remaining,
+                |host, _, _, _| {
+                    let removed = host
+                        .transaction(|host, tx| {
+                            let storage = level.capability(host, &ITEMS, target, None).unwrap();
+                            Ok::<_, ()>(storage.extract(host, tx, 0, &target_resource, 60))
+                        })
+                        .unwrap();
+                    assert_eq!(removed, 60);
+                    true
+                }
+            ),
+            0
+        );
+        assert_eq!(slot(&host, source), Some(remaining.clone()));
+        assert_eq!(slot(&host, target), Some(held.clone()));
+
+        let zinc = ZINC_DUST.stack(&host, 60).unwrap();
+        put(&mut host, target, zinc.clone());
+        assert_eq!(deliver(&mut host, &input, &remaining), 0);
+        assert_eq!(slot(&host, source), Some(remaining.clone()));
+        assert_eq!(slot(&host, target), Some(zinc));
+
+        host.level
+            .block_entity(target)
+            .items
+            .as_mut()
+            .unwrap()
+            .slots[0] = None;
+        assert_eq!(deliver(&mut host, &input, &remaining), 4);
+        assert_eq!(slot(&host, source), None);
+        assert_eq!(slot(&host, target), Some(remaining));
+
+        let vanilla = |count, batch| {
+            let mut stack = ItemStack::new(incoming.item(), count).unwrap();
+            stack
+                .apply_components(&Compound::from([(
+                    "minecraft:custom_data".into(),
+                    Tag::compound([("witness", Tag::Int(batch))]),
+                )]))
+                .unwrap();
+            stack
+        };
+        let vanilla_source = vanilla(8, 1);
+        let vanilla_target = vanilla(60, 2);
+        put(&mut host, source, vanilla_source.clone());
+        put(&mut host, target, vanilla_target.clone());
+        assert_eq!(deliver(&mut host, &input, &vanilla_source), 0);
+        assert_eq!(slot(&host, source), Some(vanilla_source));
+        assert_eq!(slot(&host, target), Some(vanilla_target));
     }
 
     #[test]
