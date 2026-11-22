@@ -1149,12 +1149,18 @@ fn entry_name(entry: &Entry) -> String {
 fn entry_icon(host: &dyn Host, entry: &Entry, count: u32) -> Option<ItemStack> {
     let mut stack = entry.item.kind.stack(host, count)?;
     if entry.label.is_some() {
-        stack
-            .apply_components(&Compound::from([(
-                "minecraft:custom_name".into(),
-                colored_lore(&entry_name(entry)),
-            )]))
-            .ok()?;
+        let mut components = Compound::from([(
+            "minecraft:custom_name".into(),
+            colored_lore(&entry_name(entry)),
+        )]);
+        if let Some(lore) = crate::industrial_miner::guide_lore(entry.id) {
+            components.insert(
+                "minecraft:lore".into(),
+                Tag::List(lore.iter().map(|line| colored_lore(line)).collect()),
+            );
+            locale::localize_item_components(entry.id, &mut components);
+        }
+        stack.apply_components(&components).ok()?;
     }
     Some(stack)
 }
@@ -1764,9 +1770,35 @@ mod tests {
             pan.ingredients[7].unwrap().kind.material(),
             "minecraft:cauldron"
         );
-        for (id, base, cost) in [
-            ("INDUSTRIAL_MINER", "minecraft:iron_block", 28),
-            ("ADVANCED_INDUSTRIAL_MINER", "minecraft:diamond_block", 36),
+        for (id, base, cost, icon, lore) in [
+            (
+                "INDUSTRIAL_MINER",
+                "minecraft:iron_block",
+                28,
+                "minecraft:golden_pickaxe",
+                &[
+                    "",
+                    "&r工业矿机能够开采其下方 7x7",
+                    "&r的范围内的所有矿物.",
+                    "&r将煤炭或其他燃料放入",
+                    "&r机器的箱子中为它添加燃料.",
+                ][..],
+            ),
+            (
+                "ADVANCED_INDUSTRIAL_MINER",
+                "minecraft:diamond_block",
+                36,
+                "minecraft:diamond_pickaxe",
+                &[
+                    "",
+                    "&r进阶工业矿机能够开采其下方 11x11",
+                    "&r的范围中的所有矿物.",
+                    "&r将燃油或岩浆放入机器的箱子中",
+                    "&r为它添加燃料.",
+                    "",
+                    "&a+ 精准采集",
+                ][..],
+            ),
         ] {
             let miner = lookup(id).unwrap();
             assert_eq!(miner.research.unwrap().cost, cost);
@@ -1781,6 +1813,15 @@ mod tests {
                 "minecraft:blast_furnace"
             );
             assert_eq!(shown.slots[32].as_ref().unwrap().item().id(&host), base);
+            let depicted = shown.slots[RECIPE_OUTPUT_SLOT].as_ref().unwrap();
+            assert_eq!(depicted.item().id(&host), icon);
+            let components = depicted.components().unwrap();
+            let expected = Tag::List(lore.iter().map(|line| colored_lore(line)).collect());
+            assert_eq!(
+                components.as_nbt().get(&"minecraft:lore".into()),
+                Some(&expected)
+            );
+            assert!(crate::items::item_id(depicted).is_none());
             for slot in [21, 23] {
                 let parts = shown.slots[slot].as_ref().unwrap().components().unwrap();
                 assert_eq!(
