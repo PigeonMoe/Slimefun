@@ -6,7 +6,7 @@ license = "GPL-3.0-only"
 publish = false
 
 [package.metadata.horizon]
-sdk = "8a86b12f4a8bf636aa56f18c042fcc10e34198c0"
+sdk = "aead0ee3b3bc40e62f339f2d37298bf8f48369b1"
 
 [lib]
 crate-type = ["rlib", "cdylib"]
