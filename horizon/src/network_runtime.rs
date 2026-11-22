@@ -1794,6 +1794,14 @@ fn move_android(
     }
 }
 
+const MAX_NETWORK_POWER: u32 = i32::MAX as u32;
+
+fn add_power(total: u32, amount: u32) -> u32 {
+    // Paper's flowSafeAddition saturates at Integer.MAX_VALUE. All network
+    // charges are nonnegative, so each contribution can share this bound.
+    total.saturating_add(amount).min(MAX_NETWORK_POWER)
+}
+
 fn tick_energy(
     host: &mut dyn ServerHost,
     level: LevelRef,
@@ -1812,8 +1820,8 @@ fn tick_energy(
     let normal_environment = OnceCell::new();
     let (status, reactors) = host
         .transaction(|host, tx| {
-            let mut available = 0u64;
-            let mut demand = 0u64;
+            let mut available = 0;
+            let mut demand = 0;
             let mut effects = Vec::new();
             let mut surviving = Vec::with_capacity(group.len());
             for &pos in group {
@@ -1821,7 +1829,7 @@ fn tick_energy(
                 let energy = match node.component {
                     Component::ElectricMachine { capacity, .. }
                     | Component::GpsTransmitter { capacity } => {
-                        demand += u64::from(capacity.saturating_sub(charge));
+                        demand = add_power(demand, capacity.saturating_sub(charge));
                         0
                     }
                     Component::Capacitor(capacity) => charge.min(capacity),
@@ -1844,7 +1852,7 @@ fn tick_energy(
                         let Some(production) = production? else {
                             continue;
                         };
-                        charge.min(capacity) + production
+                        add_power(charge.min(capacity), production)
                     }
                     Component::SolarGenerator {
                         day: sun,
@@ -1868,7 +1876,7 @@ fn tick_energy(
                     }
                     _ => 0,
                 };
-                available += u64::from(energy);
+                available = add_power(available, energy);
                 surviving.push(pos);
             }
             for (pos, stored) in capacity_updates(available, active, &surviving) {
@@ -1886,8 +1894,8 @@ fn tick_energy(
             }
             Ok::<_, ()>((
                 Status::Energy {
-                    supply: available,
-                    demand,
+                    supply: u64::from(available),
+                    demand: u64::from(demand),
                 },
                 effects,
             ))
@@ -1953,7 +1961,7 @@ fn set_capacitor_profile(
 }
 
 fn capacity_updates(
-    mut available: u64,
+    mut available: u32,
     active: &BTreeMap<Position, (&Node, u32)>,
     group: &[Position],
 ) -> Vec<(Position, u32)> {
@@ -1964,18 +1972,18 @@ fn capacity_updates(
         if let Component::ElectricMachine { capacity, .. }
         | Component::GpsTransmitter { capacity } = node.component
         {
-            let charge = available.min(u64::from(capacity.saturating_sub(previous))) as u32;
+            let charge = available.min(capacity.saturating_sub(previous));
             if charge != 0 {
                 updates.push((pos, previous + charge));
-                available -= u64::from(charge);
+                available -= charge;
             }
         }
     }
     for &pos in group {
         let (node, previous) = active[&pos];
         if let Component::Capacitor(capacity) = node.component {
-            let stored = available.min(u64::from(capacity)) as u32;
-            available -= u64::from(stored);
+            let stored = available.min(capacity);
+            available -= stored;
             if stored != previous {
                 updates.push((pos, stored));
             }
@@ -1985,8 +1993,8 @@ fn capacity_updates(
     for &pos in group {
         let (node, previous) = active[&pos];
         if let Component::FuelGenerator { capacity, .. } = node.component {
-            let stored = available.min(u64::from(capacity)) as u32;
-            available -= u64::from(stored);
+            let stored = available.min(capacity);
+            available -= stored;
             if stored != previous {
                 updates.push((pos, stored));
             }
@@ -2362,6 +2370,30 @@ mod tests {
     }
 
     #[test]
+    fn paper_network_caps_supply_and_demand_before_charging_consumers() {
+        let first_demand = MAX_NETWORK_POWER - 7;
+        let second_demand = 16;
+        let supply = add_power(MAX_NETWORK_POWER - 11, 99);
+        let demand = add_power(first_demand, second_demand);
+        assert_eq!(supply, MAX_NETWORK_POWER);
+        assert_eq!(demand, MAX_NETWORK_POWER);
+
+        // One large fixture stands in for the other receivers ahead in the net.
+        let mut large_receiver = node("GPS_TRANSMITTER_4");
+        large_receiver.component = Component::GpsTransmitter {
+            capacity: first_demand,
+        };
+        let small_receiver = node("GPS_TRANSMITTER");
+        let first = [2, 70, 0];
+        let second = [3, 70, 0];
+        let active = BTreeMap::from([(first, (&large_receiver, 0)), (second, (&small_receiver, 0))]);
+        assert_eq!(
+            capacity_updates(supply, &active, &[first, second]),
+            [(first, first_demand), (second, 7)]
+        );
+    }
+
+    #[test]
     fn paper_network_edges_are_axial_and_terminals_do_not_relay() {
         let manager = node("CARGO_MANAGER");
         let relay = node("CARGO_NODE");
@@ -2422,7 +2454,7 @@ mod tests {
             vec![(a, 128), (b, 14)]
         );
         assert_eq!(
-            capacity_updates(u64::MAX, &active, &[a, b]),
+            capacity_updates(MAX_NETWORK_POWER, &active, &[a, b]),
             vec![(a, 128), (b, 512)]
         );
     }
