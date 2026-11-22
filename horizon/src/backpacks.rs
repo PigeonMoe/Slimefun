@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use std::{
-    collections::{BTreeMap, BTreeSet},
-    sync::Mutex,
+    collections::BTreeMap,
+    sync::{LazyLock, Mutex},
 };
 
 use mod_api::{
     AttachmentCodec, AttachmentType, ComponentId, Compound, ConfigFileError, ConfigPath, Hand,
-    Holder, Host, HostTransaction, ITEM_ITEMS, ItemPlace, ItemResource, ItemStack, MenuClosedEvent,
-    MenuReplace, MenuSlotPlace, PermissionLevel, PlayerRef, Registrar, ResourceHandler, ServerHost,
-    Tag, Text, Transaction,
+    Holder, Host, HostTransaction, ITEM_ITEMS, Identifier, ItemPlace, ItemResource, ItemStack,
+    MenuClosedEvent, MenuReplace, MenuSlotPlace, PermissionLevel, PlayerRef, Registrar,
+    ResourceHandler, ServerHost, Tag, Text, Transaction,
 };
 
 use crate::{
@@ -774,6 +774,9 @@ static RECORDS: AttachmentType<Compound> = AttachmentType {
     copy_on_death: false,
     sync: false,
 };
+static RECORDS_ID: LazyLock<Identifier> = LazyLock::new(|| {
+    Identifier::parse("slimefun:backpacks").expect("the Slimefun backpack attachment ID")
+});
 
 pub(crate) struct GlobalBackpacks;
 
@@ -856,7 +859,7 @@ pub(crate) enum CaptureBags<'a> {
 }
 
 pub(crate) fn visit_snapshot_bags(
-    host: &mut dyn ServerHost,
+    host: &dyn ServerHost,
     owner: u128,
     bags: CaptureBags<'_>,
     limit: usize,
@@ -869,18 +872,35 @@ pub(crate) fn visit_snapshot_bags(
     if crate::pm_profile::committed_generation(host, owner)? != generation {
         return Err("采集期间背包档案版本已更换。".into());
     }
-    let live = snapshot_bag_numbers(host, owner, generation, limit)?;
+    let prefix = storage_prefix(owner, generation);
+    let records = host
+        .server_attachment_entries(&RECORDS_ID, &prefix, limit as u32)
+        .map_err(|_| "无法读取全局背包存档。")?;
+    let mut live = BTreeMap::new();
+    for (key, record) in records {
+        let number = key
+            .to_string()
+            .ok()
+            .and_then(|key| key.strip_prefix(&prefix).and_then(number))
+            .ok_or("存档中有无效的背包编号。")?;
+        let Tag::Compound(record) = record else {
+            return Err("无法读取存档中的背包。".into());
+        };
+        if live.insert(number, record).is_some() {
+            return Err("存档中有重复的背包编号。".into());
+        }
+    }
     let archived = paper
         .map(|paper| archived_records(paper, owner))
         .transpose()?;
     let new_bags = archived.as_ref().map_or(0, |bags| {
-        bags.keys().filter(|id| !live.contains(*id)).count()
+        bags.keys().filter(|id| !live.contains_key(*id)).count()
     });
     if live.len() + new_bags > limit {
         return Err("Slimefun 同步档案的背包数量超出允许范围。".into());
     }
     for (id, row) in archived.into_iter().flatten() {
-        if live.contains(&id) {
+        if live.contains_key(&id) {
             continue;
         }
         let size = archived_size(row).ok_or("存档中的背包容量无效。")?;
@@ -895,47 +915,10 @@ pub(crate) fn visit_snapshot_bags(
             },
         )?;
     }
-    for id in live {
-        let id = BackpackId { owner, number: id };
-        let bag = load_bag(host, id)?.ok_or("无法读取存档中的背包。")?;
-        visit(host, id.number, bag)?;
+    for (id, record) in live {
+        visit(host, id, Backpack::from_nbt(host, &record)?)?;
     }
     Ok(())
-}
-
-fn snapshot_bag_numbers(
-    host: &mut dyn ServerHost,
-    owner: u128,
-    generation: Option<u128>,
-    limit: usize,
-) -> Result<BTreeSet<u32>, String> {
-    let prefix = storage_prefix(owner, generation);
-    let scan = |records: &Compound| -> Result<BTreeSet<u32>, String> {
-        let mut ids = BTreeSet::new();
-        for key in records.keys() {
-            let Ok(key) = key.to_string() else { continue };
-            let Some(suffix) = key.strip_prefix(&prefix) else {
-                continue;
-            };
-            let id = number(suffix).ok_or("存档中有无效的背包编号。")?;
-            if ids.len() == limit {
-                return Err("Slimefun 同步档案的背包数量超出允许范围。".into());
-            }
-            ids.insert(id);
-        }
-        Ok(ids)
-    };
-    if let Some(ids) = RECORDS
-        .with_decoded(host, Holder::Server, |data| data.map(&scan))
-        .map_err(|_| "无法读取全局背包存档。")?
-    {
-        return ids;
-    }
-    RECORDS
-        .get_existing(host, Holder::Server)
-        .map_err(|_| "无法读取全局背包存档。")?
-        .as_ref()
-        .map_or_else(|| Ok(BTreeSet::new()), scan)
 }
 
 /// Paper assigns the next ID after the last backpack in the owner's profile.

@@ -9,7 +9,7 @@ use std::{
 };
 
 use mod_api::{
-    Compound, ConfigFileError, ConfigPath, Host, Identifier, ItemStack, PlayerRef, ServerHost, Tag,
+    Compound, ConfigFileError, ConfigPath, Host, Identifier, ItemStack, ServerHost, Tag,
     TransferProfileReadError,
 };
 use sha2::{Digest, Sha256};
@@ -462,13 +462,17 @@ fn stage_apply_with_decoder(
 /// lifecycle and prepared the current online player for transfer. The caller
 /// holds the interaction lock and keeps it through capture of other sections.
 pub(crate) fn capture_prepared(
-    host: &mut dyn ServerHost,
-    player: PlayerRef,
+    host: &dyn ServerHost,
+    owner: u128,
+    id: &Identifier,
+    schema: u32,
 ) -> Result<Vec<u8>, String> {
-    let owner = player.uuid();
-    if host.player(owner) != Some(player) {
-        return Err("只能采集当前在线会话的 Slimefun 档案。".into());
+    if id != &*SECTION || schema != 1 {
+        return Err("不支持此 Slimefun 同步档案版本。".into());
     }
+    let Some(player) = host.player(owner) else {
+        return Err("只能采集当前在线会话的 Slimefun 档案。".into());
+    };
     let data = player
         .persistent_data(host)
         .ok_or("无法读取当前玩家的研究档案。")?;
@@ -504,7 +508,7 @@ pub(crate) fn capture_prepared(
 }
 
 fn capture_state(
-    host: &mut dyn ServerHost,
+    host: &dyn ServerHost,
     owner: u128,
     data: &Compound,
     mut profile: Profile<'_>,
@@ -603,6 +607,34 @@ mod tests {
         assert_eq!(entries.get(&"unrelated_root".into()), None);
         assert!(stage_received_profile(&host, OWNER, &SECTION, 2, &candidate, &bytes).is_err());
         assert!(stage_received_profile(&host, OWNER + 1, &SECTION, 1, &candidate, &bytes).is_err());
+    }
+
+    #[test]
+    fn source_capture_requires_the_current_owner_and_exports_live_research() {
+        let mut host = FakeHost::new();
+        let paper = Profile::decode(OWNER, PAPER_PROFILE).unwrap();
+        host.transfer_profiles
+            .insert((OWNER, (*SECTION).clone()), (41, PAPER_PROFILE.to_vec()));
+        assert!(capture_prepared(&host, OWNER, &SECTION, 1).is_err());
+        let level = host.level.level();
+        let player = host.players.join(OWNER, 1, level);
+        player.persistent_data = Compound::from([(
+            "PlayerPersisted".into(),
+            Tag::compound([("slimefun:advanced_circuit_board", Tag::Byte(1))]),
+        )]);
+        assert!(capture_prepared(&host, OWNER, &SECTION, 2).is_err());
+        let encoded = capture_prepared(&host, OWNER, &SECTION, 1).unwrap();
+        let captured = Profile::decode(OWNER, &encoded).unwrap();
+        assert_eq!(
+            captured.researches,
+            BTreeSet::from([
+                "addon:research".into(),
+                "slimefun:advanced_circuit_board".into()
+            ]),
+        );
+        assert!(captured.legacy_researches.is_empty());
+        assert!(captured.guide_issued);
+        assert_eq!(captured.backpacks, paper.backpacks);
     }
 
     #[test]
@@ -860,7 +892,7 @@ mod tests {
             ]),
         )]);
         let output = capture_state(
-            &mut host,
+            &host,
             OWNER,
             &data,
             restored,
@@ -919,7 +951,7 @@ mod tests {
         remember_live_bag(&mut host, OWNER, 19, contents);
 
         let output = capture_state(
-            &mut host,
+            &host,
             OWNER,
             &Compound::new(),
             baseline,
@@ -941,7 +973,7 @@ mod tests {
 
     #[test]
     fn pending_paid_research_and_unreadable_archived_items_cannot_be_captured() {
-        let mut host = FakeHost::new();
+        let host = FakeHost::new();
         let pending = Compound::from([(
             "PlayerPersisted".into(),
             Tag::compound([(
@@ -951,7 +983,7 @@ mod tests {
         )]);
         let archived = || Profile::decode(OWNER, PAPER_PROFILE).unwrap();
         let pending_result = capture_state(
-            &mut host,
+            &host,
             OWNER,
             &pending,
             archived(),
@@ -961,7 +993,7 @@ mod tests {
         );
         assert!(pending_result.unwrap_err().contains("已付费的研究"));
         let invalid_bag = capture_state(
-            &mut host,
+            &host,
             OWNER,
             &Compound::new(),
             archived(),
@@ -974,7 +1006,7 @@ mod tests {
 
     #[test]
     fn a_normalized_paper_profile_is_the_bag_baseline_when_present() {
-        let mut host = FakeHost::new();
+        let host = FakeHost::new();
         let normalized = format!(
             "format = 1\nplayer = '{OWNER:032x}'\npaper_profile = 'original'\n\
              [[backpacks]]\nid = 31\nsize = 9\ninventory_slots = 0\npaper_items = []\n"
@@ -983,7 +1015,7 @@ mod tests {
         .unwrap();
         let archived = Profile::decode(OWNER, PAPER_PROFILE).unwrap();
         let output = capture_state(
-            &mut host,
+            &host,
             OWNER,
             &Compound::new(),
             archived,

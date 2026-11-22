@@ -1656,6 +1656,19 @@ impl Hooks for Slimefun {
         ancient_altar::item_expire(event);
     }
 
+    fn player_transfer_profile_capture(
+        &self,
+        host: &dyn ServerHost,
+        event: &mut mod_api::PlayerTransferProfileCaptureEvent<'_>,
+    ) {
+        *event.reply = Some(pm_profile::capture_prepared(
+            host,
+            event.owner,
+            event.id,
+            event.schema,
+        ));
+    }
+
     fn player_transfer_profile_stage(
         &self,
         host: &dyn ServerHost,
