@@ -268,9 +268,13 @@ fn paper_lore(stack: &ItemStack) -> Option<&[Tag]> {
 }
 
 pub(crate) fn paper_text(tag: &Tag) -> Option<String> {
+    render_paper_text(tag, false)
+}
+
+fn render_paper_text(tag: &Tag, include_references: bool) -> Option<String> {
     let mut output = String::new();
     let mut formatted = false;
-    append_paper_text(tag, &mut output, &mut formatted, 0)?;
+    append_paper_text(tag, &mut output, &mut formatted, include_references, 0)?;
     Some(output)
 }
 
@@ -280,21 +284,30 @@ fn append_paper_text(
     tag: &Tag,
     output: &mut String,
     formatted: &mut bool,
+    include_references: bool,
     depth: usize,
 ) -> Option<()> {
     if depth >= 32 {
         return None;
     }
-    let (literal, color) = match tag {
+    let (literal, color, reference) = match tag {
         Tag::List(children) => {
             for child in children {
-                append_paper_text(child, output, formatted, depth + 1)?;
+                append_paper_text(child, output, formatted, include_references, depth + 1)?;
             }
             return Some(());
         }
-        Tag::String(literal) => (literal.to_string().ok()?, None),
+        Tag::String(literal) => (literal.to_string().ok()?, None, false),
         Tag::Compound(_) => {
-            let Tag::String(literal) = tag.get("text")? else {
+            let (contents, reference) = match tag.get("text") {
+                Some(contents) => (contents, false),
+                // Paper compares the unresolved key or selector pattern in menu filters.
+                None if include_references => {
+                    (tag.get("keybind").or_else(|| tag.get("selector"))?, true)
+                }
+                None => return None,
+            };
+            let Tag::String(literal) = contents else {
                 return None;
             };
             let color = match tag.get("color") {
@@ -302,7 +315,7 @@ fn append_paper_text(
                 None => None,
                 _ => return None,
             };
-            (literal.to_string().ok()?, color)
+            (literal.to_string().ok()?, color, reference)
         }
         _ => return None,
     };
@@ -348,7 +361,7 @@ fn append_paper_text(
             }
         }
         *formatted = true;
-    } else if !literal.is_empty() && *formatted {
+    } else if *formatted && (!literal.is_empty() || reference) {
         output.push_str("§r");
         *formatted = false;
     }
@@ -367,19 +380,23 @@ fn append_paper_text(
     }
     output.push_str(&literal);
     if let Some(extra) = tag.get("extra") {
-        append_paper_text(extra, output, formatted, depth + 1)?;
+        append_paper_text(extra, output, formatted, include_references, depth + 1)?;
     }
     Some(())
 }
 
 fn same_text(a: &Tag, b: &Tag) -> bool {
-    a == b || matches!((paper_text(a), paper_text(b)), (Some(a), Some(b)) if a == b)
+    a == b
+        || matches!(
+            (render_paper_text(a, true), render_paper_text(b, true)),
+            (Some(a), Some(b)) if a == b
+        )
 }
 
 fn same_lore(a: &ItemStack, b: &ItemStack) -> bool {
     let lines = |line: &&Tag| !crate::soulbound_rune::is_soulbound_lore(line);
     fn comparable(line: &Tag) -> Result<String, &Tag> {
-        paper_text(line).ok_or(line)
+        render_paper_text(line, true).ok_or(line)
     }
     match (paper_lore(a), paper_lore(b)) {
         (Some(a), Some(b)) => a
@@ -1372,6 +1389,28 @@ mod tests {
             &host,
             &make(name, crate::items::text("Restricted", "aqua", false))
         ));
+
+        let literal = |text: &str| Tag::String(text.into());
+        let colored_lore = |contents_field, color| {
+            Tag::compound([
+                (contents_field, literal("warehouse.control.key")),
+                ("color", literal(color)),
+                ("extra", Tag::List(vec![literal(" 后缀")])),
+            ])
+        };
+        let original = make(
+            crate::items::text("@s", "gray", false),
+            colored_lore("text", "aqua"),
+        );
+        let filter = restored_filter(&host, &original);
+        let selector = Tag::compound([("selector", literal("@s")), ("color", literal("gray"))]);
+        let keybind = colored_lore("keybind", "aqua");
+        assert_eq!(
+            render_paper_text(&keybind, true).as_deref(),
+            Some("§bwarehouse.control.key§r 后缀")
+        );
+        assert!(filter.accepts(&host, &make(selector.clone(), keybind)));
+        assert!(!filter.accepts(&host, &make(selector, colored_lore("keybind", "gray"))));
     }
 
     #[test]
