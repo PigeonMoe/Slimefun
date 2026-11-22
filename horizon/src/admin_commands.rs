@@ -4,13 +4,44 @@ use std::{collections::BTreeMap, sync::Mutex};
 
 use mod_api::{
     CommandArgumentValue, CommandInvocation, CommandSource, Host, HostTransaction, ItemStack,
-    PlayerRef, ServerHost, Text,
+    PlayerRef, Players, ServerHost, Text,
 };
 
 use crate::{factory::charging_bench, guide, items, recipes, research, ticker_policy::Tickers};
 
-fn operator(host: &dyn Host, player: PlayerRef) -> bool {
+pub(crate) fn operator(host: &dyn Host, player: PlayerRef) -> bool {
     player.permission_level(host).is_some_and(|level| level > 0)
+}
+
+pub(crate) fn teleporter(
+    host: &mut dyn ServerHost,
+    source: &CommandSource,
+    command: &CommandInvocation,
+    transport: &crate::gps_transport::Transport,
+) -> Result<(), String> {
+    let CommandSource::Player { player, .. } = *source else {
+        return Err("这个指令只能在游戏内使用。".into());
+    };
+    if !operator(host, player) {
+        return Err("你没有权限使用此命令。".into());
+    }
+    let owner = waypoint_owner(host.players(), player.uuid(), command.argument("target"))?;
+    transport
+        .open_admin(host, player, owner)
+        .map_err(str::to_owned)
+}
+
+fn waypoint_owner(
+    players: &dyn Players,
+    caller: u128,
+    target: Option<&CommandArgumentValue>,
+) -> Result<u128, String> {
+    let Some(CommandArgumentValue::String(name)) = target else {
+        return Ok(caller);
+    };
+    players
+        .known_player_uuid(name)
+        .ok_or_else(|| format!("未知玩家：{name}"))
 }
 
 pub(crate) fn charge(host: &mut dyn ServerHost, source: &CommandSource) -> &'static str {
@@ -328,10 +359,17 @@ mod tests {
             )));
             assert!(commands.contains(&Command::new(&format!("{alias} stats"))));
             assert!(commands.contains(&Command::op(&format!("{alias} stats <target:word>"), 1)));
+            assert!(commands.contains(&Command::op(&format!("{alias} versions"), 1)));
+            assert!(commands.contains(&Command::op(
+                &format!("{alias} teleporter [target:word]"),
+                1,
+            )));
 
             for (subcommand, arguments, source, feedback) in [
                 ("charge", vec![], &console, "只有玩家可以为手中的物品充电。"),
                 ("give", vec![], &function, "你没有权限使用此命令。"),
+                ("versions", vec![], &function, "你没有权限使用此命令。"),
+                ("teleporter", vec![], &console, "这个指令只能在游戏内使用。"),
                 (
                     "give",
                     vec![],
@@ -367,6 +405,25 @@ mod tests {
                 assert_eq!(host.commands.feedback.pop(), Some(Text::literal(feedback)));
             }
         }
+    }
+
+    #[test]
+    fn a_named_teleporter_loads_the_existing_offline_account_uuid() {
+        struct AccountCache;
+        impl Players for AccountCache {
+            fn known_player_uuid(&self, name: &str) -> Option<u128> {
+                name.eq_ignore_ascii_case("PreviousGuest").then_some(42)
+            }
+        }
+
+        let named = CommandArgumentValue::String("previousguest".into());
+        assert_eq!(waypoint_owner(&AccountCache, 15, None), Ok(15));
+        assert_eq!(waypoint_owner(&AccountCache, 15, Some(&named)), Ok(42));
+        let unknown = CommandArgumentValue::String("NoMatchingAccount".into());
+        assert_eq!(
+            waypoint_owner(&AccountCache, 15, Some(&unknown)),
+            Err("未知玩家：NoMatchingAccount".into())
+        );
     }
 
     #[test]

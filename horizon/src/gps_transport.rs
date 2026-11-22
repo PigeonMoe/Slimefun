@@ -217,6 +217,7 @@ pub(crate) const CRAFTING: &[CraftingRecipe] = &[
 static PORTAL: OnceLock<ParticleKey> = OnceLock::new();
 const INTERVAL: i64 = 10;
 const ARRIVAL_TIMEOUT: i64 = 1_200;
+const ADMIN_COMPLEXITY: u32 = 999_999_999;
 
 pub(crate) fn register(registrar: &mut dyn Registrar) {
     let _ = PORTAL.set(registrar.particle_key("minecraft:portal"));
@@ -322,14 +323,15 @@ impl Transport {
         });
         if paid.is_ok() {
             // Paper takes the charge before opening a portable menu.
+            let complexity = networks.lock().unwrap().gps_complexity(player.uuid());
             self.open(
-                networks,
                 host,
                 player,
                 level,
                 player.uuid(),
                 [x, y - 1, z],
                 None,
+                complexity,
             );
         }
         true
@@ -343,15 +345,42 @@ impl Transport {
         self.activations.lock().unwrap().entry(key).or_insert(pos);
     }
 
+    pub(crate) fn open_admin(
+        &self,
+        host: &mut dyn ServerHost,
+        player: PlayerRef,
+        owner: u128,
+    ) -> Result<(), &'static str> {
+        let level = player
+            .entity()
+            .level(host)
+            .ok_or("无法读取你所在的世界。")?;
+        let [x, y, z] = player
+            .entity()
+            .block_position(host)
+            .ok_or("无法读取你的当前位置。")?;
+        let below = y.checked_sub(1).ok_or("无法读取你的当前位置。")?;
+        self.open(
+            host,
+            player,
+            level,
+            owner,
+            [x, below, z],
+            None,
+            ADMIN_COMPLEXITY,
+        );
+        Ok(())
+    }
+
     fn open(
         &self,
-        networks: &Mutex<Networks>,
         host: &mut dyn ServerHost,
         player: PlayerRef,
         level: LevelRef,
         owner: u128,
         origin: Position,
         plate: Option<Position>,
+        complexity: u32,
     ) {
         let uuid = player.uuid();
         if self.journeys.lock().unwrap().contains_key(&uuid)
@@ -367,7 +396,6 @@ impl Transport {
             f64::from(origin[1]) + 2.0,
             f64::from(origin[2]) + 0.5,
         ];
-        let complexity = networks.lock().unwrap().gps_complexity(owner);
         let points = match gps_waypoints::import(host, owner)
             .and_then(|()| gps_waypoints::load(host, owner))
         {
@@ -387,18 +415,26 @@ impl Transport {
         for slot in VISIBLE {
             items[slot] = None;
         }
-        items[4] = gps_controls::world_icon(host, "Select a Waypoint");
+        items[4] = gps_controls::world_icon(host, "&e你的传送点");
         let mut entries = BTreeMap::new();
         for (slot, (id, waypoint)) in VISIBLE.into_iter().zip(points.entries) {
             let time = time_steps(complexity, source, &dimension, &waypoint.location);
-            let mut lore = gps_controls::location_lines(&waypoint.location);
-            lore.push(format!("Time: {:.1}s", f64::from(time) / 2.0));
-            lore.push("Click to teleport".into());
+            let [x, y, z] = waypoint.location.position;
+            let lore = [
+                String::new(),
+                format!("&8⇨ &7世界：&f{}", waypoint.location.dimension),
+                format!("&8⇨ &7X: &f{x:?}"),
+                format!("&8⇨ &7Y: &f{y:?}"),
+                format!("&8⇨ &7Z: &f{z:?}"),
+                format!("&8⇨ &7预计时间：&f{:.1}s", f64::from(time) / 2.0),
+                String::new(),
+                "&8⇨ &c单击传送".into(),
+            ];
             items[slot] = gps_controls::waypoint_icon(host, &waypoint, &lore);
             entries.insert(slot, (id, waypoint));
         }
 
-        let mut title = Text::literal("Teleporter");
+        let mut title = Text::literal("传送器");
         title.style.color = Some("dark_aqua".into());
         let opened = match plate {
             Some(plate) => host.open_inventory_menu_at(
@@ -530,7 +566,8 @@ impl Transport {
                 .lock()
                 .unwrap()
                 .insert((dimension.clone(), uuid), plate);
-            self.open(networks, host, player, level, owner, origin, Some(plate));
+            let complexity = networks.lock().unwrap().gps_complexity(owner);
+            self.open(host, player, level, owner, origin, Some(plate), complexity);
         }
 
         let due: Vec<_> = self
@@ -724,7 +761,7 @@ fn progress(
     title(
         host,
         player,
-        "Teleporting...",
+        "传送中...",
         format!("{progress}%"),
         [0, 60, 0],
     );
@@ -733,13 +770,13 @@ fn progress(
 }
 
 fn arrived(host: &mut dyn ServerHost, player: PlayerRef, level: LevelRef, at: [f64; 3]) {
-    title(host, player, "Teleported", "100%", [20, 60, 20]);
+    title(host, player, "传送成功!", "100%", [20, 60, 20]);
     particles(host, level, [at[0], at[1] + 1.0, at[2]], 200);
     play(host, player, "minecraft:block.beacon.activate", 1.0);
 }
 
 fn cancelled(host: &mut dyn ServerHost, player: PlayerRef) {
-    title(host, player, "Teleport cancelled", "40%", [20, 60, 20]);
+    title(host, player, "传送被取消!", "40%", [20, 60, 20]);
 }
 
 fn particles(host: &mut dyn ServerHost, level: LevelRef, at: [f64; 3], count: i32) {
@@ -812,6 +849,10 @@ mod tests {
         );
         assert_eq!(
             time_steps(u32::MAX, source, "minecraft:the_end", &destination),
+            1
+        );
+        assert_eq!(
+            time_steps(ADMIN_COMPLEXITY, source, "minecraft:the_end", &destination),
             1
         );
     }

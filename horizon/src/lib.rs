@@ -107,6 +107,7 @@ mod teleposition_scroll;
 mod thermal_machines;
 mod ticker_policy;
 mod universal_storage;
+mod versions;
 mod villager_rune;
 mod zombie_pills;
 
@@ -152,6 +153,7 @@ struct Slimefun {
     gps: gps_controls::Controls,
     guide: guide::Guide,
     research_ranks: admin_commands::ResearchRanks,
+    versions: versions::Versions,
     androids: android_ui::Menus,
     butcher_androids: android_butchery::Butchers,
     holograms: hologram_projector::Editors,
@@ -199,6 +201,7 @@ impl Default for Slimefun {
             gps: gps_controls::Controls::default(),
             guide: guide::Guide::default(),
             research_ranks: admin_commands::ResearchRanks::default(),
+            versions: versions::Versions::default(),
             androids: android_ui::Menus::default(),
             butcher_androids: android_butchery::Butchers::default(),
             holograms: hologram_projector::Editors::default(),
@@ -461,6 +464,7 @@ impl Slimefun {
 impl Hooks for Slimefun {
     fn register(&self, registrar: &mut dyn mod_api::Registrar, context: &mod_api::RegistrationContext) {
         lifeskills::register(context);
+        self.versions.register(context);
         let dispenser = registrar.item_key("minecraft:dispenser");
         registrar.item_part(dispenser, block_placer::Placement);
         let chest = registrar.item_key("minecraft:chest");
@@ -942,6 +946,10 @@ impl Hooks for Slimefun {
             Command::new("sf stats"),
             Command::op("slimefun stats <target:word>", 1),
             Command::op("sf stats <target:word>", 1),
+            Command::op("slimefun versions", 1),
+            Command::op("sf versions", 1),
+            Command::op("slimefun teleporter [target:word]", 1),
+            Command::op("sf teleporter [target:word]", 1),
             Command::new("slimefun recipe <item:text>"),
             Command::new("sf recipe <item:text>"),
             Command::new("slimefun research <key:word>"),
@@ -1036,6 +1044,26 @@ impl Hooks for Slimefun {
                 vec![admin_commands::give(host, event.source, event.command, drop_excess)]
             }
             Some("stats") => self.research_ranks.stats(host, event.source, event.command),
+            Some("versions") => {
+                let allowed = match *event.source {
+                    CommandSource::Player { player, .. } => admin_commands::operator(host, player),
+                    _ => event.source.permission().level() > 0,
+                };
+                if !allowed {
+                    vec!["你没有权限使用此命令。".into()]
+                } else {
+                    self.versions.report(host);
+                    return Flow::Cancel;
+                }
+            }
+            Some("teleporter") => {
+                if let Err(message) =
+                    admin_commands::teleporter(host, event.source, event.command, &self.transport)
+                {
+                    let _ = host.commands().feedback(Text::literal(message));
+                }
+                return Flow::Cancel;
+            }
             Some("life_menu") => {
                 let (CommandSource::Console { .. }, Some(CommandArgumentValue::Player(target))) =
                     (&*event.source, event.command.argument("target"))
