@@ -2,7 +2,7 @@
 
 use mod_api::{
     Flow, Host, Identifier, ItemStack, LivingEntityUseItemFinishEvent,
-    LivingEntityUseItemStartEvent, ServerHost, Text,
+    LivingEntityUseItemStartEvent, ServerHost, Tag, Text,
 };
 
 use crate::{
@@ -336,6 +336,13 @@ const MEAT_JERKY_ITEMS: [Kind; 6] = [
 ];
 const DEFAULT_JERKY_SATURATION: i32 = 6;
 
+pub(crate) fn jerky_lore(id: &str) -> Option<Tag> {
+    MEAT_JERKY_ITEMS.iter().any(|jerky| jerky.id() == id).then(|| {
+        use crate::hologram_projector::colored_lore;
+        Tag::List(vec![colored_lore(""), colored_lore("&fExtra saturating!")])
+    })
+}
+
 pub(crate) const JERKY_CONFIG: &str = r#"
 [items.BEEF_JERKY]
 saturation-level = 6
@@ -550,6 +557,23 @@ pub(crate) fn dry_plant(host: &dyn Host, inputs: &[Option<ItemStack>]) -> Option
 #[cfg(test)]
 mod jerky_tests {
     use super::*;
+
+    #[test]
+    fn dried_meats_keep_the_paper_description_and_localize_it_on_new_stacks() {
+        use crate::hologram_projector::colored_lore;
+        let mut host = mod_api::testing::FakeHost::new();
+        host.registries
+            .resolve_items(MEAT_JERKY_ITEMS.map(|kind| Identifier::parse(kind.material()).unwrap()))
+            .unwrap();
+        let original = Tag::List(vec![colored_lore(""), colored_lore("&fExtra saturating!")]);
+        let localized = Tag::List(vec![colored_lore(""), colored_lore("&r横扫饥饿!")]);
+        for kind in MEAT_JERKY_ITEMS {
+            assert_eq!(jerky_lore(kind.id()), Some(original.clone()));
+            let stack = kind.stack(&host, 1).unwrap();
+            let components = stack.components().unwrap().as_nbt();
+            assert_eq!(components.get(&"minecraft:lore".into()), Some(&localized));
+        }
+    }
 
     #[test]
     fn paper_jerky_config_validates_each_meat_and_keeps_the_vanilla_food_cap() {

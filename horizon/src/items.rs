@@ -195,6 +195,9 @@ impl SlimefunItem {
         if let Some(lore) = crate::machine_lore::lore(self.id) {
             components.insert("minecraft:lore".into(), lore);
         }
+        if let Some(lore) = crate::thermal_machines::jerky_lore(self.id) {
+            components.insert("minecraft:lore".into(), lore);
+        }
         if let Some(lore) = crate::android_items::lore(self.id) {
             components.insert("minecraft:lore".into(), lore);
         }
