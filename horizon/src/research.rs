@@ -41,6 +41,7 @@ pub(crate) fn unlock(host: &mut dyn ServerHost, player: PlayerRef, research: &Re
 
 const PENDING: &str = "slimefun:pending_research";
 const SYNC_GUIDE_ISSUED: &str = "slimefun:sync_guide_issued";
+const SYNC_PROFILE_REPLACED: &str = "slimefun:sync_profile_replaced";
 pub(crate) const SKIP_LEGACY_IMPORT: &str = "slimefun:skip_legacy_research_import";
 const UPDATE_ERROR: &str = "远古工艺无法更新你的研究数据。";
 
@@ -292,6 +293,9 @@ pub(crate) fn import_synchronized_profile(host: &mut dyn ServerHost, player: Pla
     let Some(data) = player.persistent_data(host) else {
         return;
     };
+    if has_synchronized_replacement(&data) {
+        return;
+    }
     let profile = crate::pm_profile::with_archive(host, player.uuid(), |profile| {
         Ok((profile.guide_issued, profile.slimefun_researches()))
     });
@@ -313,6 +317,9 @@ fn merge_synchronized_profile(
     guide_issued: bool,
     researches: &BTreeSet<String>,
 ) -> Option<Compound> {
+    if has_synchronized_replacement(&data) {
+        return None;
+    }
     let saved = saved_data(&mut data)?;
     let skip = saved.get(&SKIP_LEGACY_IMPORT.into()) == Some(&Tag::Byte(1));
     let mut changed = false;
@@ -323,6 +330,12 @@ fn merge_synchronized_profile(
         changed |= grant_shared(&mut data, researches).is_ok_and(|learned| !learned.is_empty());
     }
     changed.then_some(data)
+}
+
+fn has_synchronized_replacement(data: &Compound) -> bool {
+    data.get(&PERSISTED.into())
+        .and_then(|saved| saved.get(SYNC_PROFILE_REPLACED))
+        == Some(&Tag::Byte(1))
 }
 
 pub(crate) fn sync_guide_already_issued(host: &dyn Host, player: PlayerRef) -> bool {
@@ -349,6 +362,10 @@ pub(crate) fn stage_replacement(
         }
     }
     saved.remove(&PENDING.into());
+    // The coordinator publishes these flags with the authoritative replacement.
+    // A local import must not restore research or guide state from an older archive.
+    saved.insert(SYNC_PROFILE_REPLACED.into(), Tag::Byte(1));
+    saved.insert(SKIP_LEGACY_IMPORT.into(), Tag::Byte(1));
     if guide_issued {
         saved.insert(SYNC_GUIDE_ISSUED.into(), Tag::Byte(1));
     } else {
@@ -401,6 +418,9 @@ fn legacy_research_ids<'a>(uuid: &str, text: &'a str) -> Option<Vec<&'a str>> {
 fn merge_import(mut data: Compound, uuid: &str, text: &str) -> Option<Compound> {
     let keys = legacy_research_ids(uuid, text)?;
     let saved = saved_data(&mut data)?;
+    if saved.get(&SKIP_LEGACY_IMPORT.into()) == Some(&Tag::Byte(1)) {
+        return None;
+    }
     let mut changed = false;
     for line in keys {
         let old = saved.insert(line.into(), Tag::Byte(1));
@@ -472,6 +492,21 @@ mod tests {
             Some(&Tag::Byte(1))
         );
         assert!(merge_import(merged, ID, IMPORT).is_none());
+    }
+
+    #[test]
+    fn a_transferred_replacement_ignores_both_older_local_imports() {
+        let old_research = BTreeSet::from(["slimefun:lumps".to_owned()]);
+        let old = merge_synchronized_profile(Compound::new(), true, &old_research).unwrap();
+        let replaced = stage_replacement(&old, &BTreeSet::new(), false).unwrap();
+
+        assert!(!unlocked(&replaced, &LUMPS));
+        assert_eq!(
+            replaced.get(&PERSISTED.into()).unwrap().get(SYNC_GUIDE_ISSUED),
+            None
+        );
+        assert!(merge_import(replaced.clone(), ID, IMPORT).is_none());
+        assert!(merge_synchronized_profile(replaced, true, &old_research).is_none());
     }
 
     #[test]
