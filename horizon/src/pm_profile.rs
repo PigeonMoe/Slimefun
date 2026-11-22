@@ -14,7 +14,10 @@ use mod_api::{
 };
 use sha2::{Digest, Sha256};
 
-use crate::{backpacks, research};
+use crate::{
+    backpacks::{self, CaptureBags},
+    research,
+};
 
 const MAX_PROFILE_BYTES: usize = 8 * 1024 * 1024;
 const MAX_ITEM_BYTES: usize = 1024 * 1024;
@@ -58,6 +61,15 @@ pub(crate) fn with_committed_profile<T>(
     generation: u128,
     read: impl FnOnce(&Profile<'_>) -> Result<T, String>,
 ) -> Result<T, String> {
+    let profile = committed_profile(host, owner, generation)?;
+    read(&profile)
+}
+
+fn committed_profile(
+    host: &dyn ServerHost,
+    owner: u128,
+    generation: u128,
+) -> Result<Arc<Profile<'static>>, String> {
     // Callers selected the active generation through the host. The engine owns
     // the immutable payload, so many slot reads can share one validated decode.
     let cached = COMMITTED_CACHE
@@ -67,7 +79,7 @@ pub(crate) fn with_committed_profile<T>(
         .filter(|cached| cached.owner == owner && cached.generation == generation)
         .map(|cached| Arc::clone(&cached.profile));
     if let Some(profile) = cached {
-        return read(&profile);
+        return Ok(profile);
     }
     let bytes = host
         .player_transfer_profile_payload(owner, &SECTION, generation)
@@ -78,14 +90,14 @@ pub(crate) fn with_committed_profile<T>(
         generation,
         profile: Arc::clone(&profile),
     });
-    read(&profile)
+    Ok(profile)
 }
 
 pub(crate) fn clear_committed_cache() {
     *COMMITTED_CACHE.lock().unwrap() = None;
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(crate) struct Profile<'a> {
     pub(crate) guide_issued: bool,
     pub(crate) researches: BTreeSet<String>,
@@ -379,6 +391,24 @@ impl StagedProfile {
 /// for its claimed revision before interaction, fence old bag viewers and paid
 /// study callbacks, and bypass legacy player/tome/bag imports for the owner.
 /// Server-local GPS data stays outside this section and is loaded independently.
+pub(crate) fn stage_received_profile(
+    host: &dyn ServerHost,
+    owner: u128,
+    id: &Identifier,
+    schema: u32,
+    candidate: &Compound,
+    payload: &[u8],
+) -> Result<Compound, String> {
+    if id != &*SECTION || schema != 1 {
+        return Err("不支持此 Slimefun 同步档案版本。".into());
+    }
+    let mut projected = stage_apply(host, owner, candidate, payload)?.player_data;
+    match projected.remove(&"PlayerPersisted".into()) {
+        Some(Tag::Compound(entries)) => Ok(entries),
+        _ => Err("无法准备 Slimefun 玩家同步数据。".into()),
+    }
+}
+
 pub(crate) fn stage_apply(
     host: &dyn ServerHost,
     owner: u128,
@@ -442,6 +472,19 @@ pub(crate) fn capture_prepared(
     let data = player
         .persistent_data(host)
         .ok_or("无法读取当前玩家的研究档案。")?;
+    let generation = committed_generation(host, owner)?;
+    if let Some(generation) = generation {
+        let profile = committed_profile(host, owner, generation)?;
+        return capture_state(
+            host,
+            owner,
+            &data,
+            (*profile).clone(),
+            CaptureBags::Committed(generation),
+            |host, bytes| host.item_from_saved_gzip_nbt(bytes.to_vec()).is_some(),
+            |host, item| host.item_to_saved_gzip_nbt(item),
+        );
+    }
     let archive = read_archive(host, owner)?;
     let profile = archive
         .as_deref()
@@ -454,7 +497,7 @@ pub(crate) fn capture_prepared(
         owner,
         &data,
         profile,
-        paper.as_ref(),
+        CaptureBags::Legacy(paper.as_ref()),
         |host, bytes| host.item_from_saved_gzip_nbt(bytes.to_vec()).is_some(),
         |host, item| host.item_to_saved_gzip_nbt(item),
     )
@@ -465,18 +508,18 @@ fn capture_state(
     owner: u128,
     data: &Compound,
     mut profile: Profile<'_>,
-    paper: Option<&toml::Table>,
+    bags: CaptureBags<'_>,
     decode_item: impl Fn(&dyn ServerHost, &[u8]) -> bool,
     encode_item: impl Fn(&dyn ServerHost, &ItemStack) -> Option<Vec<u8>>,
 ) -> Result<Vec<u8>, String> {
     research::update_capture(data, &mut profile)?;
-    if paper.is_some() {
+    if matches!(bags, CaptureBags::Legacy(Some(_))) {
         // Match lazy restoration: a normalized Paper profile takes precedence
         // over the SFP1 archive for bags, and live records win for both formats.
         profile.backpacks.clear();
     }
     let mut encoded_bytes = 0;
-    backpacks::visit_snapshot_bags(host, owner, paper, MAX_BACKPACKS, |host, id, bag| {
+    backpacks::visit_snapshot_bags(host, owner, bags, MAX_BACKPACKS, |host, id, bag| {
         let mut slots = vec![Cow::Borrowed(&[][..]); bag.size as usize];
         for (slot, item) in bag.slots {
             let bytes = encode_item(host, &item)
@@ -534,6 +577,32 @@ mod tests {
         out.push(0);
         out.extend_from_slice(&[0; 12]);
         out
+    }
+
+    #[test]
+    fn receiver_projects_only_player_persisted_and_refuses_the_wrong_schema() {
+        let host = FakeHost::new();
+        let candidate = Compound::from([
+            (
+                "PlayerPersisted".into(),
+                Tag::compound([
+                    ("slimefun:lumps", Tag::Byte(1)),
+                    ("slimefun:other_setting", Tag::Int(4)),
+                ]),
+            ),
+            ("unrelated_root".into(), Tag::Byte(1)),
+        ]);
+        let bytes = checksummed(empty_payload());
+        let entries =
+            stage_received_profile(&host, OWNER, &SECTION, 1, &candidate, &bytes).unwrap();
+        assert_eq!(
+            entries.get(&"slimefun:other_setting".into()),
+            Some(&Tag::Int(4))
+        );
+        assert_eq!(entries.get(&"slimefun:lumps".into()), None);
+        assert_eq!(entries.get(&"unrelated_root".into()), None);
+        assert!(stage_received_profile(&host, OWNER, &SECTION, 2, &candidate, &bytes).is_err());
+        assert!(stage_received_profile(&host, OWNER + 1, &SECTION, 1, &candidate, &bytes).is_err());
     }
 
     #[test]
@@ -795,7 +864,7 @@ mod tests {
             OWNER,
             &data,
             restored,
-            None,
+            CaptureBags::Legacy(None),
             |_, bytes| bytes == original_item.as_ref(),
             |_, stack| (*stack == diamond).then(|| original_item.to_vec()),
         )
@@ -828,6 +897,49 @@ mod tests {
     }
 
     #[test]
+    fn capture_uses_only_the_committed_baseline_and_its_live_bag_overrides() {
+        let mut host = FakeHost::new();
+        host.registries
+            .resolve_items([Identifier::parse("minecraft:diamond").unwrap()])
+            .unwrap();
+        let diamond = Kind::Vanilla("minecraft:diamond").stack(&host, 3).unwrap();
+        let contents =
+            Compound::from([("2".into(), Tag::Compound(diamond.to_nbt(&host).unwrap()))]);
+        remember_live_bag(&mut host, OWNER, 77, contents.clone());
+        let mut baseline = Profile::decode(OWNER, PAPER_PROFILE).unwrap();
+        let paper_item = baseline.backpacks[&14][7].to_vec();
+        baseline
+            .backpacks
+            .insert(18, baseline.backpacks[&14].clone());
+        host.transfer_profiles.insert(
+            (OWNER, (*SECTION).clone()),
+            (41, baseline.encode(OWNER).unwrap()),
+        );
+        remember_live_bag(&mut host, OWNER, 14, Compound::new());
+        remember_live_bag(&mut host, OWNER, 19, contents);
+
+        let output = capture_state(
+            &mut host,
+            OWNER,
+            &Compound::new(),
+            baseline,
+            CaptureBags::Committed(41),
+            |_, bytes| bytes == paper_item,
+            |_, stack| (*stack == diamond).then(|| paper_item.clone()),
+        )
+        .unwrap();
+        let profile = Profile::decode(OWNER, &output).unwrap();
+        assert_eq!(
+            profile.backpacks.keys().copied().collect::<Vec<_>>(),
+            [14, 18, 19]
+        );
+        assert!(profile.backpacks[&14].iter().all(|slot| slot.is_empty()));
+        assert_eq!(profile.backpacks[&18][7].as_ref(), paper_item);
+        assert_eq!(profile.backpacks[&19][2].as_ref(), paper_item);
+        assert!(profile.researches.contains("addon:research"));
+    }
+
+    #[test]
     fn pending_paid_research_and_unreadable_archived_items_cannot_be_captured() {
         let mut host = FakeHost::new();
         let pending = Compound::from([(
@@ -843,7 +955,7 @@ mod tests {
             OWNER,
             &pending,
             archived(),
-            None,
+            CaptureBags::Legacy(None),
             |_, _| panic!("pending research must be refused before reading the archived items"),
             |_, _| unreachable!(),
         );
@@ -853,7 +965,7 @@ mod tests {
             OWNER,
             &Compound::new(),
             archived(),
-            None,
+            CaptureBags::Legacy(None),
             |_, _| false,
             |_, _| unreachable!(),
         );
@@ -875,7 +987,7 @@ mod tests {
             OWNER,
             &Compound::new(),
             archived,
-            Some(&normalized),
+            CaptureBags::Legacy(Some(&normalized)),
             |_, _| panic!("the normalized profile has precedence over the older raw bags"),
             |_, _| unreachable!(),
         )

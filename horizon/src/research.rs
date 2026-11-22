@@ -346,6 +346,22 @@ pub(crate) fn sync_guide_already_issued(host: &dyn Host, player: PlayerRef) -> b
     })
 }
 
+pub(crate) fn transferred_guide_managed(host: &dyn Host, player: PlayerRef) -> bool {
+    player
+        .persistent_data(host)
+        .as_ref()
+        .is_some_and(has_synchronized_replacement)
+}
+
+/// Mark the first network guide initialization on the candidate player data.
+/// The caller publishes this with any inventory change in a single transaction.
+pub(crate) fn mark_transferred_guide_initialized(data: &mut Compound) -> bool {
+    has_synchronized_replacement(data)
+        && saved_data(data).is_some_and(|saved| {
+            saved.insert(SYNC_GUIDE_ISSUED.into(), Tag::Byte(1)) != Some(Tag::Byte(1))
+        })
+}
+
 pub(crate) fn stage_replacement(
     base: &Compound,
     known: &BTreeSet<String>,

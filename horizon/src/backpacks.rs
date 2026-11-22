@@ -849,14 +849,27 @@ impl BackpackStore for GlobalBackpacks {
     }
 }
 
+#[derive(Clone, Copy)]
+pub(crate) enum CaptureBags<'a> {
+    Legacy(Option<&'a toml::Table>),
+    Committed(u128),
+}
+
 pub(crate) fn visit_snapshot_bags(
     host: &mut dyn ServerHost,
     owner: u128,
-    paper: Option<&toml::Table>,
+    bags: CaptureBags<'_>,
     limit: usize,
     mut visit: impl FnMut(&dyn ServerHost, u32, Backpack) -> Result<(), String>,
 ) -> Result<(), String> {
-    let live = snapshot_bag_numbers(host, owner, limit)?;
+    let (generation, paper) = match bags {
+        CaptureBags::Legacy(paper) => (None, paper),
+        CaptureBags::Committed(generation) => (Some(generation), None),
+    };
+    if crate::pm_profile::committed_generation(host, owner)? != generation {
+        return Err("采集期间背包档案版本已更换。".into());
+    }
+    let live = snapshot_bag_numbers(host, owner, generation, limit)?;
     let archived = paper
         .map(|paper| archived_records(paper, owner))
         .transpose()?;
@@ -893,9 +906,10 @@ pub(crate) fn visit_snapshot_bags(
 fn snapshot_bag_numbers(
     host: &mut dyn ServerHost,
     owner: u128,
+    generation: Option<u128>,
     limit: usize,
 ) -> Result<BTreeSet<u32>, String> {
-    let prefix = format!("{owner:032x}#");
+    let prefix = storage_prefix(owner, generation);
     let scan = |records: &Compound| -> Result<BTreeSet<u32>, String> {
         let mut ids = BTreeSet::new();
         for key in records.keys() {

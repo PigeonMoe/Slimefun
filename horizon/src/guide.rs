@@ -11,6 +11,7 @@ use std::{
 use mod_api::{
     Compound, Hand, Host, HostTransaction, ItemPlace, ItemResource, ItemStack, MenuClickedEvent,
     MenuClosedEvent, MenuReplace, PermissionLevel, PlayerRef, ServerHost, SoundSource, Tag, Text,
+    Transaction,
     text::{TextClick, TextStyle},
 };
 
@@ -180,14 +181,26 @@ pub(crate) fn give(host: &mut dyn ServerHost, player: PlayerRef) {
     };
     let resource = ItemResource::of(&book);
     let _ = host.transaction(|host, tx| {
-        (0..36)
-            .any(|slot| {
-                ItemPlace::PlayerSlot { player: player.uuid(), slot }
-                    .insert(host, tx, &resource, 1) == 1
-            })
+        insert_guide(host, tx, player, &resource)
             .then_some(())
             .ok_or(())
     });
+}
+
+fn insert_guide(
+    host: &mut dyn ServerHost,
+    tx: &Transaction,
+    player: PlayerRef,
+    resource: &ItemResource,
+) -> bool {
+    (0..36).any(|slot| {
+        ItemPlace::PlayerSlot {
+            player: player.uuid(),
+            slot,
+        }
+        .insert(host, tx, resource, 1)
+            == 1
+    })
 }
 
 fn give_cheat_item(host: &mut dyn ServerHost, player: PlayerRef, stack: &ItemStack, full_stack: bool) -> bool {
@@ -309,13 +322,49 @@ impl Guide {
     }
 
     pub(crate) fn first_join(&self, host: &mut dyn ServerHost, uuid: u128) {
-        if self.receive_on_first_join.load(Ordering::Relaxed)
-            && let Some(player) = host.player(uuid)
-            && player.dimension(host).is_none_or(|dimension| availability::world_enabled(&dimension.to_string()))
+        if let Some(player) = host.player(uuid)
+            && self.receives_first_guide(host, player)
         {
             give(host, player);
         }
     }
+
+    fn receives_first_guide(&self, host: &dyn Host, player: PlayerRef) -> bool {
+        self.receive_on_first_join.load(Ordering::Relaxed)
+            && player
+                .dimension(host)
+                .is_none_or(|dimension| availability::world_enabled(&dimension.to_string()))
+    }
+
+    pub(crate) fn initialize_transferred_guide(
+        &self,
+        host: &mut dyn ServerHost,
+        player: PlayerRef,
+    ) -> Result<(), &'static str> {
+        let Some(mut data) = player.persistent_data(host) else {
+            return Ok(());
+        };
+        if !research::mark_transferred_guide_initialized(&mut data) {
+            return Ok(());
+        }
+        let resource = if self.receives_first_guide(host, player) {
+            Some(ItemResource::of(
+                &book(host).ok_or("无法创建跨服档案的远古工艺指南。")?,
+            ))
+        } else {
+            None
+        };
+        host.transaction(|host, tx| {
+            if let Some(resource) = &resource {
+                // Paper marks the profile initialized even if the inventory is full.
+                insert_guide(host, tx, player, resource);
+            }
+            player
+                .set_persistent_data(host, data)
+                .map_err(|_| "无法保存跨服指南的初始化状态。")
+        })
+    }
+
     pub(crate) fn announce_shared_research(
         &self,
         host: &mut dyn ServerHost,
@@ -1318,6 +1367,58 @@ mod tests {
             &host,
             host.players.get(1).unwrap().slots.get(&0).unwrap()
         ));
+    }
+
+    #[test]
+    fn a_transferred_guide_is_initialized_once_even_when_the_first_grant_is_disabled() {
+        mod_api::__private::initialize().unwrap();
+        let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
+        let mut host = FakeHost::new();
+        host.registries
+            .resolve_items([Identifier::parse("minecraft:enchanted_book").unwrap()])
+            .unwrap();
+        let level = host.level.level();
+        let guide = Guide::default();
+        for (owner, already_initialized, should_receive) in
+            [(1, false, true), (2, true, false), (3, false, false)]
+        {
+            host.players
+                .join(owner, u32::try_from(owner).unwrap(), level);
+            let player = (&host as &dyn Host).player(owner).unwrap();
+            let data = research::stage_replacement(
+                &Compound::new(),
+                &Default::default(),
+                already_initialized,
+            )
+            .unwrap();
+            player.set_persistent_data(&mut host, data).unwrap();
+            if should_receive {
+                host.frozen_player_handovers.insert(owner, 17);
+                assert!(guide.initialize_transferred_guide(&mut host, player).is_err());
+                assert!(host.players.get(owner).unwrap().slots.is_empty());
+                host.frozen_player_handovers.remove(&owner);
+            }
+            if owner == 3 {
+                let config = "[guide]\nreceive-on-first-join = false"
+                    .parse::<toml::Table>()
+                    .unwrap();
+                guide.configure(config.get("guide"), None);
+            }
+            guide
+                .initialize_transferred_guide(&mut host, player)
+                .unwrap();
+            assert!(research::sync_guide_already_issued(&host, player));
+            guide.configure(None, None);
+            guide
+                .initialize_transferred_guide(&mut host, player)
+                .unwrap();
+            let slots = &host.players.get(owner).unwrap().slots;
+            assert_eq!(slots.len(), usize::from(should_receive));
+            if should_receive {
+                assert!(is_book(&host, &slots[&0]));
+                assert_eq!(slots[&0].count(), 1);
+            }
+        }
     }
 
     #[test]

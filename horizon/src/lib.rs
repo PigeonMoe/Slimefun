@@ -1656,10 +1656,29 @@ impl Hooks for Slimefun {
         ancient_altar::item_expire(event);
     }
 
+    fn player_transfer_profile_stage(
+        &self,
+        host: &dyn ServerHost,
+        event: &mut mod_api::PlayerTransferProfileStageEvent<'_>,
+    ) {
+        *event.reply = Some(pm_profile::stage_received_profile(
+            host,
+            event.owner,
+            event.id,
+            event.schema,
+            event.candidate,
+            event.payload,
+        ));
+    }
+
     fn player_logged_in(&self, host: &mut dyn ServerHost, event: &mut PlayerLoggedInEvent<'_>) {
         if let Some(player) = host.player(event.player) {
             research::import_legacy(host, player);
             research::import_synchronized_profile(host, player);
+            if let Err(error) = self.guide.initialize_transferred_guide(host, player) {
+                let _ = player.disconnect(host, Text::literal(error));
+                return;
+            }
             self.guide.logged_in(host, player);
             if let Err(error) = gps_waypoints::import(host, event.player) {
                 let _ = player.tell(host, Text::literal(error));
@@ -1668,8 +1687,10 @@ impl Hooks for Slimefun {
     }
 
     fn player_first_join(&self, host: &mut dyn ServerHost, event: &mut mod_api::PlayerFirstJoinEvent<'_>) {
-        let issued = host.player(event.player)
-            .is_some_and(|player| research::sync_guide_already_issued(host, player));
+        let issued = host.player(event.player).is_some_and(|player| {
+            research::transferred_guide_managed(host, player)
+                || research::sync_guide_already_issued(host, player)
+        });
         if !issued {
             self.guide.first_join(host, event.player);
         }
