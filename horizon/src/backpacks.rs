@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::{collections::BTreeMap, sync::Mutex};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Mutex,
+};
 
 use mod_api::{
     AttachmentCodec, AttachmentType, ComponentId, Compound, ConfigFileError, ConfigPath, Hand,
@@ -628,19 +631,22 @@ fn archived_backpack(
     let entry = *records
         .get(&id.number)
         .ok_or("The Paper profile does not contain this backpack number.")?;
-    let size = entry
-        .get("size")
-        .and_then(toml::Value::as_integer)
-        .and_then(|size| u32::try_from(size).ok())
-        .filter(|&size| valid_size(size))
-        .ok_or("The archived Paper backpack has an invalid size.")?;
+    let size = archived_size(entry).ok_or("The archived Paper backpack has an invalid size.")?;
     if expected_size.is_some_and(|expected| size != expected) {
         return Err("The Paper backpack size does not match the held backpack tier.".into());
     }
     Ok((entry, size))
 }
 
-fn read_profile(host: &dyn ServerHost, owner: u128) -> Result<Option<toml::Table>, String> {
+fn archived_size(entry: &toml::Table) -> Option<u32> {
+    entry
+        .get("size")
+        .and_then(toml::Value::as_integer)
+        .and_then(|size| u32::try_from(size).ok())
+        .filter(|&size| valid_size(size))
+}
+
+pub(crate) fn read_profile(host: &dyn ServerHost, owner: u128) -> Result<Option<toml::Table>, String> {
     let path = ConfigPath::new(&format!("storage-import/backpacks/{owner:032x}.toml"))
         .expect("hexadecimal UUID is a valid archive path");
     let bytes = match host.world_data_files().read(&path) {
@@ -764,6 +770,73 @@ impl BackpackStore for GlobalBackpacks {
             .set(host, Holder::Server, data)
             .map_err(|_| "Could not write the global backpack record.".into())
     }
+}
+
+pub(crate) fn visit_snapshot_bags(
+    host: &mut dyn ServerHost,
+    owner: u128,
+    paper: Option<&toml::Table>,
+    limit: usize,
+    mut visit: impl FnMut(&dyn ServerHost, u32, Backpack) -> Result<(), String>,
+) -> Result<(), String> {
+    let live = snapshot_bag_numbers(host, owner, limit)?;
+    let archived = paper
+        .map(|paper| archived_records(paper, owner))
+        .transpose()?;
+    let new_bags = archived.as_ref().map_or(0, |bags| {
+        bags.keys().filter(|id| !live.contains(*id)).count()
+    });
+    if live.len() + new_bags > limit {
+        return Err("Slimefun 同步档案的背包数量超出允许范围。".into());
+    }
+    for (id, row) in archived.into_iter().flatten() {
+        if live.contains(&id) {
+            continue;
+        }
+        let size = archived_size(row).ok_or("存档中的背包容量无效。")?;
+        let slots = decode_archived_slots(host, row, size)?;
+        visit(host, id, Backpack { size, slots, paper: true })?;
+    }
+    for id in live {
+        let id = BackpackId { owner, number: id };
+        let bag = load_bag(host, id)?.ok_or("无法读取存档中的背包。")?;
+        visit(host, id.number, bag)?;
+    }
+    Ok(())
+}
+
+fn snapshot_bag_numbers(
+    host: &mut dyn ServerHost,
+    owner: u128,
+    limit: usize,
+) -> Result<BTreeSet<u32>, String> {
+    let prefix = format!("{owner:032x}#");
+    let scan = |records: &Compound| -> Result<BTreeSet<u32>, String> {
+        let mut ids = BTreeSet::new();
+        for key in records.keys() {
+            let Ok(key) = key.to_string() else { continue };
+            let Some(suffix) = key.strip_prefix(&prefix) else {
+                continue;
+            };
+            let id = number(suffix).ok_or("存档中有无效的背包编号。")?;
+            if ids.len() == limit {
+                return Err("Slimefun 同步档案的背包数量超出允许范围。".into());
+            }
+            ids.insert(id);
+        }
+        Ok(ids)
+    };
+    if let Some(ids) = RECORDS
+        .with_decoded(host, Holder::Server, |data| data.map(&scan))
+        .map_err(|_| "无法读取全局背包存档。")?
+    {
+        return ids;
+    }
+    RECORDS
+        .get_existing(host, Holder::Server)
+        .map_err(|_| "无法读取全局背包存档。")?
+        .as_ref()
+        .map_or_else(|| Ok(BTreeSet::new()), scan)
 }
 
 /// Paper assigns the next ID after the last backpack in the owner's profile.

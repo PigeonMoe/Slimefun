@@ -333,6 +333,34 @@ pub(crate) fn sync_guide_already_issued(host: &dyn Host, player: PlayerRef) -> b
     })
 }
 
+pub(crate) fn update_capture(
+    data: &Compound,
+    profile: &mut crate::pm_profile::Profile<'_>,
+) -> Result<(), &'static str> {
+    let saved = match data.get(&PERSISTED.into()) {
+        Some(Tag::Compound(saved)) => Some(saved),
+        Some(_) => return Err(UPDATE_ERROR),
+        None => None,
+    };
+    if saved.is_some_and(|saved| saved.contains_key(&PENDING.into())) {
+        return Err("正在进行已付费的研究，暂时无法同步档案。");
+    }
+
+    // The prepared caller has already completed `onSyncLoaded` (which records
+    // the first guide initialization even when the guide gift is disabled).
+    profile.guide_issued = true;
+    for (id, legacy) in crate::pm_profile::paper_researches() {
+        let key = format!("slimefun:{id}");
+        profile.legacy_researches.remove(&legacy);
+        if saved.is_some_and(|saved| saved.get(&key.as_str().into()) == Some(&Tag::Byte(1))) {
+            profile.researches.insert(key);
+        } else {
+            profile.researches.remove(&key);
+        }
+    }
+    Ok(())
+}
+
 fn legacy_research_ids<'a>(uuid: &str, text: &'a str) -> Option<Vec<&'a str>> {
     let mut lines = text.lines();
     if lines.next()? != "slimefun-research-import-v1" || lines.next()? != uuid {
