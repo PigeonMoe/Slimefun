@@ -35,6 +35,7 @@ public final class PaperSyncedProfiles {
 
     public static void exportRows(Path source, Path output) throws IOException {
         Path players = Files.createDirectory(output.resolve("Players"));
+        Path profiles = Files.createDirectory(output.resolve("SFP1"));
         Set<UUID> owners = new HashSet<>();
         try (InputStream input = new BufferedInputStream(Files.newInputStream(source))) {
             byte[] line;
@@ -65,8 +66,11 @@ public final class PaperSyncedProfiles {
                         throw new IOException("The PM-Sync snapshot exceeds 64 MiB.");
                     }
                     byte[] blob = HexFormat.of().parseHex(text, second + 1, text.length());
-                    ProfileSnapshot profile = ProfileSnapshot.decode(owner, slimefunSection(blob));
+                    byte[] section = slimefunSection(blob);
+                    ProfileSnapshot profile = ProfileSnapshot.decode(owner, section);
                     Files.writeString(players.resolve(owner + ".yml"), new Yaml().dump(profileMap(profile, revision)),
+                            StandardOpenOption.CREATE_NEW);
+                    Files.write(profiles.resolve(ownerText.replace("-", "") + ".sfp1"), section,
                             StandardOpenOption.CREATE_NEW);
                 } catch (IOException | RuntimeException error) {
                     throw new IOException("PM-Sync row " + row + ": " + error.getMessage(), error);

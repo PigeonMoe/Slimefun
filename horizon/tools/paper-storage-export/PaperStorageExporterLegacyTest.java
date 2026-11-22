@@ -6,6 +6,7 @@ import java.io.IOException;
 import java.lang.reflect.Proxy;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
@@ -21,16 +22,12 @@ import net.minecraft.server.permissions.LevelBasedPermissionSet;
 import net.minecraft.util.Util;
 import net.minecraft.world.level.WorldDataConfiguration;
 import org.bukkit.Bukkit;
-import org.bukkit.Material;
-import org.bukkit.NamespacedKey;
 import org.bukkit.Server;
 import org.bukkit.configuration.serialization.ConfigurationSerialization;
 import org.bukkit.craftbukkit.CraftRegistry;
 import org.bukkit.craftbukkit.inventory.CraftItemFactory;
 import org.bukkit.craftbukkit.inventory.SerializableMeta;
 import org.bukkit.craftbukkit.util.CraftMagicNumbers;
-import org.bukkit.inventory.ItemStack;
-import org.bukkit.persistence.PersistentDataType;
 import org.yaml.snakeyaml.Yaml;
 
 public final class PaperStorageExporterLegacyTest {
@@ -97,23 +94,22 @@ public final class PaperStorageExporterLegacyTest {
             throw new AssertionError("The source snapshot changed during export.");
         }
 
-        verifySyncedProfiles();
+        verifySyncedProfiles(fixtures);
     }
 
-    private static void verifySyncedProfiles() throws Exception {
-        UUID owner = UUID.fromString("8c0e7dd0-005e-48a5-9d49-28afb237bc91");
+    private static void verifySyncedProfiles(Path fixtures) throws Exception {
+        UUID owner = PaperSyncedProfilesFixture.OWNER;
         UUID wrong = UUID.fromString("fc514949-28a0-493e-8648-89a247186e15");
-        ItemStack paperItem = new ItemStack(Material.DIAMOND, 3);
-        NamespacedKey marker = new NamespacedKey("migration_fixture", "original");
-        paperItem.editMeta(meta -> meta.getPersistentDataContainer().set(marker, PersistentDataType.STRING, "saved"));
-        byte[] archived = PaperSyncedProfilesFixture.envelope(owner, paperItem.serializeAsBytes());
+        byte[] section = PaperSyncedProfilesFixture.section(owner, PaperSyncedProfilesFixture.itemBytes());
+        byte[] archived = PaperSyncedProfilesFixture.envelope(section);
         String row = sqlRow(owner, archived);
         Path source = Path.of("snapshot.tsv");
         Path output = Path.of("snapshot-exported");
         Path repeated = Path.of("snapshot-repeated");
         byte[] corrupt = archived.clone();
         corrupt[10] ^= 1;
-        byte[] invalidItem = PaperSyncedProfilesFixture.envelope(wrong, new byte[] {1, 2, 3});
+        byte[] invalidItem = PaperSyncedProfilesFixture.envelope(
+                PaperSyncedProfilesFixture.section(wrong, new byte[] {1, 2, 3}));
         for (String invalid : List.of(row + sqlRow(owner, archived), sqlRow(wrong, archived),
                 sqlRow(owner, corrupt), row + sqlRow(wrong, invalidItem))) {
             Files.writeString(source, invalid);
@@ -132,8 +128,14 @@ public final class PaperStorageExporterLegacyTest {
         PaperStorageExporter.exportSyncedProfiles(source, output);
         PaperStorageExporter.exportSyncedProfiles(source, repeated);
         Path profile = Path.of("Players", owner + ".yml");
-        if (Files.mismatch(output.resolve(profile), repeated.resolve(profile)) != -1) {
+        Path raw = Path.of("SFP1", owner.toString().replace("-", "") + ".sfp1");
+        if (Files.mismatch(output.resolve(profile), repeated.resolve(profile)) != -1
+                || Files.mismatch(output.resolve(raw), repeated.resolve(raw)) != -1) {
             throw new AssertionError("An unchanged PM-Sync export published different bytes.");
+        }
+        if (!Arrays.equals(section, Files.readAllBytes(output.resolve(raw)))
+                || Files.mismatch(output.resolve(raw), fixtures.resolve("paper-26.2-profile.sfp1")) != -1) {
+            throw new AssertionError("The exported SFP1 differs from the Paper bytes or the frozen fixture.");
         }
         Map<?, ?> exported = new Yaml().load(Files.readString(output.resolve(profile)));
         Map<?, ?> bags = (Map<?, ?>) exported.get("backpacks");

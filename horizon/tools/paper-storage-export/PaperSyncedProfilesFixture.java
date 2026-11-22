@@ -8,17 +8,33 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import org.bukkit.Material;
+import org.bukkit.NamespacedKey;
+import org.bukkit.inventory.ItemStack;
+import org.bukkit.persistence.PersistentDataType;
 
 public final class PaperSyncedProfilesFixture {
+    public static final UUID OWNER = UUID.fromString("8c0e7dd0-005e-48a5-9d49-28afb237bc91");
+
     private PaperSyncedProfilesFixture() {}
 
-    public static byte[] envelope(UUID owner, byte[] paperItem) throws Exception {
+    public static byte[] itemBytes() {
+        ItemStack item = new ItemStack(Material.DIAMOND, 3);
+        NamespacedKey marker = new NamespacedKey("migration_fixture", "original");
+        item.editMeta(meta -> meta.getPersistentDataContainer().set(marker, PersistentDataType.STRING, "saved"));
+        return item.serializeAsBytes();
+    }
+
+    public static byte[] section(UUID owner, byte[] paperItem) {
         var slots = new byte[9][];
         Arrays.setAll(slots, index -> index == 7 ? paperItem : new byte[0]);
         var bag = new ProfileSnapshot.Bag(14, List.of(slots));
         var profile = new ProfileSnapshot(owner, true, Set.of("slimefun:lumps", "addon:research"),
                 Set.of(31), List.of(bag));
-        byte[] sfp = profile.encode();
+        return profile.encode();
+    }
+
+    public static byte[] envelope(byte[] sfp) throws Exception {
         var bytes = new ByteArrayOutputStream();
         var out = new DataOutputStream(bytes);
         out.writeInt(0x504d5302);
