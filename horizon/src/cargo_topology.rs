@@ -1040,7 +1040,6 @@ fn move_to_first(
     mut permit: impl FnMut(&mut dyn ServerHost, Position, Position, &ItemStack) -> bool,
 ) -> u32 {
     let source_resource = ItemResource::of(stack);
-    let source_id = item_id(stack);
     host.transaction(|host, tx| {
         let source = level
             .capability(host, &ITEMS, input.inventory, None)
@@ -1086,12 +1085,8 @@ fn move_to_first(
                 if !similar(host, &current, stack, true) {
                     continue;
                 }
-                // For a matching Slimefun ID, Paper grows the existing stack in place.
-                // Use its components for capacity and insertion and keep the source's
-                // components for the withdrawal.
-                if source_id.is_some() && item_id(&current) == source_id {
-                    insert_resource = held;
-                }
+                // Paper grows the matching stack in place, keeping its components.
+                insert_resource = held;
                 if !direct_ingredient
                     && input.options.smart_fill
                     && current.count() >= destination.capacity(host, slot, insert_resource)
@@ -1808,7 +1803,7 @@ mod tests {
     }
 
     #[test]
-    fn cargo_merges_english_paper_dust_into_the_localized_stack_without_replacing_its_data() {
+    fn cargo_preserves_resident_metadata_when_merging_paper_similar_stacks() {
         use crate::items::{TIN_DUST, ZINC_DUST, text};
 
         let mut host = FakeHost::new();
@@ -1976,23 +1971,44 @@ mod tests {
         assert_eq!(slot(&host, source), None);
         assert_eq!(slot(&host, target), Some(remaining));
 
-        let vanilla = |count, batch| {
+        let vanilla = |count, batch, lore| {
             let mut stack = ItemStack::new(incoming.item(), count).unwrap();
             stack
-                .apply_components(&Compound::from([(
-                    "minecraft:custom_data".into(),
-                    Tag::compound([("witness", Tag::Int(batch))]),
-                )]))
+                .apply_components(&Compound::from([
+                    ("minecraft:custom_name".into(), text("货单", "gold", false)),
+                    (
+                        "minecraft:lore".into(),
+                        Tag::List(vec![text(lore, "gray", false)]),
+                    ),
+                    (
+                        "minecraft:custom_data".into(),
+                        Tag::compound([(
+                            "PublicBukkitValues",
+                            Tag::compound([("pigeonqa:batch", Tag::Int(batch))]),
+                        )]),
+                    ),
+                ]))
                 .unwrap();
             stack
         };
-        let vanilla_source = vanilla(8, 1);
-        let vanilla_target = vanilla(60, 2);
+        let vanilla_source = vanilla(8, 1, "原有说明");
+        let vanilla_target = vanilla(60, 2, "原有说明");
+        assert!(similar(&host, &vanilla_target, &vanilla_source, true));
+        assert!(!ItemResource::of(&vanilla_source).matches(&vanilla_target));
+        for input in [&input, &smart_input] {
+            put(&mut host, source, vanilla_source.clone());
+            put(&mut host, target, vanilla_target.clone());
+            assert_eq!(deliver(&mut host, input, &vanilla_source), 4);
+            assert_eq!(slot(&host, source), Some(vanilla(4, 1, "原有说明")));
+            assert_eq!(slot(&host, target), Some(vanilla(64, 2, "原有说明")));
+        }
+
+        let different_lore = vanilla(60, 2, "不同说明");
         put(&mut host, source, vanilla_source.clone());
-        put(&mut host, target, vanilla_target.clone());
+        put(&mut host, target, different_lore.clone());
         assert_eq!(deliver(&mut host, &input, &vanilla_source), 0);
         assert_eq!(slot(&host, source), Some(vanilla_source));
-        assert_eq!(slot(&host, target), Some(vanilla_target));
+        assert_eq!(slot(&host, target), Some(different_lore));
     }
 
     #[test]
