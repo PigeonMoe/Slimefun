@@ -760,6 +760,13 @@ static RECORDS: AttachmentType<Compound> = AttachmentType {
 
 pub(crate) struct GlobalBackpacks;
 
+fn require_unfrozen_owner(host: &dyn ServerHost, owner: u128) -> Result<(), String> {
+    if host.player_frozen_handover(owner).is_some() {
+        return Err("背包所有者正在换服，暂时无法操作这个背包。".into());
+    }
+    Ok(())
+}
+
 impl BackpackStore for GlobalBackpacks {
     fn load(&self, host: &mut dyn ServerHost, id: BackpackId) -> Result<Option<Compound>, String> {
         let key = id.storage_key();
@@ -789,6 +796,8 @@ impl BackpackStore for GlobalBackpacks {
         id: BackpackId,
         record: Compound,
     ) -> Result<(), String> {
+        // A recovered head may be held by another player while its owner transfers.
+        require_unfrozen_owner(host, id.owner)?;
         let mut data = RECORDS
             .get_existing(host, Holder::Server)
             .map_err(|_| "The global backpack store is unavailable.")?
@@ -1153,6 +1162,7 @@ pub(crate) fn restore_held(
                 "The original owner or a level-2 operator must restore this backpack.".into(),
             );
         }
+        require_unfrozen_owner(host, id.owner)?;
         bind_paper(host, tx, store, id, size, load_paper)
     })
 }
@@ -1183,6 +1193,7 @@ fn issue_recovered(
     id: BackpackId,
     load: impl FnOnce(&dyn ServerHost, BackpackId, Option<u32>) -> Result<Backpack, String>,
 ) -> Result<(), String> {
+    require_unfrozen_owner(host, id.owner)?;
     let mut head = RESTORED_BACKPACK
         .stack(host, 1)
         .ok_or("Could not create the restored backpack head.")?;
@@ -1460,6 +1471,7 @@ impl BackpackMenus {
             restored_id(host, &stack)
                 .map_err(str::to_owned)
                 .and_then(|id| {
+                    require_unfrozen_owner(host, id.owner)?;
                     let bag = load_bag(host, id)?.ok_or(missing)?;
                     Ok((id, bag.size))
                 })
@@ -1473,6 +1485,11 @@ impl BackpackMenus {
                             required.id
                         ));
                     }
+                    let owner = match binding {
+                        Binding::Named(id) => id.owner,
+                        Binding::Blank => player.uuid(),
+                    };
+                    require_unfrozen_owner(host, owner)?;
                     let id = match binding {
                         Binding::Named(id) => id,
                         Binding::Blank => {
@@ -1589,6 +1606,99 @@ mod tests {
                 ),
             ]),
         ]
+    }
+
+    #[test]
+    fn borrowed_backpack_transfers_are_rolled_back_while_its_owner_is_frozen() {
+        let mut host = fixture();
+        host.join(RECIPIENT, 7);
+        let borrower = (&host as &dyn Host).player(RECIPIENT).unwrap();
+        let diamond = material(&host, "minecraft:diamond", 2);
+        let resource = ItemResource::of(&diamond);
+        let record = Backpack {
+            size: 9,
+            slots: BTreeMap::from([(8, diamond.clone())]),
+            paper: false,
+        };
+        let saved = record.to_nbt(&host).unwrap();
+        host.transaction(|host, tx| GlobalBackpacks.save(host, tx, ID, saved.clone()))
+            .unwrap();
+        recover_lost(
+            &mut host, borrower, PermissionLevel::Gamemasters, OWNER_UUID, "3",
+        )
+        .unwrap();
+        let bag = BackpackInventory {
+            at: ItemPlace::PlayerHand {
+                player: RECIPIENT,
+                hand: Hand::Main,
+            },
+            id: ID,
+            size: 9,
+            cooler: false,
+        };
+        let source = ItemPlace::PlayerSlot {
+            player: RECIPIENT,
+            slot: 1,
+        };
+        let destination = ItemPlace::PlayerSlot {
+            player: RECIPIENT,
+            slot: 2,
+        };
+        host.players
+            .get_mut(RECIPIENT)
+            .unwrap()
+            .slots
+            .insert(1, diamond.clone());
+
+        // The borrower already has a valid backing inventory when the owner freezes.
+        assert_eq!(bag.amount(&mut host, 8), 2);
+        host.join(OWNER, 6);
+        host.frozen_player_handovers.insert(OWNER, 41);
+        let refusal = require_unfrozen_owner(&host, OWNER).unwrap_err();
+        assert_eq!(
+            host.transaction(|host, tx| GlobalBackpacks.save(host, tx, ID, Compound::new())),
+            Err(refusal.clone())
+        );
+        assert_eq!(
+            recover_lost(&mut host, borrower, PermissionLevel::Gamemasters, OWNER_UUID, "3"),
+            Err(refusal.clone())
+        );
+        assert_eq!(
+            restore_held(&mut host, &GlobalBackpacks, borrower, Hand::Main, PermissionLevel::Gamemasters),
+            Err(refusal)
+        );
+
+        let withdraw = |host: &mut FakeHost| {
+            host.transaction(|host, tx| {
+                // Quick-move inserts at the destination first and aborts if extraction fails.
+                let moved = destination.insert(host, tx, &resource, 2);
+                assert_eq!(moved, 2);
+                (bag.extract(host, tx, 8, &resource, moved) == moved)
+                    .then_some(())
+                    .ok_or(())
+            })
+        };
+        let deposit = |host: &mut FakeHost| {
+            host.transaction(|host, tx| {
+                let moved = bag.insert(host, tx, 0, &resource, 2);
+                (moved == 0 || source.extract(host, tx, &resource, moved) == moved)
+                    .then_some(moved)
+                    .ok_or(())
+            })
+        };
+        assert_eq!(withdraw(&mut host), Err(()));
+        assert_eq!(deposit(&mut host), Ok(0));
+        assert_eq!(source.stack(&mut host), Some(diamond.clone()));
+        assert_eq!(destination.stack(&mut host), None);
+        assert_eq!(GlobalBackpacks.load(&mut host, ID).unwrap(), Some(saved));
+
+        host.frozen_player_handovers.remove(&OWNER);
+        assert_eq!(withdraw(&mut host), Ok(()));
+        assert_eq!(deposit(&mut host), Ok(2));
+        assert_eq!(source.stack(&mut host), None);
+        assert_eq!(destination.stack(&mut host), Some(diamond));
+        assert_eq!(bag.amount(&mut host, 8), 0);
+        assert_eq!(bag.amount(&mut host, 0), 2);
     }
 
     #[test]
