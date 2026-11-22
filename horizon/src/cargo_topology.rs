@@ -3,8 +3,9 @@
 use std::{collections::BTreeMap, ops::Range, sync::Mutex};
 
 use mod_api::{
-    AttachmentError, BlockEntityItemError, Compound, HostSide, HostTransaction, ITEMS, ItemKey,
-    ItemResource, ItemStack, LevelRef, ServerHost, StackWriteError, Tag, Text, UseOnEvent,
+    AttachmentError, BlockEntityItemError, BlockItemPlacePreEvent, Compound, HostTransaction,
+    ITEMS, ItemKey, ItemResource, ItemStack, LevelRef, ServerHost, StackWriteError, Tag, Text,
+    UseOnEvent,
 };
 
 use super::{
@@ -184,14 +185,8 @@ impl CargoSettings {
     }
 }
 
-pub(super) fn block_invalid_placement(host: HostSide<'_>, event: &UseOnEvent<'_>) -> bool {
-    let HostSide::Server(host) = host else {
-        return false;
-    };
-    let Some(id) = item_id(event.stack) else {
-        return false;
-    };
-    let Some(component) = Component::for_item(&id) else {
+pub(super) fn deny_unresearched_cargo(host: &mut dyn ServerHost, event: &UseOnEvent<'_>) -> bool {
+    let Some(component) = item_id(event.stack).and_then(|id| Component::for_item(&id)) else {
         return false;
     };
     let required = match component {
@@ -207,42 +202,54 @@ pub(super) fn block_invalid_placement(host: HostSide<'_>, event: &UseOnEvent<'_>
     let Some(player) = host.player(event.player) else {
         return false;
     };
-    if !crate::research::can_use(host, player, required) {
-        let _ = player.tell(
-            host,
-            Text::literal(format!(
-                "Unlock {} with /sf research {}.",
-                required.name, required.id
-            )),
-        );
-        return true;
+    if crate::research::can_use(host, player, required) {
+        return false;
     }
+    let _ = player.tell(
+        host,
+        Text::literal(format!(
+            "Unlock {} with /sf research {}.",
+            required.name, required.id
+        )),
+    );
+    true
+}
+
+pub(super) fn deny_cargo_placement(
+    host: &mut dyn ServerHost,
+    event: &BlockItemPlacePreEvent<'_>,
+) -> bool {
+    let component = item_id(event.stack).and_then(|id| Component::for_item(&id));
     if !matches!(
         component,
-        Component::CargoInput | Component::CargoOutput { .. }
+        Some(Component::CargoInput | Component::CargoOutput { .. })
     ) {
         return false;
     }
-    let Some(level) = player.entity().level(host) else {
+    let Some(level) = event.player.entity().level(host) else {
         return false;
     };
-    let [x, y, z] = event.pos;
-    let [dx, dy, dz] = event.face;
-    let allowed = dy == 0
-        && matches!(
-            level
-                .block_state(host, [x + dx, y, z + dz])
-                .map(|state| state.block().id(host))
-                .as_deref(),
-            Some("minecraft:air" | "minecraft:cave_air" | "minecraft:void_air")
-        );
-    if !allowed {
-        let _ = player.tell(
-            host,
-            crate::hologram_projector::colored_label("&4货运节点必须放置在箱子或机器上!"),
-        );
+    let replaced = level
+        .block_state(host, event.pos)
+        .map(|state| state.block().id(host));
+    if cargo_terminal_can_replace(event.pos, event.clicked_pos, replaced.as_deref()) {
+        return false;
     }
-    !allowed
+    let _ = event.player.tell(
+        host,
+        crate::hologram_projector::colored_label("&4货运节点必须放置在箱子或机器上!"),
+    );
+    true
+}
+
+fn cargo_terminal_can_replace(pos: Position, clicked: Position, replaced: Option<&str>) -> bool {
+    // Paper compares the placed and clicked heights and checks the original
+    // material at the resolved destination, which may be the clicked block.
+    pos[1] == clicked[1]
+        && matches!(
+            replaced,
+            Some("minecraft:air" | "minecraft:cave_air" | "minecraft:void_air")
+        )
 }
 
 pub(super) fn item_key(host: &dyn ServerHost, id: &str) -> Option<ItemKey> {
@@ -987,6 +994,24 @@ fn insert_brewing_ingredient(
 mod tests {
     use super::*;
     use mod_api::{Identifier, prelude::ItemsHost, testing::FakeHost};
+
+    #[test]
+    fn cargo_terminal_placement_requires_air_at_the_resolved_position() {
+        let clicked = [10, 70, 5];
+        assert!(!cargo_terminal_can_replace(
+            clicked,
+            clicked,
+            Some("minecraft:short_grass")
+        ));
+        assert!(!cargo_terminal_can_replace(
+            [10, 71, 5],
+            clicked,
+            Some("minecraft:air")
+        ));
+        for air in ["minecraft:air", "minecraft:cave_air", "minecraft:void_air"] {
+            assert!(cargo_terminal_can_replace([11, 70, 5], clicked, Some(air)));
+        }
+    }
 
     fn restored_filter(host: &dyn ServerHost, stack: &ItemStack) -> Filter {
         let node = Node {

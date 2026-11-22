@@ -8,9 +8,10 @@ use std::{
 };
 
 use mod_api::{
-    AttachmentCodec, AttachmentError, AttachmentType, BlockDropsEvent, Compound, ConfigFileError,
-    ConfigPath, Holder, HostSide, HostTransaction, InteractionResult, ItemKey, ItemPart, ItemStack,
-    LevelHost, LevelRef, LightLayer, OnBlockPlacedByEvent, ServerHost, Tag, UseOnEvent,
+    AttachmentCodec, AttachmentError, AttachmentType, BlockDropsEvent, BlockItemPlacePreEvent,
+    Compound, ConfigFileError, ConfigPath, Flow, Holder, HostSide, HostTransaction,
+    InteractionResult, ItemKey, ItemPart, ItemStack, LevelHost, LevelRef, LightLayer,
+    OnBlockPlacedByEvent, ServerHost, Tag, UseOnEvent,
 };
 
 use crate::{
@@ -266,12 +267,24 @@ impl ItemPart for NetworkPlacement {
                 || crate::composter::refuses_placement(host, event)
                 || crate::auto_crafter::refuses_placement(host, event)
                 || crate::elevator::refuses_placement(host, event)
-                || cargo_topology::block_invalid_placement(HostSide::Server(host), event)
+                || cargo_topology::deny_unresearched_cargo(host, event)
             {
                 return Some(InteractionResult::Fail);
             }
         }
         None
+    }
+
+    fn block_item_place_pre(
+        &self,
+        host: &mut dyn ServerHost,
+        event: &mut BlockItemPlacePreEvent<'_>,
+    ) -> Flow {
+        if cargo_topology::deny_cargo_placement(host, event) {
+            Flow::Cancel
+        } else {
+            Flow::Continue
+        }
     }
 
     fn on_block_placed_by(&self, host: &mut dyn ServerHost, event: &mut OnBlockPlacedByEvent<'_>) {
