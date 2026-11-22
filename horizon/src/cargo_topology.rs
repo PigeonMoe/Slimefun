@@ -5,7 +5,7 @@ use std::{collections::BTreeMap, ops::Range, sync::Mutex};
 use mod_api::{
     AttachmentError, BlockEntityItemError, BlockItemPlacePreEvent, Compound, HostTransaction,
     ITEMS, ItemKey, ItemResource, ItemStack, LevelRef, ServerHost, StackWriteError, Tag, Text,
-    UseOnEvent,
+    UseOnEvent, java_double_to_string, java_float_to_string,
 };
 
 use super::{
@@ -268,13 +268,16 @@ fn paper_lore(stack: &ItemStack) -> Option<&[Tag]> {
 }
 
 pub(crate) fn paper_text(tag: &Tag) -> Option<String> {
-    render_paper_text(tag, false)
+    render_paper_text(tag, None)
 }
 
-fn render_paper_text(tag: &Tag, include_references: bool) -> Option<String> {
+const MAX_LEGACY_TEXT: usize = 1 << 20;
+const MAX_TEXT_DEPTH: usize = 32;
+
+fn render_paper_text(tag: &Tag, host: Option<&dyn ServerHost>) -> Option<String> {
     let mut output = String::new();
     let mut formatted = false;
-    append_paper_text(tag, &mut output, &mut formatted, include_references, 0)?;
+    append_paper_text(tag, &mut output, &mut formatted, host, 0)?;
     Some(output)
 }
 
@@ -284,38 +287,36 @@ fn append_paper_text(
     tag: &Tag,
     output: &mut String,
     formatted: &mut bool,
-    include_references: bool,
+    host: Option<&dyn ServerHost>,
     depth: usize,
 ) -> Option<()> {
-    if depth >= 32 {
+    if depth >= MAX_TEXT_DEPTH {
         return None;
     }
     let (literal, color, reference) = match tag {
         Tag::List(children) => {
             for child in children {
-                append_paper_text(child, output, formatted, include_references, depth + 1)?;
+                let child = if host.is_some() {
+                    unwrap_list_item(child)
+                } else {
+                    child
+                };
+                append_paper_text(child, output, formatted, host, depth + 1)?;
             }
             return Some(());
         }
         Tag::String(literal) => (literal.to_string().ok()?, None, false),
         Tag::Compound(_) => {
-            let (contents, reference) = match tag.get("text") {
-                Some(contents) => (contents, false),
-                // Paper compares the unresolved key or selector pattern in menu filters.
-                None if include_references => {
-                    (tag.get("keybind").or_else(|| tag.get("selector"))?, true)
-                }
-                None => return None,
-            };
-            let Tag::String(literal) = contents else {
-                return None;
+            let (literal, reference) = match tag.get("text") {
+                Some(contents) => (text_string(contents)?, false),
+                None => (nonliteral_contents(host?, tag, depth)?, true),
             };
             let color = match tag.get("color") {
                 Some(Tag::String(color)) => Some(color.to_string().ok()?),
                 None => None,
                 _ => return None,
             };
-            (literal.to_string().ok()?, color, reference)
+            (literal, color, reference)
         }
         _ => return None,
     };
@@ -378,32 +379,195 @@ fn append_paper_text(
             *formatted = true;
         }
     }
-    output.push_str(&literal);
+    if host.is_some() {
+        append_bounded(output, &literal)?;
+    } else {
+        output.push_str(&literal);
+    }
     if let Some(extra) = tag.get("extra") {
-        append_paper_text(extra, output, formatted, include_references, depth + 1)?;
+        append_paper_text(extra, output, formatted, host, depth + 1)?;
     }
     Some(())
 }
 
-fn same_text(a: &Tag, b: &Tag) -> bool {
+fn text_string(tag: &Tag) -> Option<String> {
+    match tag {
+        Tag::String(text) => text.to_string().ok(),
+        _ => None,
+    }
+}
+
+fn unwrap_list_item(tag: &Tag) -> &Tag {
+    // Minecraft uses a one-entry compound to wrap bare items in mixed NBT lists.
+    match tag {
+        Tag::Compound(fields) if fields.len() == 1 => tag.get("").unwrap_or(tag),
+        _ => tag,
+    }
+}
+
+fn append_bounded(output: &mut String, text: &str) -> Option<()> {
+    // A cropped string could pass a whitelist (or escape a blacklist).
+    if output.len().saturating_add(text.len()) > MAX_LEGACY_TEXT {
+        return None;
+    }
+    output.push_str(text);
+    Some(())
+}
+
+fn nonliteral_contents(host: &dyn ServerHost, tag: &Tag, depth: usize) -> Option<String> {
+    if let Some(key) = tag.get("translate") {
+        let key = text_string(key)?;
+        let template = host
+            .server_default_translation(&key)?
+            .unwrap_or_else(|| tag.get("fallback").and_then(text_string).unwrap_or(key));
+        let arguments = match tag.get("with") {
+            Some(Tag::List(arguments)) => arguments.as_slice(),
+            None => &[],
+            _ => return None,
+        };
+        return translate_contents(host, template, arguments, depth);
+    }
+    if let Some(reference) = tag.get("keybind").or_else(|| tag.get("selector")) {
+        return text_string(reference);
+    }
+    None
+}
+
+fn append_argument(
+    host: &dyn ServerHost,
+    tag: &Tag,
+    output: &mut String,
+    depth: usize,
+) -> Option<()> {
+    if depth >= MAX_TEXT_DEPTH {
+        return None;
+    }
+    let text = match tag {
+        Tag::List(children) => {
+            for child in children {
+                append_argument(host, unwrap_list_item(child), output, depth + 1)?;
+            }
+            return Some(());
+        }
+        Tag::Byte(n) => n.to_string(),
+        Tag::Short(n) => n.to_string(),
+        Tag::Int(n) => n.to_string(),
+        Tag::Long(n) => n.to_string(),
+        Tag::Float(n) => java_float_to_string(f32::from_bits(*n)),
+        Tag::Double(n) => java_double_to_string(f64::from_bits(*n)),
+        Tag::String(_) => text_string(tag)?,
+        Tag::Compound(_) => match tag.get("text") {
+            Some(text) => text_string(text)?,
+            // Paper's unstyled visit of an unresolved score or NBT component is empty.
+            None if tag.get("score").is_some() || tag.get("nbt").is_some() => String::new(),
+            None => nonliteral_contents(host, tag, depth)?,
+        },
+        _ => return None,
+    };
+    append_bounded(output, &text)?;
+    if let Some(extra) = tag.get("extra") {
+        append_argument(host, extra, output, depth + 1)?;
+    }
+    Some(())
+}
+
+enum TranslationPart<'a> {
+    Text(&'a str),
+    Argument(usize),
+}
+
+// `TranslatableContents` checks the entire template before visiting the unstyled
+// arguments. One missing argument or unsupported token uses the whole raw template.
+fn translate_contents(
+    host: &dyn ServerHost,
+    template: String,
+    arguments: &[Tag],
+    depth: usize,
+) -> Option<String> {
+    if template.len() > MAX_LEGACY_TEXT {
+        return None;
+    }
+    let mut tokens = Vec::new();
+    let mut remaining = template.as_str();
+    let mut sequential = 0usize;
+    while let Some((before, suffix)) = remaining.split_once('%') {
+        if !before.is_empty() {
+            tokens.push(TranslationPart::Text(before));
+        }
+        if let Some(rest) = suffix.strip_prefix('%') {
+            tokens.push(TranslationPart::Text("%"));
+            remaining = rest;
+            continue;
+        }
+        let (index, rest) = if let Some(rest) = suffix.strip_prefix('s') {
+            let index = sequential;
+            sequential += 1;
+            (index, rest)
+        } else {
+            let after_index = suffix.trim_start_matches(|ch: char| ch.is_ascii_digit());
+            let index = &suffix[..suffix.len() - after_index.len()];
+            let (Ok(index), Some(rest)) = (index.parse::<i32>(), after_index.strip_prefix("$s"))
+            else {
+                return Some(template);
+            };
+            if index <= 0 {
+                return Some(template);
+            }
+            (index as usize - 1, rest)
+        };
+        if index >= arguments.len() {
+            return Some(template);
+        }
+        tokens.push(TranslationPart::Argument(index));
+        remaining = rest;
+    }
+    let mut rendered = String::new();
+    let mut rendered_arguments = BTreeMap::new();
+    for token in tokens {
+        match token {
+            TranslationPart::Text(text) => append_bounded(&mut rendered, text)?,
+            TranslationPart::Argument(index) => {
+                use std::collections::btree_map::Entry;
+                let argument = match rendered_arguments.entry(index) {
+                    Entry::Occupied(existing) => existing.into_mut(),
+                    Entry::Vacant(slot) => {
+                        let mut value = String::new();
+                        append_argument(
+                            host,
+                            unwrap_list_item(&arguments[index]),
+                            &mut value,
+                            depth + 1,
+                        )?;
+                        slot.insert(value)
+                    }
+                };
+                append_bounded(&mut rendered, argument)?;
+            }
+        }
+    }
+    append_bounded(&mut rendered, remaining)?;
+    Some(rendered)
+}
+
+fn same_text(host: &dyn ServerHost, a: &Tag, b: &Tag) -> bool {
     a == b
         || matches!(
-            (render_paper_text(a, true), render_paper_text(b, true)),
+            (render_paper_text(a, Some(host)), render_paper_text(b, Some(host))),
             (Some(a), Some(b)) if a == b
         )
 }
 
-fn same_lore(a: &ItemStack, b: &ItemStack) -> bool {
+fn same_lore(host: &dyn ServerHost, a: &ItemStack, b: &ItemStack) -> bool {
     let lines = |line: &&Tag| !crate::soulbound_rune::is_soulbound_lore(line);
-    fn comparable(line: &Tag) -> Result<String, &Tag> {
-        render_paper_text(line, true).ok_or(line)
+    fn comparable<'a>(host: &dyn ServerHost, line: &'a Tag) -> Result<String, &'a Tag> {
+        render_paper_text(line, Some(host)).ok_or(line)
     }
     match (paper_lore(a), paper_lore(b)) {
         (Some(a), Some(b)) => a
             .iter()
             .filter(lines)
-            .map(comparable)
-            .eq(b.iter().filter(lines).map(comparable)),
+            .map(|line| comparable(host, line))
+            .eq(b.iter().filter(lines).map(|line| comparable(host, line))),
         (None, None) => true,
         _ => false,
     }
@@ -451,14 +615,14 @@ fn similar(host: &dyn ServerHost, a: &ItemStack, b: &ItemStack, check_lore: bool
         component(a, "minecraft:custom_name"),
         component(b, "minecraft:custom_name"),
     ) {
-        (Some(a), Some(b)) => same_text(a, b),
+        (Some(a), Some(b)) => same_text(host, a, b),
         (None, None) => true,
         _ => false,
     };
     has_meta(a) == has_meta(b)
         && same_name
         && paper_model_data(a) == paper_model_data(b)
-        && (!check_lore || same_lore(a, b))
+        && (!check_lore || same_lore(host, a, b))
         && (potion_type(a) == potion_type(b)
             || !matches!(
                 a.item().id(host).as_str(),
@@ -1406,11 +1570,143 @@ mod tests {
         let selector = Tag::compound([("selector", literal("@s")), ("color", literal("gray"))]);
         let keybind = colored_lore("keybind", "aqua");
         assert_eq!(
-            render_paper_text(&keybind, true).as_deref(),
+            render_paper_text(&keybind, Some(&host)).as_deref(),
             Some("§bwarehouse.control.key§r 后缀")
         );
         assert!(filter.accepts(&host, &make(selector.clone(), keybind)));
         assert!(!filter.accepts(&host, &make(selector, colored_lore("keybind", "gray"))));
+    }
+
+    #[test]
+    fn cargo_compares_translatable_item_meta_using_paper_formatting() {
+        use mod_api::{
+            BackendRef, Host,
+            prelude::{ConfigServerHost, ItemsHost},
+        };
+
+        struct TestServer {
+            game: FakeHost,
+            language_available: bool,
+        }
+        impl Host for TestServer {
+            fn backend(&self) -> Option<BackendRef<'_>> {
+                self.game.backend()
+            }
+        }
+        impl ServerHost for TestServer {}
+        mod_api::impl_host_areas!(TestServer, except(items));
+        mod_api::impl_server_host_areas!(TestServer, except(config));
+        impl ItemsHost for TestServer {
+            fn item_key(&self, id: &Identifier) -> Option<ItemKey> {
+                self.game.item_key(id)
+            }
+        }
+        impl ConfigServerHost for TestServer {
+            fn server_default_translation(&self, key: &str) -> Option<Option<String>> {
+                self.language_available.then(|| match key {
+                    "item.minecraft.apple" => Some("Apple".into()),
+                    "chat.type.text" => Some("<%s> %s".into()),
+                    _ => None,
+                })
+            }
+        }
+
+        let mut host = TestServer {
+            game: FakeHost::new(),
+            language_available: true,
+        };
+        let id = Identifier::parse("minecraft:stick").unwrap();
+        host.game.registries.resolve_items([id.clone()]).unwrap();
+        let item = host.item_key(&id).unwrap();
+        let stack = |name: Tag, line: Tag| {
+            let mut stack = ItemStack::new(item, 1).unwrap();
+            stack
+                .set_components(Compound::from([
+                    ("minecraft:custom_name".into(), name),
+                    ("minecraft:lore".into(), Tag::List(vec![line])),
+                ]))
+                .unwrap();
+            stack
+        };
+        let literal = |value: &str| Tag::String(value.into());
+        let apple = Tag::compound([
+            ("translate", literal("item.minecraft.apple")),
+            ("fallback", literal("苹果")),
+        ]);
+        let lore = Tag::compound([
+            ("translate", literal("chat.type.text")),
+            ("color", literal("aqua")),
+            (
+                "with",
+                Tag::List(vec![crate::items::text("雪", "red", false), apple.clone()]),
+            ),
+            (
+                "extra",
+                Tag::List(vec![Tag::compound([("", literal(" 后缀"))])]),
+            ),
+        ]);
+        assert_eq!(
+            render_paper_text(&lore, Some(&host)).as_deref(),
+            Some("§b<雪> Apple§r 后缀")
+        );
+        let archive = stack(literal("Apple"), literal("§b<雪> Apple§r 后缀"));
+        let filter = restored_filter(&host, &archive);
+        let translated = stack(apple.clone(), lore.clone());
+        assert!(filter.accepts(&host, &translated));
+        assert_eq!(
+            component(&translated, "minecraft:custom_name"),
+            Some(&apple)
+        );
+        assert_eq!(paper_lore(&translated), Some([lore].as_slice()));
+
+        let unmatched = literal("warehouse.item.missing");
+        for (fallback, with, expected) in [
+            (None, vec![], "warehouse.item.missing"),
+            (Some("锡粉"), vec![], "锡粉"),
+            (
+                Some("%2$s / %1$s / %s / %%"),
+                vec![literal("雪"), literal("锡")],
+                "锡 / 雪 / 雪 / %",
+            ),
+            (Some("Value %s!"), vec![], "Value %s!"),
+            (Some("Value %d!"), vec![Tag::Int(9)], "Value %d!"),
+            (
+                Some("%s / %s / %s / %s"),
+                vec![
+                    Tag::Byte(1),
+                    Tag::compound([("", Tag::Float(123.0f32.to_bits()))]),
+                    Tag::Double(1.0e20f64.to_bits()),
+                    Tag::Int(9),
+                ],
+                "1 / 123.0 / 1.0E20 / 9",
+            ),
+        ] {
+            let mut tag = Compound::from([
+                ("translate".into(), unmatched.clone()),
+                ("with".into(), Tag::List(with)),
+            ]);
+            if let Some(fallback) = fallback {
+                tag.insert("fallback".into(), literal(fallback));
+            }
+            assert_eq!(
+                render_paper_text(&Tag::Compound(tag), Some(&host)).as_deref(),
+                Some(expected)
+            );
+        }
+
+        let too_long = Tag::compound([
+            ("translate", unmatched),
+            ("fallback", literal("%1$s%1$s")),
+            (
+                "with",
+                Tag::List(vec![literal(&"x".repeat(MAX_LEGACY_TEXT / 2 + 1))]),
+            ),
+        ]);
+        assert!(render_paper_text(&too_long, Some(&host)).is_none());
+
+        host.language_available = false;
+        assert!(!filter.accepts(&host, &translated));
+        assert!(restored_filter(&host, &translated).accepts(&host, &translated));
     }
 
     #[test]
