@@ -19,7 +19,6 @@ type Pos = [i32; 3];
 type ChunkPos = [i32; 2];
 type Address = (String, Pos);
 
-const INTERVAL: u64 = 2 * 20;
 const PANE_PROPERTIES: [&str; 5] = ["north", "east", "south", "west", "waterlogged"];
 
 const MARKERS: AttachmentType<Compound> = AttachmentType {
@@ -36,14 +35,14 @@ const MARKERS: AttachmentType<Compound> = AttachmentType {
 
 #[derive(Clone, Copy, Default)]
 struct Phase {
-    round: u64,
+    round: Option<i64>,
     color: usize,
 }
 
 impl Phase {
-    fn color(&mut self, round: u64, colors: &'static [&'static str]) -> &'static str {
-        if self.round != round {
-            self.round = round;
+    fn color(&mut self, round: i64, colors: &'static [&'static str]) -> &'static str {
+        if self.round != Some(round) {
+            self.round = Some(round);
             self.color = (self.color + 1) % colors.len();
         }
         colors[self.color]
@@ -65,7 +64,6 @@ struct Recolor {
 
 #[derive(Default)]
 struct Runtime {
-    ticks: u64,
     phases: [Phase; BLOCK_COUNT],
     chunks: BTreeMap<String, BTreeSet<ChunkPos>>,
     seeded: BTreeSet<String>,
@@ -323,11 +321,6 @@ pub(crate) fn drop_item(level: &dyn LevelHost, event: &mut BlockDropsEvent<'_>) 
     event.drops.push(ItemDrop::new(stack, at, velocity, delay));
 }
 
-pub(crate) fn begin_tick() {
-    let mut state = RUNTIME.lock().unwrap();
-    state.ticks = state.ticks.saturating_add(1);
-}
-
 pub(crate) fn loaded(host: &mut dyn ServerHost, dimension: &str, column: ChunkPos) {
     if host
         .level(dimension)
@@ -386,7 +379,11 @@ fn cleanup(host: &mut dyn ServerHost, level: LevelRef, dimension: &str) {
     }
 }
 
-pub(crate) fn tick(host: &mut dyn ServerHost, level: LevelRef) {
+pub(crate) fn tick(
+    host: &mut dyn ServerHost,
+    level: LevelRef,
+    profile: Option<&mut crate::timings::Cycle>,
+) {
     if !level.in_place(host) {
         return;
     }
@@ -400,16 +397,17 @@ pub(crate) fn tick(host: &mut dyn ServerHost, level: LevelRef) {
             loaded(host, &dimension, column.pos());
         }
     }
-    let (round, columns) = {
-        let state = RUNTIME.lock().unwrap();
-        if state.ticks == 0 || state.ticks % INTERVAL != 0 {
-            return;
-        }
-        (
-            state.ticks / INTERVAL,
-            state.chunks.get(&dimension).cloned().unwrap_or_default(),
-        )
+    let Some(profile) = profile else {
+        return;
     };
+    let round = profile.round;
+    let columns = RUNTIME
+        .lock()
+        .unwrap()
+        .chunks
+        .get(&dimension)
+        .cloned()
+        .unwrap_or_default();
     for column in columns {
         let Ok(map) = read(host, column) else {
             continue;
@@ -441,7 +439,9 @@ pub(crate) fn tick(host: &mut dyn ServerHost, level: LevelRef) {
             if RUNTIME.lock().unwrap().retired.contains_key(&address) {
                 continue;
             }
-            recolor(host, level, address, rainbow, index, round);
+            profile.measure(host, rainbow.kind.id(), at, |host| {
+                recolor(host, level, address, rainbow, index, round)
+            });
         }
     }
 }
@@ -452,7 +452,7 @@ fn recolor(
     at: Address,
     rainbow: Rainbow,
     index: usize,
-    round: u64,
+    round: i64,
 ) -> Option<()> {
     let pos = at.1;
     let old = level.block_state(host, pos)?;

@@ -2,7 +2,7 @@
 
 use std::{collections::BTreeMap, sync::Mutex};
 
-use mod_api::{CommandArgumentValue, CommandInvocation, CommandSource, ServerHost};
+use mod_api::{CommandArgumentValue, CommandInvocation, CommandSource, LevelRef, ServerHost};
 
 use crate::{admin_commands, guide};
 
@@ -47,14 +47,25 @@ impl Options {
 type Position = [i32; 3];
 
 pub(crate) struct Cycle {
-    dimension: String,
+    pub(crate) dimension: String,
+    pub(crate) round: i64,
     locations: BTreeMap<Position, (String, u64)>,
 }
 
 impl Cycle {
-    pub(crate) fn new(dimension: &str) -> Self {
+    pub(crate) fn for_level(host: &dyn ServerHost, level: LevelRef, interval: u32) -> Option<Self> {
+        if !level.in_place(host) {
+            return None;
+        }
+        let round = round_at(level.game_time(host)?, interval)?;
+        let dimension = level.dimension().id(host)?;
+        Some(Self::new(dimension, round))
+    }
+
+    fn new(dimension: String, round: i64) -> Self {
         Self {
-            dimension: dimension.into(),
+            dimension,
+            round,
             locations: BTreeMap::new(),
         }
     }
@@ -92,6 +103,11 @@ impl Cycle {
         let elapsed = host.server_monotonic_nanos().saturating_sub(start);
         self.record(id, pos, elapsed.saturating_sub(children));
     }
+}
+
+fn round_at(time: i64, interval: u32) -> Option<i64> {
+    let interval = i64::from(interval.max(1));
+    (time.rem_euclid(interval) == 0).then_some(time)
 }
 
 #[derive(Default)]
@@ -194,7 +210,7 @@ fn summarize(cycles: &[Cycle], options: Options, interval: u32) -> Vec<String> {
 
     let mut lines = vec![
         "远古工艺性能报告 · 最近一轮已完成的采样".into(),
-        "采样范围包括网络中的设备、能源调节器及发电机、货运管理器及输入节点。".into(),
+        "采样范围包括网络设备、发电与货运节点，以及彩虹方块换色。".into(),
         format!(
             "设备周期 {interval} 刻 · {} 个已采样方块 · 总耗时 {}",
             total.blocks,
@@ -303,9 +319,19 @@ mod tests {
     }
 
     #[test]
+    fn the_shared_cycle_uses_the_configured_interval_on_the_signed_server_clock() {
+        assert_eq!(round_at(10, 10), Some(10));
+        assert_eq!(round_at(10, 25), None);
+        assert_eq!(round_at(40, 25), None);
+        assert_eq!(round_at(25, 25), Some(25));
+        assert_eq!(round_at(50, 25), Some(50));
+        assert_eq!(round_at(-25, 25), Some(-25));
+    }
+
+    #[test]
     fn reports_order_genuine_aggregates_and_never_publish_a_running_cycle() {
         let profiler = Profiler::default();
-        let mut cycle = Cycle::new("minecraft:the_nether");
+        let mut cycle = Cycle::new("minecraft:the_nether".into(), 1);
         cycle.record("ENERGY_REGULATOR", [-1, 63, -16], 2_000_000);
         cycle.record("ENERGY_REGULATOR", [-1, 63, -16], 1_000_000);
         cycle.record("ENERGY_REGULATOR", [-2, 63, -16], 3_000_000);

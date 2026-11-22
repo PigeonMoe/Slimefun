@@ -1371,25 +1371,19 @@ pub(crate) fn tick(
     settings: Settings,
     rolls: &Rolls,
     butchers: &crate::android_butchery::Butchers,
-    profiler: &crate::timings::Profiler,
+    profile: Option<&mut crate::timings::Cycle>,
 ) {
     if !level.in_place(host) {
         return;
     }
     plain_network::clean_level(host, level);
-    if !level
-        .game_time(host)
-        .is_some_and(|time| time.rem_euclid(i64::from(settings.block_ticker_delay)) == 0)
-    {
-        return;
-    }
-    let Some(dimension) = level.dimension().id(host) else {
+    let Some(profile) = profile else {
         return;
     };
+    let dimension = profile.dimension.clone();
     let Ok(nodes) = networks.lock().unwrap().nodes(host, &dimension) else {
         return;
     };
-    let mut profile = crate::timings::Cycle::new(&dimension);
     let active: BTreeMap<_, _> = nodes
         .iter()
         .filter_map(|(&pos, node)| {
@@ -1467,7 +1461,7 @@ pub(crate) fn tick(
                         &group,
                         rolls,
                         settings.solar_night_in_other_dimensions,
-                        &mut profile,
+                        profile,
                         &mut generators,
                     )
                 };
@@ -1502,7 +1496,7 @@ pub(crate) fn tick(
                             level,
                             &active,
                             &group,
-                            &mut profile,
+                            profile,
                         );
                         profile.record_parent(host, &active[&start].0.id, start, started, inputs);
                     }
@@ -1668,7 +1662,6 @@ pub(crate) fn tick(
     }) {
         network_visuals::reconcile(host, level, &dimension, labels);
     }
-    profiler.collect(profile);
     let mut networks = networks.lock().unwrap();
     if gps_signals.is_empty() {
         networks.gps_signals.remove(&dimension);

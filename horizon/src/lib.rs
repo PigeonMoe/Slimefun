@@ -2036,13 +2036,10 @@ impl Hooks for Slimefun {
     }
 
     fn server_tick(&self, host: &mut dyn ServerHost, event: &mut mod_api::ServerTickEvent) {
-        if let mod_api::ServerTickPhase::ServerTickStart { world_running } = event.phase {
+        if let mod_api::ServerTickPhase::ServerTickStart { .. } = event.phase {
             self.profiler.begin_tick();
             self.radiation.begin_tick(|| host.server_monotonic_millis());
             self.smelters_pickaxes.begin_tick();
-            if world_running {
-                rainbow::placed::begin_tick();
-            }
         }
         if let mod_api::ServerTickPhase::ServerTickEnd { .. } = event.phase {
             self.profiler.finish_tick();
@@ -2081,6 +2078,7 @@ impl Hooks for Slimefun {
         if let HostSide::Server(host) = host {
             self.delayed_crafts.tick(host, event.level);
             let settings = *self.settings.lock().unwrap();
+            let mut cycle = timings::Cycle::for_level(host, event.level, settings.block_ticker_delay);
             self.magic_weapons.tick(host, event.level, &self.rolls);
             self.grapple.tick(host, event.level);
             self.butcher_androids.tick(host, event.level, &self.rolls);
@@ -2091,14 +2089,17 @@ impl Hooks for Slimefun {
                 settings,
                 &self.rolls,
                 &self.butcher_androids,
-                &self.profiler,
+                cycle.as_mut(),
             );
             factory::VIEWERS.refresh(host, event.level);
             self.crucibles.tick(host, event.level);
             self.industrial_miners.tick(host, event.level, &self.rolls);
             self.composters.tick(host, event.level, &self.rolls);
             ancient_altar::tick(host, event.level);
-            rainbow::placed::tick(host, event.level);
+            rainbow::placed::tick(host, event.level, cycle.as_mut());
+            if let Some(cycle) = cycle {
+                self.profiler.collect(cycle);
+            }
             hologram_projector::tick(host, event.level);
             auto_crafter::refresh(host, event.level);
             armor_forge::tick_equipment(host, event.level);
