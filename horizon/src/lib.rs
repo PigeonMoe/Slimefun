@@ -935,6 +935,8 @@ impl Hooks for Slimefun {
             Command::op("sf research clear <player:word>", 2),
             Command::new("slimefun restore-backpack"),
             Command::new("sf restore-backpack"),
+            Command::op("slimefun backpack <owner:word> <id:word>", 2),
+            Command::op("sf backpack <owner:word> <id:word>", 2),
             Command::op("slimefun storage", 2),
             Command::op("sf storage", 2),
             Command::op("slimefun storage restore-universal <preset:text>", 2),
@@ -1047,6 +1049,24 @@ impl Hooks for Slimefun {
                 return Flow::Cancel;
             }
             Some("storage") => storage::command(host, event, path.next(), &self.networks, &self.universal),
+            Some("backpack") => {
+                let message = match (
+                    &*event.source,
+                    event.command.argument("owner"),
+                    event.command.argument("id"),
+                ) {
+                    (
+                        CommandSource::Player { player, .. },
+                        Some(CommandArgumentValue::String(owner)),
+                        Some(CommandArgumentValue::String(id)),
+                    ) => match backpacks::recover_lost(host, *player, event.source.permission(), owner, id) {
+                        Ok(()) => "Restored backpack added to your inventory.".into(),
+                        Err(error) => error,
+                    },
+                    _ => "Run /sf backpack <player name or UUID> <id> as a player.".into(),
+                };
+                vec![message]
+            }
             Some("restore-backpack") => {
                 let message = match *event.source {
                     CommandSource::Player { player, .. } => match backpacks::restore_held(
