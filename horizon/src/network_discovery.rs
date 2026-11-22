@@ -19,6 +19,7 @@ pub(super) struct Discovery {
     topology: Topology,
     graphs: BTreeMap<Position, Graph>,
     energy_order: Vec<Position>,
+    cargo_order: Vec<Position>,
 }
 
 impl Discovery {
@@ -45,10 +46,10 @@ impl Discovery {
                 Some((pos, (family, role)))
             })
             .collect();
-        // An unavailable chunk does not unregister Paper's EnergyNet. Keep
+        // Unloading a chunk does not unregister Paper's networks. Keep
         // positions already observed there until a loaded block disproves them.
         for (&pos, &role) in &self.topology {
-            if role.0 == Network::Energy && !topology.contains_key(&pos) && !is_loaded(pos) {
+            if !topology.contains_key(&pos) && !is_loaded(pos) {
                 topology.insert(pos, role);
             }
         }
@@ -56,42 +57,34 @@ impl Discovery {
 
         // An explicitly disabled root has no registered Paper BlockTicker.
         // The existing positions still classify normally for passive routing.
-        let mut groups = if crate::availability::globally_enabled("ENERGY_REGULATOR") {
-            self.discover_energy(active, budget)
-        } else {
-            Vec::new()
-        };
-        let cargo_enabled = crate::availability::globally_enabled("CARGO_MANAGER");
-        let mut claimed = BTreeSet::new();
-        for (&pos, &(family, role)) in &self.topology {
-            if !cargo_enabled || family != Network::Cargo || role != Role::Regulator || !claimed.insert(pos)
-            {
-                continue;
+        let mut groups = Vec::new();
+        for (family, root_id) in [
+            (Network::Energy, "ENERGY_REGULATOR"),
+            (Network::Cargo, "CARGO_MANAGER"),
+        ] {
+            if crate::availability::globally_enabled(root_id) {
+                groups.extend(self.discover_family(active, family, budget));
             }
-            let graph = self.graphs.entry(pos).or_insert_with(|| Graph::new(pos));
-            graph.advance(&self.topology, pos, family, budget);
-            let group = graph
-                .members
-                .iter()
-                .copied()
-                .filter(|&member| member == pos || claimed.insert(member))
-                .collect();
-            groups.push((pos, family, group));
         }
         groups.sort_unstable_by_key(|(root, _, _)| *root);
         groups
     }
 
-    fn discover_energy(
+    fn discover_family(
         &mut self,
         active: &BTreeMap<Position, (&Node, u32)>,
+        family: Network,
         budget: u32,
     ) -> Vec<Group> {
+        let order = match family {
+            Network::Energy => &mut self.energy_order,
+            Network::Cargo => &mut self.cargo_order,
+            Network::Independent => return Vec::new(),
+        };
         let mut unclaimed: BTreeSet<_> = active
             .keys()
             .filter_map(|&pos| {
-                (self.topology.get(&pos) == Some(&(Network::Energy, Role::Regulator)))
-                    .then_some(pos)
+                (self.topology.get(&pos) == Some(&(family, Role::Regulator))).then_some(pos)
             })
             .collect();
         if unclaimed.is_empty() {
@@ -101,7 +94,7 @@ impl Discovery {
         let mut claimed_members = BTreeSet::new();
         let mut groups: Vec<Group> = Vec::new();
         let mut added = Vec::new();
-        let mut registered = self.energy_order.iter().copied();
+        let mut registered = order.iter().copied();
         while let Some(root) = registered.next().or_else(|| unclaimed.first().copied()) {
             let graph = self.graphs.entry(root).or_insert_with(|| {
                 added.push(root);
@@ -114,13 +107,15 @@ impl Discovery {
             } else {
                 let mut members = Vec::new();
                 if unclaimed.remove(&root) {
-                    graph.advance(&self.topology, root, Network::Energy, budget);
+                    graph.advance(&self.topology, root, family, budget);
                     members.extend(graph.members.iter().copied().filter(|pos| {
-                        active.contains_key(pos) && (*pos == root || claimed_members.insert(*pos))
+                        active.get(pos).is_some_and(|(node, _)| {
+                            *pos == root || (!node.regulator() && claimed_members.insert(*pos))
+                        })
                     }));
                 }
                 let group = groups.len();
-                groups.push((root, Network::Energy, members));
+                groups.push((root, family, members));
                 group
             };
             // Paper registers positions on queueing, before classification.
@@ -131,7 +126,7 @@ impl Discovery {
                 groups[group].2.push(pos);
             }
         }
-        self.energy_order.extend(added);
+        order.extend(added);
         groups.retain(|(_, _, members)| !members.is_empty());
         for (_, _, members) in &mut groups {
             members.sort_unstable();
@@ -139,11 +134,24 @@ impl Discovery {
         groups
     }
 
-    pub(super) fn retire_energy_regulator(&mut self, pos: Position) {
-        if self.topology.get(&pos) == Some(&(Network::Energy, Role::Regulator)) {
-            self.graphs.remove(&pos);
-            self.energy_order.retain(|&root| root != pos);
+    pub(super) fn retire_regulator(&mut self, pos: Position) {
+        self.graphs.remove(&pos);
+        self.energy_order.retain(|&root| root != pos);
+        self.cargo_order.retain(|&root| root != pos);
+    }
+
+    pub(super) fn cargo_due(&mut self, root: Position, delay: u32) -> bool {
+        let Some(graph) = self.graphs.get_mut(&root) else {
+            return false;
+        };
+        // Paper counts only connected ticker calls on this CargoNet, and
+        // recreating that net discards the previous counter.
+        if graph.cargo_elapsed < delay {
+            graph.cargo_elapsed += 1;
+            return false;
         }
+        graph.cargo_elapsed = 0;
+        true
     }
 
     fn update(&mut self, topology: Topology) {
@@ -185,8 +193,9 @@ impl Discovery {
             }
             true
         });
-        self.energy_order
-            .retain(|root| self.graphs.contains_key(root));
+        for order in [&mut self.energy_order, &mut self.cargo_order] {
+            order.retain(|root| self.graphs.contains_key(root));
+        }
         self.topology = topology;
     }
 }
@@ -196,6 +205,7 @@ struct Graph {
     queued: BTreeSet<Position>,
     pending: VecDeque<Position>,
     members: BTreeSet<Position>,
+    cargo_elapsed: u32,
 }
 
 impl Graph {
@@ -205,6 +215,7 @@ impl Graph {
             queued: BTreeSet::from([start]),
             pending: VecDeque::from([start]),
             members: BTreeSet::from([start]),
+            cargo_elapsed: 0,
         }
     }
 
@@ -228,6 +239,7 @@ impl Graph {
             let Some(&(kind, role)) = topology.get(&pos) else {
                 continue;
             };
+            // Only CargoNet classifies another regulator as a relay.
             if kind != family
                 || (family == Network::Energy && role == Role::Regulator && pos != root)
             {
@@ -303,6 +315,71 @@ mod tests {
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].0, second);
         assert_eq!(groups[0].2, [distant_cell, second, relay, original_cell]);
+    }
+
+    #[test]
+    fn an_older_cargo_manager_keeps_control_and_the_conflicting_manager_extends_the_mesh() {
+        let manager = node("CARGO_MANAGER");
+        let terminal = node("CARGO_NODE_OUTPUT");
+        let older = [29, 70, 0];
+        let later = [23, 70, 0];
+        let near = [29, 70, 6];
+        let far = [17, 70, 0];
+        let mut active = BTreeMap::from([(older, (&manager, 0)), (near, (&terminal, 0))]);
+        let mut discovery = Discovery::default();
+        assert_eq!(
+            discovery.discover(&active, 200, |_| true)[0].2,
+            [older, near]
+        );
+
+        active.insert(later, (&manager, 0));
+        active.insert(far, (&terminal, 0));
+        let groups = discovery.discover(&active, 200, |_| true);
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].0, older);
+        assert_eq!(groups[0].2, [far, later, older, near]);
+
+        active.remove(&older);
+        let groups = discovery.discover(&active, 200, |_| true);
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].0, later);
+        assert_eq!(groups[0].2, [far, later]);
+    }
+
+    #[test]
+    fn a_parked_cargo_manager_keeps_conflicts_and_resumes_its_existing_tick_counter() {
+        let manager = node("CARGO_MANAGER");
+        let terminal = node("CARGO_NODE_INPUT");
+        let older = [33, 70, 0];
+        let later = [31, 70, 0];
+        let input = [30, 70, 0];
+        let mut active = BTreeMap::from([(older, (&manager, 0)), (input, (&terminal, 0))]);
+        let mut discovery = Discovery::default();
+        assert_eq!(
+            discovery.discover(&active, 200, |_| true)[0].2,
+            [input, older]
+        );
+        assert!(!discovery.cargo_due(older, 1));
+
+        active.remove(&older);
+        active.insert(later, (&manager, 0));
+        let groups = discovery.discover(&active, 200, |pos| pos[0].div_euclid(16) != 2);
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].0, older);
+        assert_eq!(groups[0].2, [later]);
+        assert!(!discovery.cargo_due(later, 0));
+
+        active.insert(older, (&manager, 0));
+        let groups = discovery.discover(&active, 200, |_| true);
+        assert_eq!(groups[0].0, older);
+        assert_eq!(groups[0].2, [input, later, older]);
+        assert!(discovery.cargo_due(older, 1));
+
+        assert!(!discovery.cargo_due(older, 1));
+        discovery.retire_regulator(older);
+        active.remove(&later);
+        discovery.discover(&active, 200, |_| true);
+        assert!(!discovery.cargo_due(older, 1));
     }
 
     #[test]
@@ -396,7 +473,7 @@ mod tests {
 
         // A registration at the same position can replace a regulator between
         // discovery rounds. Its fresh marker must not inherit the old age.
-        discovery.retire_energy_regulator(second);
+        discovery.retire_regulator(second);
         let groups = discovery.discover(&active, 200, |_| true);
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].0, first);

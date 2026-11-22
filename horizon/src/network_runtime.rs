@@ -500,26 +500,11 @@ pub(crate) struct Networks {
     levels: BTreeMap<String, Arc<Nodes>>,
     menus: BTreeMap<u128, cargo_menu::Session>,
     round_robin: HashMap<(LevelRef, Position), usize>,
-    cargo_ticks: HashMap<(LevelRef, Position), u32>,
     discoveries: BTreeMap<String, Discovery>,
     gps_signals: BTreeMap<String, BTreeMap<Position, (u128, u32)>>,
 }
 
 impl Networks {
-    fn cargo_due(&mut self, level: LevelRef, pos: Position, delay: u32) -> bool {
-        if delay == 0 {
-            self.cargo_ticks.remove(&(level, pos));
-            return true;
-        }
-        let elapsed = self.cargo_ticks.entry((level, pos)).or_default();
-        if *elapsed < delay {
-            *elapsed += 1;
-            return false;
-        }
-        *elapsed = 0;
-        true
-    }
-
     pub(crate) fn gps_network(&self, player: u128) -> Vec<(String, Position, u32)> {
         self.gps_signals
             .iter()
@@ -552,7 +537,6 @@ impl Networks {
         self.levels.clear();
         self.menus.clear();
         self.round_robin.clear();
-        self.cargo_ticks.clear();
         self.discoveries.clear();
         self.gps_signals.clear();
         plain_network::clear();
@@ -702,7 +686,7 @@ impl Networks {
         if old.as_ref().is_some_and(|old| old.id != data.id) {
             return Err("A different Slimefun network node is registered there.".into());
         }
-        let fresh_energy_regulator = component == Component::EnergyRegulator && old.is_none();
+        let fresh_regulator = node.regulator() && old.is_none();
         let current = self.nodes(host, &dimension)?;
         let saved_node = current.get(&pos);
         let node = saved_node
@@ -728,10 +712,10 @@ impl Networks {
             }
             Ok::<_, String>(())
         })?;
-        if fresh_energy_regulator
+        if fresh_regulator
             && let Some(discovery) = self.discoveries.get_mut(&dimension)
         {
-            discovery.retire_energy_regulator(pos);
+            discovery.retire_regulator(pos);
         }
         if let Some(next) = next {
             self.levels.insert(dimension, Arc::new(next));
@@ -1402,16 +1386,6 @@ pub(crate) fn tick(
         })
         .collect();
     let mut labels = BTreeMap::new();
-    networks
-        .lock()
-        .unwrap()
-        .cargo_ticks
-        .retain(|(held_level, pos), _| {
-            *held_level != level
-                || active
-                    .get(pos)
-                    .is_some_and(|(node, _)| node.component == Component::CargoManager)
-        });
     for (&pos, &(node, _)) in &active {
         if !crate::availability::globally_enabled(&node.id) {
             continue;
@@ -1450,12 +1424,13 @@ pub(crate) fn tick(
                 .or_insert_with(|| level.is_loaded(host, pos))
         });
     for (start, family, group) in groups {
-        if family == Network::Energy && !active.contains_key(&start) {
-            labels.extend(
-                group
-                    .into_iter()
-                    .map(|pos| (pos, Some(Status::EnergyConflict))),
-            );
+        if !active.contains_key(&start) {
+            let conflict = match family {
+                Network::Energy => Status::EnergyConflict,
+                Network::Cargo => Status::CargoConflict,
+                Network::Independent => continue,
+            };
+            labels.extend(group.into_iter().map(|pos| (pos, Some(conflict))));
             continue;
         }
         let (status, conflict) = match family {
@@ -1481,11 +1456,14 @@ pub(crate) fn tick(
                     .copied()
                     .filter(|pos| !active[pos].0.regulator());
                 let status = if terminals.clone().next().is_some() {
-                    let due =
-                        networks
-                            .lock()
-                            .unwrap()
-                            .cargo_due(level, start, settings.cargo_tick_delay);
+                    let due = networks
+                        .lock()
+                        .unwrap()
+                        .discoveries
+                        .get_mut(&dimension)
+                        .is_some_and(|discovery| {
+                            discovery.cargo_due(start, settings.cargo_tick_delay)
+                        });
                     if due {
                         if settings.cargo_visualizer
                             && block_data(host, level, start)
@@ -2178,17 +2156,19 @@ mod tests {
 
     #[test]
     fn each_cargo_regulator_skips_its_own_configured_number_of_ticks() {
-        let level = FakeHost::new().level.level();
+        let manager = node("CARGO_MANAGER");
         let a = [0, 65, 0];
-        let b = [1, 65, 0];
-        let mut networks = Networks::default();
-        assert!(!networks.cargo_due(level, a, 2));
-        assert!(!networks.cargo_due(level, b, 2));
-        assert!(!networks.cargo_due(level, a, 2));
-        assert!(networks.cargo_due(level, a, 2));
-        assert!(!networks.cargo_due(level, b, 2));
-        assert!(networks.cargo_due(level, b, 0));
-        assert!(!networks.cargo_due(level, b, 2));
+        let b = [30, 65, 0];
+        let active = BTreeMap::from([(a, (&manager, 0)), (b, (&manager, 0))]);
+        let mut discovery = Discovery::default();
+        assert_eq!(discovery.discover(&active, 200, |_| true).len(), 2);
+        assert!(!discovery.cargo_due(a, 2));
+        assert!(!discovery.cargo_due(b, 2));
+        assert!(!discovery.cargo_due(a, 2));
+        assert!(discovery.cargo_due(a, 2));
+        assert!(!discovery.cargo_due(b, 2));
+        assert!(discovery.cargo_due(b, 0));
+        assert!(!discovery.cargo_due(b, 2));
     }
 
     #[test]
