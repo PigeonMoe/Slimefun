@@ -11,6 +11,7 @@ use mod_api::{
     Text, TriState,
 };
 
+mod admin_commands;
 mod advanced_processing;
 mod ancient_altar;
 mod android_butchery;
@@ -150,6 +151,7 @@ struct Slimefun {
     networks: Arc<Mutex<network_runtime::Networks>>,
     gps: gps_controls::Controls,
     guide: guide::Guide,
+    research_ranks: admin_commands::ResearchRanks,
     androids: android_ui::Menus,
     butcher_androids: android_butchery::Butchers,
     holograms: hologram_projector::Editors,
@@ -196,6 +198,7 @@ impl Default for Slimefun {
             networks: Arc::default(),
             gps: gps_controls::Controls::default(),
             guide: guide::Guide::default(),
+            research_ranks: admin_commands::ResearchRanks::default(),
             androids: android_ui::Menus::default(),
             butcher_androids: android_butchery::Butchers::default(),
             holograms: hologram_projector::Editors::default(),
@@ -285,6 +288,7 @@ impl Slimefun {
         geo_deposits::load_config(fresh, table.get("geo-resources"));
         output_chest::configure(&table);
         self.guide.configure(table.get("guide"), table.get("researches"));
+        self.research_ranks.configure(table.get("research-ranks"));
         self.ore_tools.configure(&table);
         self.grapple.configure(table.get("grappling-hook"));
         self.multi_tools.configure(table.get("multi-tool"));
@@ -416,6 +420,11 @@ impl Slimefun {
         if let Some(value) = table.get("drop-from-golems").and_then(toml::Value::as_bool) {
             settings.drop_from_golems = value;
         }
+        settings.drop_excess_command_items = table
+            .get("options")
+            .and_then(|section| section.get("drop-excess-sf-give-items"))
+            .and_then(toml::Value::as_bool)
+            .unwrap_or(false);
         if let Some(value) = table
             .get("golem-drop-chance")
             .and_then(toml::Value::as_integer)
@@ -502,7 +511,7 @@ impl Hooks for Slimefun {
             "slimefun",
             ConfigKind::Server,
             &format!("{}{}{}{}{}{}{}{}{}{}",
-            "double-ores = true\ncrucible-allow-water-in-nether = false\nlegacy-ore-washer = false\nlegacy-dust-washer = false\nlegacy-ore-grinder = true\nelectric-gold-pan-override-output-limit = [false, false, false]\nfreezer-use-vanilla-ratios = [false, false, false]\nfire-breaking-chance = 34\noutput-chest-enabled = true\ndrop-from-golems = true\ngolem-drop-chance = 75\n\n[guide]\nreceive-on-first-join = true\nshow-hidden-item-groups-in-search = false\n\n[researches]\nfree-in-creative-mode = true\nenable-fireworks = true\ndisable-learning-animation = false\n\n[URID]\nenable-tickers = true\ncustom-ticker-delay = 10\n\n[networks]\nmax-size = 200\nenable-visualizer = true\ncargo-ticker-delay = 0\n\n[wind-staff]\npower = 4\n\n[book-binder]\nbypass-vanilla-max-level = false\nhas-custom-max-level = false\ncustom-max-level = 15\n\n[solar-generator-4]\nother-dimensions-use-night-energy = false\n\n[portable-teleporter]\nteleportation-cost = 10\n\n[produce-collector]\nrange = 2\n\n[pickaxe-of-vein-mining]\nmax-blocks = 16\n\n[pickaxe-of-the-seeker]\nmax-range = 5\n\n[blade-of-vampires]\nchance = 45\n\n[reinforced-spawner]\nallow-spawn-eggs = true\n\n[ancient-altar]\nstep-delay = 8\n\n[miner-android]\nreduced-block-updates = true\n\n[industrial-miner]\ncan-mine-ancient-debris = false\ncan-mine-deepslate-ores = true\n\n[advanced-industrial-miner]\ncan-mine-ancient-debris = false\ncan-mine-deepslate-ores = true\n",
+            "double-ores = true\ncrucible-allow-water-in-nether = false\nlegacy-ore-washer = false\nlegacy-dust-washer = false\nlegacy-ore-grinder = true\nelectric-gold-pan-override-output-limit = [false, false, false]\nfreezer-use-vanilla-ratios = [false, false, false]\nfire-breaking-chance = 34\noutput-chest-enabled = true\ndrop-from-golems = true\ngolem-drop-chance = 75\n\n[options]\ndrop-excess-sf-give-items = false\n\n[guide]\nreceive-on-first-join = true\nshow-hidden-item-groups-in-search = false\n\n[researches]\nfree-in-creative-mode = true\nenable-fireworks = true\ndisable-learning-animation = false\n\n[URID]\nenable-tickers = true\ncustom-ticker-delay = 10\n\n[networks]\nmax-size = 200\nenable-visualizer = true\ncargo-ticker-delay = 0\n\n[wind-staff]\npower = 4\n\n[book-binder]\nbypass-vanilla-max-level = false\nhas-custom-max-level = false\ncustom-max-level = 15\n\n[solar-generator-4]\nother-dimensions-use-night-energy = false\n\n[portable-teleporter]\nteleportation-cost = 10\n\n[produce-collector]\nrange = 2\n\n[pickaxe-of-vein-mining]\nmax-blocks = 16\n\n[pickaxe-of-the-seeker]\nmax-range = 5\n\n[blade-of-vampires]\nchance = 45\n\n[reinforced-spawner]\nallow-spawn-eggs = true\n\n[ancient-altar]\nstep-delay = 8\n\n[miner-android]\nreduced-block-updates = true\n\n[industrial-miner]\ncan-mine-ancient-debris = false\ncan-mine-deepslate-ores = true\n\n[advanced-industrial-miner]\ncan-mine-ancient-debris = false\ncan-mine-deepslate-ores = true\n",
                 enchantment_machines::default_config(),
                 beheading::DEFAULT_CONFIG,
                 explosive_tools::DEFAULT_CONFIG,
@@ -925,6 +934,14 @@ impl Hooks for Slimefun {
             Command::new("sf search [query:text]"),
             Command::new("slimefun status"),
             Command::new("sf status"),
+            Command::op("slimefun charge", 1),
+            Command::op("sf charge", 1),
+            Command::op("slimefun give <target:word> <item:word> [amount:integer]", 1),
+            Command::op("sf give <target:word> <item:word> [amount:integer]", 1),
+            Command::new("slimefun stats"),
+            Command::new("sf stats"),
+            Command::op("slimefun stats <target:word>", 1),
+            Command::op("sf stats <target:word>", 1),
             Command::new("slimefun recipe <item:text>"),
             Command::new("sf recipe <item:text>"),
             Command::new("slimefun research <key:word>"),
@@ -1013,6 +1030,12 @@ impl Hooks for Slimefun {
             return Flow::Continue;
         }
         let lines = match path.next() {
+            Some("charge") => vec![admin_commands::charge(host, event.source).into()],
+            Some("give") => {
+                let drop_excess = self.settings.lock().unwrap().drop_excess_command_items;
+                vec![admin_commands::give(host, event.source, event.command, drop_excess)]
+            }
+            Some("stats") => self.research_ranks.stats(host, event.source, event.command),
             Some("life_menu") => {
                 let (CommandSource::Console { .. }, Some(CommandArgumentValue::Player(target))) =
                     (&*event.source, event.command.argument("target"))

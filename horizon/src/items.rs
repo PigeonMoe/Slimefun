@@ -1,8 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use mod_api::{Compound, Host, Identifier, ItemStack, Tag};
+use mod_api::{ComponentId, Compound, Host, Identifier, ItemResource, ItemStack, Tag};
 
 pub(crate) const ID_KEY: &str = "slimefun:slimefun_item";
+
+pub(crate) fn stack_limit(host: &dyn Host, stack: &ItemStack) -> u32 {
+    let resource = ItemResource::of(stack);
+    let key = ComponentId::new("minecraft:max_stack_size").expect("built-in item component");
+    match resource.value(host, &key) {
+        Some(Tag::Int(max @ 1..=99)) => max as u32,
+        _ => host.max_stack_size(resource.item()).unwrap_or(1),
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Kind {

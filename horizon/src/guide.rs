@@ -9,7 +9,7 @@ use std::{
 };
 
 use mod_api::{
-    ComponentId, Compound, Hand, Host, HostTransaction, ItemPlace, ItemResource, ItemStack, MenuClickedEvent,
+    Compound, Hand, Host, HostTransaction, ItemPlace, ItemResource, ItemStack, MenuClickedEvent,
     MenuClosedEvent, MenuReplace, PermissionLevel, PlayerRef, ServerHost, SoundSource, Tag, Text,
     text::{TextClick, TextStyle},
 };
@@ -121,6 +121,32 @@ pub(crate) fn has_stock_item_id(id: &str) -> bool {
     catalog::has_stock_item_id(id)
 }
 
+pub(crate) fn localized_item_name(id: &str) -> Option<&'static str> {
+    locale::item_name(id)
+}
+
+pub(crate) fn command_item(id: &str) -> Option<Result<Kind, &'static str>> {
+    match id {
+        "RESTORED_BACKPACK" => return Some(Ok(crate::backpacks::RESTORED_BACKPACK)),
+        "FILLED_FLASK_OF_KNOWLEDGE" => {
+            return Some(Ok(crate::factory::experience_collector::FILLED_FLASK_OF_KNOWLEDGE));
+        }
+        _ => {}
+    }
+    if let Some(kind) = crate::rainbow::item(id) {
+        return Some(Ok(kind));
+    }
+    if !catalog::has_stock_item_id(id) {
+        return None;
+    }
+    let entry = lookup(id)?;
+    Some(if entry.label.is_some() {
+        Err("多方块机器需现场搭建，无法发放。")
+    } else {
+        Ok(entry.item.kind)
+    })
+}
+
 pub(crate) fn blocks_vanilla_station(item: &ItemStack) -> bool {
     let tickers = Tickers::current();
     crate::items::item_id(item).is_some_and(|id| {
@@ -138,6 +164,10 @@ pub(crate) fn research_available(id: &str, tickers: Tickers, dimension: Option<&
 
 pub(crate) fn research_topics() -> impl Iterator<Item = &'static Research> {
     catalog::research_topics()
+}
+
+pub(crate) fn research_has_enabled_items(id: &str, tickers: Tickers) -> bool {
+    catalog::items_for_research(id).any(|item| availability::visible(tickers, None, item))
 }
 
 pub(crate) fn prevent_research_firework_damage(item: &ItemStack) -> bool {
@@ -162,11 +192,7 @@ pub(crate) fn give(host: &mut dyn ServerHost, player: PlayerRef) {
 
 fn give_cheat_item(host: &mut dyn ServerHost, player: PlayerRef, stack: &ItemStack, full_stack: bool) -> bool {
     let resource = ItemResource::of(stack);
-    let key = ComponentId::new("minecraft:max_stack_size").expect("built-in item component");
-    let limit = match resource.value(host, &key) {
-        Some(Tag::Int(max @ 1..=99)) => max as u32,
-        _ => host.max_stack_size(resource.item()).unwrap_or(1),
-    };
+    let limit = crate::items::stack_limit(host, stack);
     let count = if full_stack { limit } else { 1 };
     host.transaction(|host, tx| {
         let mut remaining = count;

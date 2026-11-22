@@ -211,13 +211,21 @@ pub(crate) fn recharge(host: &dyn Host, stack: &ItemStack, amount: f32) -> Optio
     }
 }
 
+pub(crate) fn fully_charge(host: &dyn Host, stack: &ItemStack) -> Option<ItemStack> {
+    match update_charge(host, stack, Change::Fill)? {
+        Action::Charge(stack) => Some(stack),
+        _ => None,
+    }
+}
+
 enum Change {
     Add(f32),
     Remove(f32),
+    Fill,
 }
 
 fn update_charge(host: &dyn Host, stack: &ItemStack, change: Change) -> Option<Action> {
-    if stack.count() != 1 {
+    if stack.count() != 1 && !matches!(change, Change::Fill) {
         return None;
     }
     let id = item_id(stack)?;
@@ -243,22 +251,27 @@ fn update_charge(host: &dyn Host, stack: &ItemStack, change: Change) -> Option<A
     let Tag::Compound(values) = data.get_mut(&PUBLIC_VALUES.into())? else {
         return None;
     };
-    let current = match values.get(&CHARGE_KEY.into()) {
-        Some(Tag::Float(bits)) => {
-            let charge = f32::from_bits(*bits);
-            if !charge.is_finite() || charge < 0.0 {
-                return None;
+    let charge = if matches!(change, Change::Fill) {
+        maximum
+    } else {
+        let current = match values.get(&CHARGE_KEY.into()) {
+            Some(Tag::Float(bits)) => {
+                let charge = f32::from_bits(*bits);
+                if !charge.is_finite() || charge < 0.0 {
+                    return None;
+                }
+                charge
             }
-            charge
+            None => first.map_or(0.0, |(_, charge)| charge),
+            _ => return None,
+        };
+        match change {
+            Change::Remove(amount) if current >= amount => current - amount,
+            Change::Remove(_) => return None,
+            Change::Add(_) if current >= maximum => return Some(Action::ReturnFull),
+            Change::Add(amount) => (current + amount).min(maximum),
+            Change::Fill => unreachable!(),
         }
-        None => first.map_or(0.0, |(_, charge)| charge),
-        _ => return None,
-    };
-    let charge = match change {
-        Change::Remove(amount) if current >= amount => current - amount,
-        Change::Remove(_) => return None,
-        Change::Add(_) if current >= maximum => return Some(Action::ReturnFull),
-        Change::Add(amount) => (current + amount).min(maximum),
     };
     // Paper rounds the f32 charge and writes the same value to PDC and lore.
     let charge = ((f64::from(charge) * 100.0).round() / 100.0) as f32;
@@ -344,6 +357,23 @@ mod tests {
                 charge_lore(charge, capacity),
             ])
         );
+    }
+
+    #[test]
+    fn command_charge_canonicalizes_existing_charge_and_keeps_the_original_components() {
+        let host = host();
+        let stack = paper_stack(
+            &host,
+            "PORTABLE_TELEPORTER",
+            "minecraft:compass",
+            Some(50.0),
+            charge_lore(1.25, 50.0),
+        );
+        let charged = fully_charge(&host, &stack).unwrap();
+        assert_charge(&charged, 50.0, 50.0);
+        assert_eq!(item_id(&charged).as_deref(), Some("PORTABLE_TELEPORTER"));
+        let ordinary_compass = Kind::Vanilla("minecraft:compass").stack(&host, 1).unwrap();
+        assert!(fully_charge(&host, &ordinary_compass).is_none());
     }
 
     #[test]
