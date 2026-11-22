@@ -7,7 +7,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
 };
 
-use mod_api::{Compound, ConfigFileError, ConfigPath, ItemStack, PlayerRef, ServerHost};
+use mod_api::{Compound, ConfigFileError, ConfigPath, ItemStack, PlayerRef, ServerHost, Tag};
 use sha2::{Digest, Sha256};
 
 use crate::{backpacks, research};
@@ -259,6 +259,91 @@ pub(crate) fn with_archive<T>(
     read(Profile::decode(owner, &bytes)?).map(Some)
 }
 
+#[derive(Debug)]
+pub(crate) struct StagedProfile {
+    pub(crate) owner: u128,
+    pub(crate) player_data: Compound,
+    pub(crate) guide_issued: bool,
+    pub(crate) unknown_researches: BTreeSet<String>,
+    pub(crate) unknown_legacy_researches: BTreeSet<i32>,
+    backpack_records: BTreeMap<u32, Compound>,
+}
+
+impl StagedProfile {
+    /// Project the owner-wide replacement onto the current map, read under the
+    /// coordinator's commit fence. Do not reuse a map read before staging or
+    /// allow archival recovery for a missing record of this synchronized owner.
+    pub(crate) fn replace_backpack_records(&self, mut records: Compound) -> Compound {
+        let prefix = format!("{:032x}#", self.owner);
+        records.retain(|key, _| !key.to_string_lossy().starts_with(&prefix));
+        records.extend(self.backpack_records.iter().map(|(&number, data)| {
+            let id = backpacks::BackpackId {
+                owner: self.owner,
+                number,
+            };
+            (
+                id.storage_key().as_str().into(),
+                Tag::Compound(data.clone()),
+            )
+        }));
+        records
+    }
+}
+
+/// Validate the complete incoming profile against the held native player's
+/// candidate PDC without publishing it. The coordinator must apply the result
+/// for its claimed revision before interaction, fence old bag viewers and paid
+/// study callbacks, and bypass legacy player/tome/bag imports for the owner.
+/// Server-local GPS data stays outside this section and is loaded independently.
+pub(crate) fn stage_apply(
+    host: &dyn ServerHost,
+    owner: u128,
+    base_player_data: &Compound,
+    bytes: &[u8],
+) -> Result<StagedProfile, String> {
+    stage_apply_with_decoder(host, owner, base_player_data, bytes, |bytes| {
+        host.item_from_saved_gzip_nbt(bytes.to_vec())
+    })
+}
+
+fn stage_apply_with_decoder(
+    host: &dyn ServerHost,
+    owner: u128,
+    base_player_data: &Compound,
+    bytes: &[u8],
+    mut decode: impl FnMut(&[u8]) -> Option<ItemStack>,
+) -> Result<StagedProfile, String> {
+    let mut profile = Profile::decode(owner, bytes)?;
+    let researches = profile.slimefun_researches();
+    let player_data =
+        research::stage_replacement(base_player_data, &researches, profile.guide_issued)?;
+
+    let mut backpack_records = BTreeMap::new();
+    for (number, slots) in profile.backpacks {
+        let staged = backpacks::stage_snapshot_bag(
+            host,
+            number,
+            slots.iter().map(Cow::as_ref),
+            &mut decode,
+        )?;
+        backpack_records.insert(number, staged);
+    }
+    // Resolve matches against the full incoming legacy set first, so every
+    // registered research sharing a historical number acquires the unlock.
+    for (id, legacy) in paper_researches() {
+        profile.researches.remove(&format!("slimefun:{id}"));
+        profile.legacy_researches.remove(&legacy);
+    }
+    Ok(StagedProfile {
+        owner,
+        player_data,
+        guide_issued: profile.guide_issued,
+        unknown_researches: profile.researches,
+        unknown_legacy_researches: profile.legacy_researches,
+        backpack_records,
+    })
+}
+
 /// Take the Slimefun section after the coordinator has settled the first-guide
 /// lifecycle and prepared the current online player for transfer. The caller
 /// holds the interaction lock and keeps it through capture of other sections.
@@ -340,9 +425,11 @@ fn capture_state(
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
+
     use super::*;
     use crate::{
-        backpacks::{BackpackId, BackpackStore, GlobalBackpacks},
+        backpacks::{Backpack, BackpackId, BackpackStore, GlobalBackpacks},
         items::Kind,
     };
     use mod_api::{HostTransaction, Identifier, Tag, testing::FakeHost};
@@ -411,6 +498,152 @@ mod tests {
             "0ea0142ea4da499c768ee8a6f57bacfa2b09cad7526b094044e74af9b022426d"
         );
         assert_eq!(profile.encode(OWNER).unwrap(), PAPER_PROFILE);
+    }
+
+    #[test]
+    fn destination_staging_refuses_wrong_owners_and_a_bad_item_in_the_last_slot() {
+        let mut host = FakeHost::new();
+        host.registries
+            .resolve_items([Identifier::parse("minecraft:diamond").unwrap()])
+            .unwrap();
+        let data = Compound::new();
+        let wrong_owner = stage_apply_with_decoder(&host, OWNER + 1, &data, PAPER_PROFILE, |_| {
+            panic!("a profile for another owner must be rejected before decoding items")
+        });
+        assert!(wrong_owner.unwrap_err().contains("UUID 不匹配"));
+
+        let diamond = Kind::Vanilla("minecraft:diamond").stack(&host, 3).unwrap();
+        let mut profile = Profile::decode(OWNER, PAPER_PROFILE).unwrap();
+        let mut late_bag = vec![Cow::Borrowed(&[][..]); 9];
+        late_bag[8] = Cow::Borrowed(b"invalid last item");
+        profile.backpacks.insert(30, late_bag);
+        let bytes = profile.encode(OWNER).unwrap();
+        let visits = Cell::new(0);
+        let failure = stage_apply_with_decoder(&host, OWNER, &data, &bytes, |encoded| {
+            let slot = visits.get();
+            visits.set(slot + 1);
+            if slot == 0 {
+                assert_eq!(encoded, profile.backpacks[&14][7].as_ref());
+                Some(diamond.clone())
+            } else {
+                assert_eq!(encoded, b"invalid last item");
+                None
+            }
+        });
+        assert_eq!(visits.get(), 2);
+        assert!(failure.unwrap_err().contains("背包 30 的第 8 槽"));
+        assert!(data.is_empty());
+
+        let accepted = stage_apply_with_decoder(&host, OWNER, &data, PAPER_PROFILE, |_| {
+            Some(diamond.clone())
+        })
+        .unwrap();
+        assert!(accepted.guide_issued);
+        assert_eq!(
+            accepted
+                .player_data
+                .get(&"PlayerPersisted".into())
+                .unwrap()
+                .get("slimefun:sync_guide_issued"),
+            Some(&Tag::Byte(1))
+        );
+    }
+
+    #[test]
+    fn destination_replacement_erases_stale_owned_state_and_preserves_other_players() {
+        let mut host = FakeHost::new();
+        host.registries
+            .resolve_items([Identifier::parse("minecraft:diamond").unwrap()])
+            .unwrap();
+        let diamond = Kind::Vanilla("minecraft:diamond").stack(&host, 3).unwrap();
+        let gps = Tag::compound([("world", Tag::String("minecraft:the_nether".into()))]);
+        let base = Compound::from([
+            (
+                "PlayerPersisted".into(),
+                Tag::compound([
+                    ("slimefun:alloys", Tag::Byte(1)),
+                    (
+                        "slimefun:pending_research",
+                        Tag::compound([("step", Tag::Byte(2))]),
+                    ),
+                    ("slimefun:sync_guide_issued", Tag::Byte(1)),
+                    ("addon:preference", Tag::Int(17)),
+                ]),
+            ),
+            ("ServerLocalGPS".into(), gps.clone()),
+        ]);
+        let mut source = Profile::decode(OWNER, PAPER_PROFILE).unwrap();
+        source.guide_issued = false;
+        source.legacy_researches.extend([173, -307]);
+        source
+            .backpacks
+            .insert(22, vec![Cow::Borrowed(&[][..]); 18]);
+        let bytes = source.encode(OWNER).unwrap();
+        let staged = stage_apply_with_decoder(&host, OWNER, &base, &bytes, |encoded| {
+            assert_eq!(encoded, source.backpacks[&14][7].as_ref());
+            Some(diamond.clone())
+        })
+        .unwrap();
+        assert_eq!(staged.owner, OWNER);
+        assert!(!staged.guide_issued);
+        assert_eq!(
+            staged.unknown_researches,
+            BTreeSet::from(["addon:research".into()])
+        );
+        assert_eq!(staged.unknown_legacy_researches, BTreeSet::from([-307]));
+        let saved = staged.player_data.get(&"PlayerPersisted".into()).unwrap();
+        for id in [
+            "slimefun:lumps",
+            "slimefun:cactus_armor",
+            "slimefun:bio_reactor",
+            "slimefun:coal_generator",
+        ] {
+            assert_eq!(saved.get(id), Some(&Tag::Byte(1)), "{id}");
+        }
+        for id in [
+            "slimefun:alloys",
+            "slimefun:pending_research",
+            "slimefun:sync_guide_issued",
+            "addon:research",
+        ] {
+            assert_eq!(saved.get(id), None, "{id}");
+        }
+        assert_eq!(saved.get("addon:preference"), Some(&Tag::Int(17)));
+        assert_eq!(staged.player_data.get(&"ServerLocalGPS".into()), Some(&gps));
+        assert_eq!(
+            base.get(&"PlayerPersisted".into())
+                .unwrap()
+                .get("slimefun:alloys"),
+            Some(&Tag::Byte(1))
+        );
+
+        let key = |owner, number| BackpackId { owner, number }.storage_key();
+        let other = key(OWNER + 1, 14);
+        let records = Compound::from([
+            (key(OWNER, 2).as_str().into(), Tag::Byte(1)),
+            (key(OWNER, 14).as_str().into(), Tag::Byte(2)),
+            (other.as_str().into(), Tag::Int(23)),
+        ]);
+        let staged_records = staged.replace_backpack_records(records);
+        assert_eq!(staged_records.len(), 3);
+        assert_eq!(staged_records.get(&key(OWNER, 2).as_str().into()), None);
+        assert_eq!(
+            staged_records.get(&other.as_str().into()),
+            Some(&Tag::Int(23))
+        );
+        let load = |number| {
+            let Some(Tag::Compound(record)) =
+                staged_records.get(&key(OWNER, number).as_str().into())
+            else {
+                panic!("missing staged backpack {number}");
+            };
+            assert_eq!(record.get(&"paper".into()), Some(&Tag::Byte(0)));
+            Backpack::from_nbt(&host, record).unwrap()
+        };
+        assert_eq!(load(14).slots, BTreeMap::from([(7, diamond)]));
+        let empty = load(22);
+        assert_eq!(empty.size, 18);
+        assert!(empty.slots.is_empty());
     }
 
     #[test]

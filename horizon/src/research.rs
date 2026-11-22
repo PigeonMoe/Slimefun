@@ -333,6 +333,30 @@ pub(crate) fn sync_guide_already_issued(host: &dyn Host, player: PlayerRef) -> b
     })
 }
 
+pub(crate) fn stage_replacement(
+    base: &Compound,
+    known: &BTreeSet<String>,
+    guide_issued: bool,
+) -> Result<Compound, &'static str> {
+    let mut replacement = base.clone();
+    let saved = saved_data(&mut replacement).ok_or(UPDATE_ERROR)?;
+    for (id, _) in crate::pm_profile::paper_researches() {
+        let key = format!("slimefun:{id}");
+        if known.contains(&key) {
+            saved.insert(key.as_str().into(), Tag::Byte(1));
+        } else {
+            saved.remove(&key.as_str().into());
+        }
+    }
+    saved.remove(&PENDING.into());
+    if guide_issued {
+        saved.insert(SYNC_GUIDE_ISSUED.into(), Tag::Byte(1));
+    } else {
+        saved.remove(&SYNC_GUIDE_ISSUED.into());
+    }
+    Ok(replacement)
+}
+
 pub(crate) fn update_capture(
     data: &Compound,
     profile: &mut crate::pm_profile::Profile<'_>,

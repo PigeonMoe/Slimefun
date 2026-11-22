@@ -573,6 +573,34 @@ impl Backpack {
     }
 }
 
+pub(crate) fn stage_snapshot_bag<'a>(
+    host: &dyn Host,
+    number: u32,
+    contents: impl ExactSizeIterator<Item = &'a [u8]>,
+    mut decode: impl FnMut(&[u8]) -> Option<ItemStack>,
+) -> Result<Compound, String> {
+    let size = u32::try_from(contents.len())
+        .ok()
+        .filter(|&size| valid_size(size))
+        .ok_or("同步档案中的背包容量无效。")?;
+    let mut slots = BTreeMap::new();
+    for (slot, bytes) in contents.enumerate() {
+        if !bytes.is_empty() {
+            let item = decode(bytes)
+                .ok_or_else(|| format!("无法解码同步档案中背包 {number} 的第 {slot} 槽。"))?;
+            slots.insert(slot as u32, item);
+        }
+    }
+    // This record comes from an authoritative profile, not the legacy backpack recovery flow.
+    Backpack {
+        size,
+        slots,
+        paper: false,
+    }
+    .to_nbt(host)
+    .map_err(|error| format!("无法保存同步档案中的背包 {number}。{error}"))
+}
+
 fn archived_records(
     profile: &toml::Table,
     owner: u128,
