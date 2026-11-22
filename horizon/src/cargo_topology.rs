@@ -687,9 +687,11 @@ pub(super) fn tick(
     level: LevelRef,
     active: &BTreeMap<Position, (&Node, u32)>,
     group: &[Position],
-) {
+    profile: &mut crate::timings::Cycle,
+) -> u64 {
     let mut inputs = Vec::new();
     let mut outputs = BTreeMap::<u8, Vec<_>>::new();
+    let mut input_elapsed: u64 = 0;
     for &pos in group {
         let node = active[&pos].0;
         if !matches!(
@@ -698,6 +700,8 @@ pub(super) fn tick(
         ) {
             continue;
         }
+        let started = (node.component == Component::CargoInput)
+            .then(|| host.server_monotonic_nanos());
         let options = node.cargo_settings(host, level, pos);
         let channel = options.channel;
         let terminal = attached_inventory(host, level, pos).and_then(|(inventory, kind)| {
@@ -710,49 +714,49 @@ pub(super) fn tick(
                 filter,
             })
         });
-        if node.component == Component::CargoInput && channel < 16 {
-            inputs.extend(terminal);
+        if let Some(started) = started.filter(|_| channel < 16) {
+            let elapsed = host.server_monotonic_nanos().saturating_sub(started);
+            input_elapsed = input_elapsed.saturating_add(elapsed);
+            profile.record(&node.id, pos, elapsed);
+            inputs.extend(terminal.map(|terminal| (&node.id, terminal)));
         } else if matches!(node.component, Component::CargoOutput { .. }) {
             // Paper counts even temporarily unusable output nodes in this channel.
             outputs.entry(channel).or_default().push(terminal);
         }
     }
-    for input in &inputs {
-        let Some(outputs) = outputs.get(&input.options.channel) else {
-            continue;
-        };
-        let cursor_key = (level, input.pos);
-        let cursor = if input.options.round_robin {
-            networks
-                .lock()
-                .unwrap()
-                .round_robin
-                .get(&cursor_key)
-                .copied()
-                .unwrap_or(0)
-        } else {
-            0
-        };
-        let next = route(
-            host,
-            level,
-            input,
-            outputs,
-            cursor,
-            |host, from, to, stack| {
+    for (id, input) in &inputs {
+        let (_, elapsed) = profile.measure(host, id, input.pos, |host| {
+            let Some(outputs) = outputs.get(&input.options.channel) else {
+                return;
+            };
+            let cursor_key = (level, input.pos);
+            let cursor = if input.options.round_robin {
+                networks
+                    .lock()
+                    .unwrap()
+                    .round_robin
+                    .get(&cursor_key)
+                    .copied()
+                    .unwrap_or(0)
+            } else {
+                0
+            };
+            let next = route(host, level, input, outputs, cursor, |host, from, to, stack| {
                 from != to && level.allow_inventory_transfer(host, from, to, stack)
-            },
-        );
-        if let Some(next) = next
-            && input.options.round_robin
-        {
-            networks
-                .lock()
-                .unwrap()
-                .round_robin
-                .insert(cursor_key, next);
-        }
+            });
+            if let Some(next) = next
+                && input.options.round_robin
+            {
+                networks
+                    .lock()
+                    .unwrap()
+                    .round_robin
+                    .insert(cursor_key, next);
+            }
+        });
+        input_elapsed = input_elapsed.saturating_add(elapsed);
     }
+    input_elapsed
 }
 
 struct Terminal {

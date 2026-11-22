@@ -106,6 +106,7 @@ mod tape_measure;
 mod teleposition_scroll;
 mod thermal_machines;
 mod ticker_policy;
+mod timings;
 mod universal_storage;
 mod versions;
 mod villager_rune;
@@ -154,6 +155,7 @@ struct Slimefun {
     guide: guide::Guide,
     research_ranks: admin_commands::ResearchRanks,
     versions: versions::Versions,
+    profiler: timings::Profiler,
     androids: android_ui::Menus,
     butcher_androids: android_butchery::Butchers,
     holograms: hologram_projector::Editors,
@@ -202,6 +204,7 @@ impl Default for Slimefun {
             guide: guide::Guide::default(),
             research_ranks: admin_commands::ResearchRanks::default(),
             versions: versions::Versions::default(),
+            profiler: timings::Profiler::default(),
             androids: android_ui::Menus::default(),
             butcher_androids: android_butchery::Butchers::default(),
             holograms: hologram_projector::Editors::default(),
@@ -950,6 +953,8 @@ impl Hooks for Slimefun {
             Command::op("sf versions", 1),
             Command::op("slimefun teleporter [target:word]", 1),
             Command::op("sf teleporter [target:word]", 1),
+            Command::op("slimefun timings [flags:text]", 1),
+            Command::op("sf timings [flags:text]", 1),
             Command::new("slimefun recipe <item:text>"),
             Command::new("sf recipe <item:text>"),
             Command::new("slimefun research <key:word>"),
@@ -1044,6 +1049,10 @@ impl Hooks for Slimefun {
                 vec![admin_commands::give(host, event.source, event.command, drop_excess)]
             }
             Some("stats") => self.research_ranks.stats(host, event.source, event.command),
+            Some("timings") => {
+                let interval = self.settings.lock().unwrap().block_ticker_delay;
+                self.profiler.report(host, event.source, event.command, interval)
+            }
             Some("versions") => {
                 let allowed = match *event.source {
                     CommandSource::Player { player, .. } => admin_commands::operator(host, player),
@@ -2028,11 +2037,15 @@ impl Hooks for Slimefun {
 
     fn server_tick(&self, host: &mut dyn ServerHost, event: &mut mod_api::ServerTickEvent) {
         if let mod_api::ServerTickPhase::ServerTickStart { world_running } = event.phase {
+            self.profiler.begin_tick();
             self.radiation.begin_tick(|| host.server_monotonic_millis());
             self.smelters_pickaxes.begin_tick();
             if world_running {
                 rainbow::placed::begin_tick();
             }
+        }
+        if let mod_api::ServerTickPhase::ServerTickEnd { .. } = event.phase {
+            self.profiler.finish_tick();
         }
     }
 
@@ -2078,6 +2091,7 @@ impl Hooks for Slimefun {
                 settings,
                 &self.rolls,
                 &self.butcher_androids,
+                &self.profiler,
             );
             factory::VIEWERS.refresh(host, event.level);
             self.crucibles.tick(host, event.level);
@@ -2159,6 +2173,7 @@ impl Hooks for Slimefun {
     }
 
     fn server_stopping(&self, host: &mut dyn ServerHost, _: &mut ServerStoppingEvent) {
+        self.profiler.clear();
         self.item_clicks.clear();
         self.climbing.clear();
         self.snacks.clear();

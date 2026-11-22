@@ -1371,6 +1371,7 @@ pub(crate) fn tick(
     settings: Settings,
     rolls: &Rolls,
     butchers: &crate::android_butchery::Butchers,
+    profiler: &crate::timings::Profiler,
 ) {
     if !level.in_place(host) {
         return;
@@ -1388,6 +1389,7 @@ pub(crate) fn tick(
     let Ok(nodes) = networks.lock().unwrap().nodes(host, &dimension) else {
         return;
     };
+    let mut profile = crate::timings::Cycle::new(&dimension);
     let active: BTreeMap<_, _> = nodes
         .iter()
         .filter_map(|(&pos, node)| {
@@ -1404,23 +1406,27 @@ pub(crate) fn tick(
             continue;
         }
         if node.component == Component::TrashCan {
-            trash::clear(host, pos);
+            profile.measure(host, &node.id, pos, |host| trash::clear(host, pos));
         }
         if node.component == Component::InfusedHopper {
-            crate::infused::tick_hopper(host, level, pos, settings.infused);
+            profile.measure(host, &node.id, pos, |host| {
+                crate::infused::tick_hopper(host, level, pos, settings.infused);
+            });
         }
-        if node.component == Component::Android
-            && let Some(movement) = crate::android_machine::tick(
-                host,
-                level,
-                pos,
-                &node.id,
-                rolls,
-                settings.android_reduced_block_updates,
-                butchers,
-            )
-        {
-            move_android(networks, host, level, &dimension, node, movement);
+        if node.component == Component::Android {
+            profile.measure(host, &node.id, pos, |host| {
+                if let Some(movement) = crate::android_machine::tick(
+                    host,
+                    level,
+                    pos,
+                    &node.id,
+                    rolls,
+                    settings.android_reduced_block_updates,
+                    butchers,
+                ) {
+                    move_android(networks, host, level, &dimension, node, movement);
+                }
+            });
         }
     }
     let mut loaded_chunks = BTreeMap::new();
@@ -1448,6 +1454,8 @@ pub(crate) fn tick(
         }
         let (status, conflict) = match family {
             Network::Energy => {
+                let started = host.server_monotonic_nanos();
+                let mut generators = 0;
                 let status = if group.iter().all(|pos| active[pos].0.regulator()) {
                     Some(Status::EnergyEmpty)
                 } else {
@@ -1459,8 +1467,11 @@ pub(crate) fn tick(
                         &group,
                         rolls,
                         settings.solar_night_in_other_dimensions,
+                        &mut profile,
+                        &mut generators,
                     )
                 };
+                profile.record_parent(host, &active[&start].0.id, start, started, generators);
                 (status, Status::EnergyConflict)
             }
             Network::Cargo => {
@@ -1484,7 +1495,16 @@ pub(crate) fn tick(
                         {
                             network_visuals::cargo_particles(host, level, terminals);
                         }
-                        cargo_topology::tick(networks, host, level, &active, &group);
+                        let started = host.server_monotonic_nanos();
+                        let inputs = cargo_topology::tick(
+                            networks,
+                            host,
+                            level,
+                            &active,
+                            &group,
+                            &mut profile,
+                        );
+                        profile.record_parent(host, &active[&start].0.id, start, started, inputs);
                     }
                     Status::CargoOnline
                 } else {
@@ -1516,125 +1536,129 @@ pub(crate) fn tick(
         }
         if let Component::GpsTransmitter { .. } = node.component
             && let Some(transmitter) = geology::transmitter(&node.id)
-            && let Ok(signal) = host.transaction(|host, _| {
-                let mut data = block_data(host, level, pos).ok_or(())?;
-                let owner = data.gps_owner.ok_or(())?;
-                data.charge = data.charge.checked_sub(transmitter.cost).ok_or(())?;
-                write_data(host, pos, data).map_err(|_| ())?;
-                Ok::<_, ()>((owner, transmitter.strength(pos[1])))
-            })
+            && let Ok(signal) = profile.measure(host, &node.id, pos, |host| {
+                host.transaction(|host, _| {
+                    let mut data = block_data(host, level, pos).ok_or(())?;
+                    let owner = data.gps_owner.ok_or(())?;
+                    data.charge = data.charge.checked_sub(transmitter.cost).ok_or(())?;
+                    write_data(host, pos, data).map_err(|_| ())?;
+                    Ok::<_, ()>((owner, transmitter.strength(pos[1])))
+                })
+            }).0
         {
             gps_signals.insert(pos, signal);
         }
         if let Component::ElectricMachine { .. } = node.component {
-            if let Some(spec) = assemblers::by_id(&node.id) {
-                let spawn = host.transaction(|host, tx| {
+            profile.measure(host, &node.id, pos, |host| {
+                if let Some(spec) = assemblers::by_id(&node.id) {
+                    let spawn = host.transaction(|host, tx| {
+                        let mut data = block_data(host, level, pos).ok_or(())?;
+                        data.charge = data.charge.checked_sub(spec.cost).ok_or(())?;
+                        let spawn = assemblers::stage(host, tx, level, pos, spec).ok_or(())?;
+                        write_data(host, pos, data).map_err(|_| ())?;
+                        Ok::<_, ()>(spawn)
+                    });
+                    if let Ok(spawn) = spawn {
+                        spawn.apply(host, level, pos);
+                    }
+                    return;
+                }
+                if let Some(cost) = crate::auto_crafter::operation_cost(&node.id) {
+                    let crafted = host.transaction(|host, tx| {
+                        let mut data = block_data(host, level, pos).ok_or(())?;
+                        data.charge = data.charge.checked_sub(cost).ok_or(())?;
+                        crate::auto_crafter::stage(host, tx, level, pos, &node.id)?;
+                        write_data(host, pos, data).map_err(|_| ())
+                    });
+                    if crafted.is_ok() {
+                        crate::auto_crafter::complete(host, level, pos);
+                    }
+                    return;
+                }
+                if let Some(machine) = animal_machines::machine(&node.id) {
+                    let feeding = host.transaction(|host, tx| {
+                        let mut data = block_data(host, level, pos).ok_or(())?;
+                        data.charge = data.charge.checked_sub(machine.cost).ok_or(())?;
+                        let feeding = machine.stage(host, tx, level, pos)?;
+                        write_data(host, pos, data).map_err(|_| ())?;
+                        feeding.apply(host)?;
+                        Ok::<_, ()>(feeding)
+                    });
+                    if let Ok(feeding) = feeding {
+                        feeding.particles(host, level);
+                    }
+                    return;
+                }
+                if let Some(machine) = crop_growth::machine(&node.id) {
+                    let growth = host.transaction(|host, tx| {
+                        let mut data = block_data(host, level, pos).ok_or(())?;
+                        data.charge = data.charge.checked_sub(machine.cost).ok_or(())?;
+                        let growth = machine.stage(host, tx, level, pos)?;
+                        write_data(host, pos, data).map_err(|_| ())?;
+                        growth.apply(host, level)?;
+                        Ok::<_, ()>(growth)
+                    });
+                    if let Ok(growth) = growth {
+                        growth.particles(host, level);
+                    }
+                    return;
+                }
+                if node.id == tree_growth::TREE_GROWTH_ACCELERATOR.id() {
+                    let target = host.transaction(|host, tx| {
+                        let mut data = block_data(host, level, pos).ok_or(())?;
+                        data.charge = data.charge.checked_sub(tree_growth::COST).ok_or(())?;
+                        let target = tree_growth::stage(host, tx, level, pos).ok_or(())?;
+                        write_data(host, pos, data).map_err(|_| ())?;
+                        Ok::<_, ()>(target)
+                    });
+                    if let Ok(target) = target {
+                        tree_growth::grow(host, level, target);
+                    }
+                    return;
+                }
+                let geo = node.id == geology::GEO_MINER.id();
+                let previous_mining = if geo {
+                    crate::factory::geo_mining_resource(host, level, pos)
+                } else {
+                    None
+                };
+                let _ = host.transaction(|host, tx| {
                     let mut data = block_data(host, level, pos).ok_or(())?;
-                    data.charge = data.charge.checked_sub(spec.cost).ok_or(())?;
-                    let spawn = assemblers::stage(host, tx, level, pos, spec).ok_or(())?;
-                    write_data(host, pos, data).map_err(|_| ())?;
-                    Ok::<_, ()>(spawn)
+                    if node.id == fluid_pump::FLUID_PUMP.id() {
+                        data.charge = data.charge.checked_sub(fluid_pump::COST).ok_or(())?;
+                        let drain = fluid_pump::stage(host, tx, level, pos, rolls)?;
+                        write_data(host, pos, data).map_err(|_| ())?;
+                        return drain.map_or(Ok(()), |drain| drain.apply(host, level));
+                    }
+                    if node.id == experience_collector::XP_COLLECTOR.id() {
+                        (data.stored_experience, data.charge) = experience_collector::collect(
+                            host,
+                            tx,
+                            level,
+                            pos,
+                            data.stored_experience,
+                            data.charge,
+                        )?;
+                        return write_data(host, pos, data).map_err(|_| ());
+                    }
+                    if let Some(charge) =
+                        crate::factory::tick(host, level, settings, rolls, pos, &node.id, data.charge)
+                    {
+                        data.charge = charge;
+                        write_data(host, pos, data).map_err(|_| ())?;
+                    }
+                    Ok::<_, ()>(())
                 });
-                if let Ok(spawn) = spawn {
-                    spawn.apply(host, level, pos);
+                if geo {
+                    // Paper keeps the Mining label through the completion tick.
+                    // Read a newly started operation only after the outer transaction.
+                    let operation = previous_mining
+                        .or_else(|| crate::factory::geo_mining_resource(host, level, pos));
+                    let status =
+                        Status::geo_miner(operation, || geo_deposits::mining(host, level, pos).ok());
+                    labels.insert(pos, Some(status));
                 }
-                continue;
-            }
-            if let Some(cost) = crate::auto_crafter::operation_cost(&node.id) {
-                let crafted = host.transaction(|host, tx| {
-                    let mut data = block_data(host, level, pos).ok_or(())?;
-                    data.charge = data.charge.checked_sub(cost).ok_or(())?;
-                    crate::auto_crafter::stage(host, tx, level, pos, &node.id)?;
-                    write_data(host, pos, data).map_err(|_| ())
-                });
-                if crafted.is_ok() {
-                    crate::auto_crafter::complete(host, level, pos);
-                }
-                continue;
-            }
-            if let Some(machine) = animal_machines::machine(&node.id) {
-                let feeding = host.transaction(|host, tx| {
-                    let mut data = block_data(host, level, pos).ok_or(())?;
-                    data.charge = data.charge.checked_sub(machine.cost).ok_or(())?;
-                    let feeding = machine.stage(host, tx, level, pos)?;
-                    write_data(host, pos, data).map_err(|_| ())?;
-                    feeding.apply(host)?;
-                    Ok::<_, ()>(feeding)
-                });
-                if let Ok(feeding) = feeding {
-                    feeding.particles(host, level);
-                }
-                continue;
-            }
-            if let Some(machine) = crop_growth::machine(&node.id) {
-                let growth = host.transaction(|host, tx| {
-                    let mut data = block_data(host, level, pos).ok_or(())?;
-                    data.charge = data.charge.checked_sub(machine.cost).ok_or(())?;
-                    let growth = machine.stage(host, tx, level, pos)?;
-                    write_data(host, pos, data).map_err(|_| ())?;
-                    growth.apply(host, level)?;
-                    Ok::<_, ()>(growth)
-                });
-                if let Ok(growth) = growth {
-                    growth.particles(host, level);
-                }
-                continue;
-            }
-            if node.id == tree_growth::TREE_GROWTH_ACCELERATOR.id() {
-                let target = host.transaction(|host, tx| {
-                    let mut data = block_data(host, level, pos).ok_or(())?;
-                    data.charge = data.charge.checked_sub(tree_growth::COST).ok_or(())?;
-                    let target = tree_growth::stage(host, tx, level, pos).ok_or(())?;
-                    write_data(host, pos, data).map_err(|_| ())?;
-                    Ok::<_, ()>(target)
-                });
-                if let Ok(target) = target {
-                    tree_growth::grow(host, level, target);
-                }
-                continue;
-            }
-            let geo = node.id == geology::GEO_MINER.id();
-            let previous_mining = if geo {
-                crate::factory::geo_mining_resource(host, level, pos)
-            } else {
-                None
-            };
-            let _ = host.transaction(|host, tx| {
-                let mut data = block_data(host, level, pos).ok_or(())?;
-                if node.id == fluid_pump::FLUID_PUMP.id() {
-                    data.charge = data.charge.checked_sub(fluid_pump::COST).ok_or(())?;
-                    let drain = fluid_pump::stage(host, tx, level, pos, rolls)?;
-                    write_data(host, pos, data).map_err(|_| ())?;
-                    return drain.map_or(Ok(()), |drain| drain.apply(host, level));
-                }
-                if node.id == experience_collector::XP_COLLECTOR.id() {
-                    (data.stored_experience, data.charge) = experience_collector::collect(
-                        host,
-                        tx,
-                        level,
-                        pos,
-                        data.stored_experience,
-                        data.charge,
-                    )?;
-                    return write_data(host, pos, data).map_err(|_| ());
-                }
-                if let Some(charge) =
-                    crate::factory::tick(host, level, settings, rolls, pos, &node.id, data.charge)
-                {
-                    data.charge = charge;
-                    write_data(host, pos, data).map_err(|_| ())?;
-                }
-                Ok::<_, ()>(())
             });
-            if geo {
-                // Paper keeps the Mining label through the completion tick.
-                // Read a newly started operation only after the outer transaction.
-                let operation = previous_mining
-                    .or_else(|| crate::factory::geo_mining_resource(host, level, pos));
-                let status =
-                    Status::geo_miner(operation, || geo_deposits::mining(host, level, pos).ok());
-                labels.insert(pos, Some(status));
-            }
         }
     }
     if nodes.values().any(|node| {
@@ -1644,6 +1668,7 @@ pub(crate) fn tick(
     }) {
         network_visuals::reconcile(host, level, &dimension, labels);
     }
+    profiler.collect(profile);
     let mut networks = networks.lock().unwrap();
     if gps_signals.is_empty() {
         networks.gps_signals.remove(&dimension);
@@ -1724,6 +1749,8 @@ fn tick_energy(
     group: &[Position],
     rolls: &Rolls,
     solar_night_in_other_dimensions: bool,
+    profile: &mut crate::timings::Cycle,
+    generator_elapsed: &mut u64,
 ) -> Option<Status> {
     let time = level.day_time(host).map(|time| time.rem_euclid(24_000));
     let day = time.is_some_and(|time| !(12_300..=23_850).contains(&time))
@@ -1746,37 +1773,46 @@ fn tick_energy(
                     }
                     Component::Capacitor(capacity) => charge.min(capacity),
                     Component::FuelGenerator { capacity, .. } => {
-                        let production = if let Some(spec) = reactors::reactor(&node.id) {
-                            let focus = reactor_production(host, level, pos).ok_or(())?;
-                            let outcome =
-                                reactors::poll(host, tx, level, pos, spec, charge, focus, rolls)?;
-                            let (energy, melt) = (outcome.energy, outcome.melt);
-                            if outcome.wither || melt {
-                                effects.push((pos, outcome));
+                        let (production, elapsed) = profile.measure(host, &node.id, pos, |host| {
+                            if let Some(spec) = reactors::reactor(&node.id) {
+                                let focus = reactor_production(host, level, pos).ok_or(())?;
+                                let outcome =
+                                    reactors::poll(host, tx, level, pos, spec, charge, focus, rolls)?;
+                                let (energy, melt) = (outcome.energy, outcome.melt);
+                                if outcome.wither || melt {
+                                    effects.push((pos, outcome));
+                                }
+                                return Ok((!melt).then_some(energy));
                             }
-                            if melt {
-                                continue;
-                            }
-                            energy
-                        } else {
-                            crate::factory::generate(host, tx, level, pos, &node.id, charge)?
+                            crate::factory::generate(host, tx, level, pos, &node.id, charge)
+                                .map(Some)
+                        });
+                        *generator_elapsed = generator_elapsed.saturating_add(elapsed);
+                        let Some(production) = production? else {
+                            continue;
                         };
                         charge.min(capacity) + production
                     }
                     Component::SolarGenerator {
                         day: sun,
                         night: moon,
-                    } => solar_power(
-                        *normal_environment.get_or_init(|| {
-                            solar_uses_daylight(dimension, || {
-                                level.dimension_type(host).map(|kind| kind.id)
-                            })
-                        }),
-                        day,
-                        [sun, moon],
-                        solar_night_in_other_dimensions,
-                        || level.brightness(host, LightLayer::Sky, pos) == Some(15),
-                    ),
+                    } => {
+                        let (production, elapsed) = profile.measure(host, &node.id, pos, |host| {
+                            solar_power(
+                                *normal_environment.get_or_init(|| {
+                                    solar_uses_daylight(dimension, || {
+                                        level.dimension_type(host).map(|kind| kind.id)
+                                    })
+                                }),
+                                day,
+                                [sun, moon],
+                                solar_night_in_other_dimensions,
+                                || level.brightness(host, LightLayer::Sky, pos) == Some(15),
+                            )
+                        });
+                        *generator_elapsed = generator_elapsed.saturating_add(elapsed);
+                        production
+                    }
                     _ => 0,
                 };
                 available += u64::from(energy);
