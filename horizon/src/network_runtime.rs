@@ -21,7 +21,7 @@ use crate::{
     },
     geo_deposits, geology,
     gps_transport::{GPS_TELEPORTER_PYLON, PYLON_CARRIERS},
-    items::{item_id, network_item},
+    items::{decorative_head, item_id, network_item},
     machine::Settings,
     networks::Component,
     random::Rolls,
@@ -254,6 +254,13 @@ impl ItemPart for NetworkPlacement {
             {
                 return Some(InteractionResult::Fail);
             }
+            if let Some((_, research)) = item_id(event.stack).as_deref().and_then(decorative_head)
+                && !host.player(event.player).is_some_and(|player| {
+                    crate::research::can_use(host, player, research)
+                })
+            {
+                return Some(InteractionResult::Fail);
+            }
             if geology::GPS_EMERGENCY_TRANSMITTER.matches(host, event.stack)
                 && !host.player(event.player).is_some_and(|player| {
                     crate::research::can_use(host, player, &geology::EMERGENCY_WAYPOINT)
@@ -456,6 +463,7 @@ impl Node {
             | Component::ManualComposter
             | Component::IgnitionChamber
             | Component::IngredientHead
+            | Component::DecorativeHead
             | Component::EnhancedFurnace
             | Component::InfusedHopper
             | Component::DuctTape

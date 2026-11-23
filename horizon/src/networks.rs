@@ -17,6 +17,7 @@ pub(crate) enum Component {
     ManualComposter,
     IgnitionChamber,
     IngredientHead,
+    DecorativeHead,
     EnhancedFurnace,
     InfusedHopper,
     EnergyConnector,
@@ -189,6 +190,7 @@ impl Component {
             "CARGO_NODE_INPUT" => Self::CargoInput,
             "CARGO_NODE_OUTPUT" => Self::CargoOutput { advanced: false },
             "CARGO_NODE_OUTPUT_ADVANCED" => Self::CargoOutput { advanced: true },
+            id if crate::items::decorative_head(id).is_some() => Self::DecorativeHead,
             _ => {
                 if let Some(machine) = crate::electric_processing::machine(id) {
                     Self::ElectricMachine {
@@ -260,6 +262,7 @@ impl Component {
             Self::BlastResistant(crate::items::Kind::Slimefun(item)) => item.name.into(),
             Self::BlastResistant(kind) => kind.id().into(),
             Self::IngredientHead => "Slimefun cooking ingredient".into(),
+            Self::DecorativeHead => "Placeable Slimefun head".into(),
             Self::DecorativeGold => "Gold Block (24-Carat)".into(),
             Self::DuctTape => "Duct Tape".into(),
             Self::CargoInput => cargo_terminal("Cargo input", metadata),

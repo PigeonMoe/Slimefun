@@ -853,7 +853,10 @@ fn render(
         ] {
             menu.slots[slot] = pane.clone();
         }
-    } else {
+    } else if !matches!(
+        screen,
+        Page::Recipe(_) | Page::ProcessingRecipes(_, _) | Page::VanillaRecipe(_, _)
+    ) {
         for slot in (0..9).chain(45..54) {
             menu.slots[slot] = pane.clone();
         }
@@ -1760,8 +1763,15 @@ mod tests {
             recipe.ingredients.push(mod_api::Ingredient::of(vec!["minecraft:porkchop".into()]));
             recipes.push(vanilla::Match { recipe, result: target.clone() });
         }
-        let mut menu = render(&host, None, &Page::Main, 1, false, available(), false);
+        // Paint the test recipe list into the regular recipe-page shell.
+        let mut shell = available();
+        shell.show_vanilla_recipes = false;
+        let page = Page::VanillaRecipe(item.clone(), 0);
+        let mut menu = render(&host, None, &page, 1, false, shell, false);
         paint_vanilla_recipe(&host, &mut menu, &item, &recipes, 0);
+        for slot in [1, 3, 5, 7, 45, 53] {
+            assert!(menu.slots[slot].is_none() && menu.actions[slot].is_none());
+        }
         let id = |menu: &Menu, slot: usize| menu.slots[slot].as_ref().unwrap().item().id(&host);
         assert_eq!(id(&menu, INGREDIENT_SLOTS[4]), "minecraft:porkchop");
         assert_eq!(id(&menu, RECIPE_METHOD_SLOT), "minecraft:furnace");
@@ -1771,7 +1781,8 @@ mod tests {
         let Some(Action::Replace(Page::VanillaRecipe(item, index))) = &menu.actions[34] else {
             panic!("next cooking recipe must replace this history page");
         };
-        let mut next = render(&host, None, &Page::Main, 1, false, available(), false);
+        let page = Page::VanillaRecipe(item.clone(), *index);
+        let mut next = render(&host, None, &page, 1, false, shell, false);
         paint_vanilla_recipe(&host, &mut next, item, &recipes, *index);
         assert_eq!(id(&next, RECIPE_METHOD_SLOT), "minecraft:smoker");
         assert!(matches!(next.actions[28], Some(Action::Replace(Page::VanillaRecipe(_, 0)))));
@@ -1830,7 +1841,8 @@ mod tests {
         assert_eq!(shown(INGREDIENT_SLOTS[4]).as_deref(), Some("minecraft:crafting_table"));
         assert_eq!(shown(RECIPE_OUTPUT_SLOT).as_deref(), Some("minecraft:crafting_table"));
         assert_eq!(shown(INGREDIENT_SLOTS[7]).as_deref(), Some("minecraft:dispenser"));
-        assert_eq!(shown(6).as_deref(), Some("minecraft:gray_stained_glass_pane"));
+        assert_eq!(shown(6), None);
+        assert_eq!(shown(45), None);
     }
 
     #[test]

@@ -170,6 +170,8 @@ python3 horizon/tools/import-block-storage.py \
 
 二级及以上 OP 可用 `/sf storage` 查看统计，再使用 `/sf storage inspect minecraft:overworld -1 64 -17` 查看具体位置。对于已迁移且仍是普通箱子的输出箱，使用 `/sf storage restore-output minecraft:overworld -1 64 -17` 恢复路由标记，原有箱内物品保持原样。目标需位于当前维度的已加载区块。
 
+导入对应 `.sfb` 后，`restore-network` 和 `restore-chunk` 可恢复原位置头颅上的能量水晶、石块、人造蓝宝石、黑金刚石和黑金刚石原矿标记。保留已有头颅的皮肤和朝向，生存破坏时掉落对应的 Slimefun 物品。
+
 `/sf storage restore-inventory minecraft:overworld -1 64 -17` 可恢复已移植的电力机器、货运输入节点和高级货运输出节点的菜单库存。电炉系列和高温压力舱都使用 Paper 的原始输入槽 19、20 与输出槽 24、25。反应堆与反应堆访问端口在原来的 19、28、37 槽恢复燃料，25、34、43 槽恢复冷却剂，40 槽恢复副产物。菜单会根据恢复后的运行模式和连接重新生成按钮。旧 `.sfi` 缺少 `preset` 时，已移植的 Slimefun 方块菜单可按同一坐标的 `.sfb` 方块 ID 恢复。若两份档案明确给出不同 ID，恢复会报错并保留原档。命令保留物品数量，使用每件物品的 DataVersion 升级组件。任何一个槽位无效时整份菜单均不写入。带旧式 `type` 或 `meta` 字段的物品保留在原始档案中，`inspect` 会标明需先由 Paper 重新保存的槽位。
 
 `/sf storage restore-chunk minecraft:overworld -1 64 -17` 按位置顺序恢复指定区块已支持的方块。每批最多 32 条，达到当前命令的处理时间后会在完整记录之间暂停。命令会列出拒绝恢复的坐标和原因，也会给出继续使用的偏移量。未移植的方块仍保存在原档案中。

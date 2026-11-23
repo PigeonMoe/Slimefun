@@ -187,6 +187,81 @@ fn fixture_host(material: &'static str) -> OrphanHost {
 }
 
 #[test]
+fn stock_heads_restore_exact_identity_and_localized_drops_idempotently() {
+    let cases: [(_, _, _, &[&str]); 5] = [
+        ("POWER_CRYSTAL", "misc_power_items", "&c&l能量水晶", &[]),
+        ("STONE_CHUNK", "ore_washer", "&6石块", &[]),
+        (
+            "SYNTHETIC_SAPPHIRE",
+            "synthetic_sapphire",
+            "&b人造蓝宝石",
+            &[
+                "",
+                "&fThis item can be used in a",
+                "&fworkbench and acts like Lapis Lazuli",
+            ],
+        ),
+        (
+            "CARBONADO",
+            "carbonado",
+            "&b&l黑金刚石",
+            &["", "&7&o\"黑色钻石\""],
+        ),
+        ("RAW_CARBONADO", "carbonado", "&b黑金刚石原矿", &[]),
+    ];
+    let mut host = fixture_host("minecraft:player_head");
+    let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
+    let level = host.0.level.level();
+    let pos = POSITION;
+    let missing = [pos[0] + 1, pos[1], pos[2]];
+    host.0.level.block_entity(pos);
+    let material = Identifier::parse("minecraft:player_head").unwrap();
+    host.0.registries.resolve_items([material.clone()]).unwrap();
+    let vanilla = ItemStack::new(host.item_key(&material).unwrap(), 1).unwrap();
+    for (id, expected_research, expected_name, expected_lore) in cases {
+        host.0.attachments = Default::default();
+        host.1.files.get_mut().unwrap().clear();
+        let archive = format!("[metadata]\nid = '{id}'").parse().unwrap();
+        let networks = Mutex::new(Networks::default());
+        assert_eq!(
+            crate::network_runtime::placed_id(&mut host, level, pos),
+            None
+        );
+        restore_network(&mut host, level, pos, &archive, &networks).unwrap();
+        assert_eq!(
+            crate::network_runtime::placed_id(&mut host, level, pos).as_deref(),
+            Some(id)
+        );
+        let after = host.0.attachments.to_nbt();
+        restore_network(&mut host, level, pos, &archive, &networks).unwrap();
+        assert!(restore_network(&mut host, level, missing, &archive, &networks).is_err());
+        assert_eq!(host.0.attachments.to_nbt(), after);
+
+        let (kind, research) = crate::items::decorative_head(id).unwrap();
+        assert_eq!(research.id, expected_research);
+        assert_eq!(crate::items::network_item(id), Some(kind));
+        let mut drop = vanilla.clone();
+        kind.decorate(&mut drop);
+        assert!(kind.matches(&host, &drop));
+        assert_eq!(Some(drop.clone()), kind.stack(&host, 1));
+        let components = drop.components().unwrap().as_nbt();
+        let colored = crate::hologram_projector::colored_lore;
+        assert_eq!(
+            components.get(&"minecraft:custom_name".into()),
+            Some(&colored(expected_name))
+        );
+        assert!(components.contains_key(&"minecraft:profile".into()));
+        let lore = (!expected_lore.is_empty())
+            .then(|| Tag::List(expected_lore.iter().copied().map(colored).collect()));
+        assert_eq!(
+            components.get(&"minecraft:lore".into()),
+            lore.as_ref(),
+            "{id}"
+        );
+    }
+}
+
+#[test]
 fn an_orphan_gold_pan_without_a_preset_keeps_charge_and_cannot_refill_a_replacement() {
     let mut host = fixture_host(CARRIER);
     let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);

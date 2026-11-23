@@ -278,18 +278,29 @@ impl SlimefunItem {
                 crate::hologram_projector::colored_lore("&fGold Block &7(24-Carat)"),
             );
         }
-        if self.id == crate::ancient_altar::SYNTHETIC_SHULKER_SHELL.id() {
+        let component_lore: &[&str] = match self.id {
+            "SYNTHETIC_SHULKER_SHELL" => &[
+                "",
+                "&fThis item can be used in a",
+                "&fworkbench like a normal Shulker Shell",
+            ],
+            "SYNTHETIC_SAPPHIRE" => &[
+                "",
+                "&fThis item can be used in a",
+                "&fworkbench and acts like Lapis Lazuli",
+            ],
+            "CARBONADO" => &["", "&7&o\"Black Diamond\""],
+            _ => &[],
+        };
+        if !component_lore.is_empty() {
             components.insert(
                 "minecraft:lore".into(),
                 Tag::List(
-                    [
-                        "",
-                        "&fThis item can be used in a",
-                        "&fworkbench like a normal Shulker Shell",
-                    ]
-                    .into_iter()
-                    .map(crate::hologram_projector::colored_lore)
-                    .collect(),
+                    component_lore
+                        .iter()
+                        .copied()
+                        .map(crate::hologram_projector::colored_lore)
+                        .collect(),
                 ),
             );
         }
@@ -1222,6 +1233,23 @@ item!(
     None
 );
 
+pub(crate) fn decorative_head(id: &str) -> Option<(Kind, &'static crate::recipes::Research)> {
+    use crate::{network_recipes, recipes};
+
+    [
+        (network_recipes::POWER_CRYSTAL, &recipes::POWER_ITEMS),
+        (STONE_CHUNK, &recipes::ORE_WASHER),
+        (
+            network_recipes::SYNTHETIC_SAPPHIRE,
+            &network_recipes::SYNTHETIC_SAPPHIRE_RESEARCH,
+        ),
+        (CARBONADO, &recipes::BLACK_DIAMONDS),
+        (RAW_CARBONADO, &recipes::BLACK_DIAMONDS),
+    ]
+    .into_iter()
+    .find(|(kind, _)| kind.id() == id)
+}
+
 pub(crate) fn network_item(id: &str) -> Option<Kind> {
     [
         GOLD_24K_BLOCK,
@@ -1255,6 +1283,7 @@ pub(crate) fn network_item(id: &str) -> Option<Kind> {
     ]
     .into_iter()
     .find(|kind| kind.id() == id)
+    .or_else(|| decorative_head(id).map(|(kind, _)| kind))
     .or_else(|| crate::network_recipes::network_item(id))
     .or_else(|| crate::auto_crafter::item_by_id(id))
     .or_else(|| crate::armor_forge::registered_item(id))
