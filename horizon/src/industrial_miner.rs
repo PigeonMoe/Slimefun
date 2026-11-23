@@ -626,26 +626,29 @@ fn structure(host: &dyn Host, level: LevelRef, origin: Pos) -> Option<(bool, [Po
     None
 }
 
-fn fuel_value(host: &dyn Host, stack: &ItemStack, advanced: bool) -> Option<u32> {
+pub(crate) fn fuel_value(host: &dyn Host, stack: &ItemStack, advanced: bool) -> Option<u32> {
     let name = stack.item().id(host);
-    if advanced {
-        return [
+    let seconds = if advanced {
+        [
             (Kind::Vanilla("minecraft:lava_bucket"), 48),
             (BUCKET_OF_OIL, 64),
             (BUCKET_OF_FUEL, 128),
         ]
         .into_iter()
-        .find_map(|(kind, value)| kind.matches(host, stack).then_some(value));
-    }
-    match name.as_str() {
-        "minecraft:coal" | "minecraft:charcoal" | "minecraft:blaze_rod" => Some(4),
-        "minecraft:coal_block" => Some(40),
-        "minecraft:dried_kelp_block" => Some(10),
-        _ => host
-            .item_block(stack.item())
-            .filter(|&block| host.block_in_tag(block, "minecraft:logs") == Some(true))
-            .map(|_| 1),
-    }
+        .find_map(|(kind, value)| kind.matches(host, stack).then_some(value))
+    } else {
+        match name.as_str() {
+            "minecraft:coal" | "minecraft:charcoal" | "minecraft:blaze_rod" => Some(4),
+            "minecraft:coal_block" => Some(40),
+            "minecraft:dried_kelp_block" => Some(10),
+            _ => host
+                .item_block(stack.item())
+                .filter(|&block| host.block_in_tag(block, "minecraft:logs") == Some(true))
+                .map(|_| 1),
+        }
+    }?;
+    // Paper's MachineFuel converts seconds to ticks. The miner spends one tick per ore.
+    Some(seconds * 2)
 }
 
 fn ore(name: &str, advanced: bool, rules: Rules) -> Option<(&str, u32, u32)> {
@@ -781,6 +784,28 @@ mod tests {
         );
         let columns = Columns::square([8, 63, -8], 5);
         assert_eq!(columns.chunks().collect::<Vec<_>>(), [[0, -1]]);
+    }
+
+    #[test]
+    fn a_new_fuel_item_grants_one_paper_mining_use_per_fuel_tick() {
+        use mod_api::{Identifier, testing::FakeHost};
+
+        mod_api::__private::initialize().unwrap();
+        let mut host = FakeHost::new();
+        let fuels = [
+            (Kind::Vanilla("minecraft:coal"), false, 8),
+            (Kind::Vanilla("minecraft:coal_block"), false, 80),
+            (Kind::Vanilla("minecraft:lava_bucket"), true, 96),
+            (BUCKET_OF_OIL, true, 128),
+            (BUCKET_OF_FUEL, true, 256),
+        ];
+        host.registries.resolve_items(fuels.map(|(kind, _, _)| {
+            Identifier::parse(kind.material()).unwrap()
+        })).unwrap();
+        for (kind, advanced, ores) in fuels {
+            let stack = kind.stack(&host, 1).unwrap();
+            assert_eq!(fuel_value(&host, &stack, advanced), Some(ores));
+        }
     }
 
     #[test]

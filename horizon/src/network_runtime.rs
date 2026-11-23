@@ -519,9 +519,9 @@ fn accepts_carrier(component: Component, actual: &str) -> bool {
 }
 
 #[derive(Default)]
-struct MachineRecipes {
-    fuels: crate::fuel_generators::TagFuels,
-    furnaces: crate::factory::FurnaceRecipes,
+pub(crate) struct MachineRecipes {
+    pub fuels: crate::fuel_generators::TagFuels,
+    pub furnaces: crate::factory::FurnaceRecipes,
 }
 
 #[derive(Default)]
@@ -535,11 +535,12 @@ pub(crate) struct Networks {
 }
 
 impl Networks {
-    pub(crate) fn register_machine_recipes(&mut self, host: &dyn mod_api::Host) {
+    pub(crate) fn register_machine_recipes(&mut self, host: &dyn mod_api::Host) -> Arc<MachineRecipes> {
         self.machine_recipes = Arc::new(MachineRecipes {
             fuels: crate::fuel_generators::TagFuels::register(host),
             furnaces: crate::factory::FurnaceRecipes::register(host),
         });
+        self.machine_recipes.clone()
     }
 
     pub(crate) fn gps_network(&self, player: u128) -> Vec<(String, Position, u32)> {

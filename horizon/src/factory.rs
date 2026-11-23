@@ -1447,6 +1447,10 @@ impl FurnaceRecipes {
         )
     }
 
+    pub(crate) fn display_recipes(&self) -> impl Iterator<Item = (ItemKey, &ItemStack)> {
+        self.0.iter().flat_map(|(keys, result)| keys.iter().map(move |&key| (key, result)))
+    }
+
     /// Paper's enhanced furnace tests the vanilla MaterialChoice directly.
     /// A stack's name, other components and count do not change that choice.
     pub(crate) fn material_output(&self, item: ItemKey) -> Option<&ItemStack> {
@@ -1505,7 +1509,7 @@ fn dust_to_ingot_recipes() -> impl Iterator<Item = SingleRecipe> {
         })
 }
 
-fn ingot_pulverizer_recipes(post_setup_recipes: bool) -> impl Iterator<Item = SingleRecipe> {
+pub(crate) fn ingot_pulverizer_recipes(post_setup_recipes: bool) -> impl Iterator<Item = SingleRecipe> {
     // Paper registers these two vanilla ingots before installing its smeltery-derived recipes.
     [
         (Kind::Vanilla("minecraft:gold_ingot"), GOLD_DUST),

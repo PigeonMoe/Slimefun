@@ -560,7 +560,7 @@ const LIQUID_FUELS: &[(Kind, u32)] = &[
 const NUCLEAR_FUELS: &[(Kind, u32)] =
     &[(URANIUM, 2500), (NEPTUNIUM, 1200), (BOOSTED_URANIUM, 3000)];
 
-fn fuel_ticks(host: &dyn Host, tier: Tier, stack: &ItemStack) -> Option<u32> {
+pub(crate) fn fuel_ticks(host: &dyn Host, tier: Tier, stack: &ItemStack) -> Option<u32> {
     let table = match tier {
         Tier::Solid => return solid_fuel(host, stack),
         Tier::Liquid => LIQUID_FUELS,

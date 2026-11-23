@@ -140,7 +140,7 @@ fn in_tag(host: &dyn Host, material: &str, tag: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn saw_result(host: &dyn Host, material: &str) -> Option<ItemStack> {
+pub(crate) fn saw_result(host: &dyn Host, material: &str) -> Option<ItemStack> {
     let (name, count) = if in_tag(host, material, "minecraft:logs") {
         (planks_for(material)?, 8)
     } else if in_tag(host, material, "minecraft:planks") {

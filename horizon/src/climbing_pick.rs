@@ -71,7 +71,7 @@ const COLORS: &[&str] = &[
     "black",
 ];
 
-fn default_power(material: &str) -> Option<f64> {
+pub(crate) fn default_power(material: &str) -> Option<f64> {
     let material = material.strip_prefix("minecraft:")?;
     match material {
         "ice" | "packed_ice" | "frosted_ice" | "blue_ice" | "terracotta" | "stone" | "granite"

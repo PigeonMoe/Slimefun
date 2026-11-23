@@ -270,6 +270,7 @@ impl Slimefun {
             availability::configure(&toml::Table::new());
             geo_deposits::load_config(true, None);
             *settings = Settings::default();
+            self.guide.configure_machine_display(*settings);
             enchantment_machines::configure(&toml::Table::new());
             self.talismans.configure(&toml::Table::new());
             self.radiation.configure(None);
@@ -461,6 +462,7 @@ impl Slimefun {
                 .and_then(toml::Value::as_table),
         );
         settings.update_networks(table.get("networks"));
+        self.guide.configure_machine_display(*settings);
     }
 }
 
@@ -2035,7 +2037,8 @@ impl Hooks for Slimefun {
             if let HostSide::Server(host) = host
                 && !reload
             {
-                self.networks.lock().unwrap().register_machine_recipes(host);
+                let registered = self.networks.lock().unwrap().register_machine_recipes(host);
+                self.guide.set_registered_machine_recipes(registered);
             }
         }
     }

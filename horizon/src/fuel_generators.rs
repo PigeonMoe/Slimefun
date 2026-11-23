@@ -180,7 +180,7 @@ const GENERATORS: &[Generator] = &[
     },
 ];
 
-const COAL_BLOCK_TAGS: &[(&str, u32)] = &[
+pub(crate) const COAL_BLOCK_TAGS: &[(&str, u32)] = &[
     ("minecraft:logs", 4),
     ("minecraft:planks", 1),
     ("minecraft:wooden_slabs", 1),
@@ -192,7 +192,7 @@ const COAL_BLOCK_TAGS: &[(&str, u32)] = &[
     ("minecraft:standing_signs", 2),
 ];
 
-const BIO_BLOCK_TAGS: &[(&str, u32)] = &[
+pub(crate) const BIO_BLOCK_TAGS: &[(&str, u32)] = &[
     ("minecraft:small_flowers", 1),
     ("minecraft:leaves", 1),
     ("minecraft:saplings", 1),

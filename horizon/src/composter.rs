@@ -87,16 +87,20 @@ fn research_hint(host: &mut dyn ServerHost, player: PlayerRef) {
     );
 }
 
+pub(crate) const MATERIAL_RECIPES: &[(&str, u32, &str)] = &[
+    ("minecraft:stone", 4, "minecraft:netherrack"),
+    ("minecraft:sand", 2, "minecraft:soul_sand"),
+    ("minecraft:wheat", 4, "minecraft:nether_wart"),
+];
+
 fn recipe(host: &dyn Host, input: &ItemStack) -> Option<(u32, Kind, String)> {
     if input.components().is_some() || input.damage_component().is_some() {
         return None;
     }
     let material = input.item().id(host);
-    let (count, product) = match material.as_str() {
-        "minecraft:stone" => (4, "minecraft:netherrack"),
-        "minecraft:sand" => (2, "minecraft:soul_sand"),
-        "minecraft:wheat" => (4, "minecraft:nether_wart"),
-        _ => {
+    let (count, product) = match MATERIAL_RECIPES.iter().find(|&&(name, _, _)| name == material) {
+        Some(&(_, count, product)) => (count, product),
+        None => {
             let block = host.block_key(&material)?;
             if ["minecraft:leaves", "minecraft:saplings"]
                 .iter()

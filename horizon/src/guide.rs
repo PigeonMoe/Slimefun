@@ -19,6 +19,7 @@ use crate::{
     availability,
     hologram_projector::{colored_label, colored_lore},
     items::{HeadTexture, Kind},
+    network_runtime::MachineRecipes,
     recipes::Research,
     research,
     ticker_policy::Tickers,
@@ -27,6 +28,7 @@ use crate::{
 mod catalog;
 mod learning;
 mod locale;
+mod processing;
 use catalog::{Entry, GROUPS, Group, group_entries, lookup, named_group_entries};
 use learning::Preference;
 pub(crate) use learning::launch_random_fireworks;
@@ -43,9 +45,10 @@ const BOOK_LORE: &[&str] = &[
 const GUIDE_KEY: &str = "slimefun:slimefun_guide_mode";
 const SURVIVAL: &str = "SURVIVAL_MODE";
 const DISCOVERY_SLOTS: usize = 36;
-const INGREDIENT_SLOTS: [usize; 9] = [12, 13, 14, 21, 22, 23, 30, 31, 32];
-const RECIPE_METHOD_SLOT: usize = 19;
-const RECIPE_OUTPUT_SLOT: usize = 25;
+const INGREDIENT_SLOTS: [usize; 9] = [3, 4, 5, 12, 13, 14, 21, 22, 23];
+const RECIPE_METHOD_SLOT: usize = 10;
+const RECIPE_OUTPUT_SLOT: usize = 16;
+const PROCESSING_PAGE_SIZE: usize = 18;
 
 fn book(host: &dyn Host) -> Option<ItemStack> {
     let mut item = icon(
@@ -244,6 +247,7 @@ enum Page {
     Cheat,
     Group(&'static Group, usize),
     Recipe(&'static Entry),
+    ProcessingRecipes(&'static Entry, usize),
     Info,
     Search(Arc<str>),
 }
@@ -288,6 +292,8 @@ pub(crate) struct Guide {
     receive_on_first_join: AtomicBool,
     show_hidden_groups_in_search: AtomicBool,
     learning: learning::Learning,
+    machine_settings: Mutex<crate::machine::Settings>,
+    machine_recipes: Mutex<Arc<MachineRecipes>>,
 }
 
 impl Default for Guide {
@@ -297,11 +303,21 @@ impl Default for Guide {
             receive_on_first_join: AtomicBool::new(true),
             show_hidden_groups_in_search: AtomicBool::new(false),
             learning: learning::Learning::default(),
+            machine_settings: Mutex::default(),
+            machine_recipes: Mutex::default(),
         }
     }
 }
 
 impl Guide {
+    pub(crate) fn set_registered_machine_recipes(&self, recipes: Arc<MachineRecipes>) {
+        *self.machine_recipes.lock().unwrap() = recipes;
+    }
+
+    pub(crate) fn configure_machine_display(&self, settings: crate::machine::Settings) {
+        *self.machine_settings.lock().unwrap() = settings;
+    }
+
     pub(crate) fn configure(
         &self,
         section: Option<&toml::Value>,
@@ -463,9 +479,15 @@ impl Guide {
             return;
         }
         let month = host.server_local_minute()[1];
-        let availability = Availability::for_dimension(host.dimension());
+        let recipes = self.machine_recipes.lock().unwrap().clone();
+        let availability = Availability {
+            machine_settings: *self.machine_settings.lock().unwrap(),
+            machine_recipes: Some(&recipes),
+            ..Availability::for_dimension(host.dimension())
+        };
         if matches!(path.last(), Some(Page::Group(group, _)) if !group.in_season(month))
-            || matches!(path.last(), Some(Page::Recipe(entry)) if !availability.allows_search(entry))
+            || matches!(path.last(), Some(Page::Recipe(entry) | Page::ProcessingRecipes(entry, _))
+                if !availability.allows_search(entry))
         {
             path.truncate(1);
         }
@@ -527,7 +549,10 @@ impl Guide {
             }
         }
         if path.len() > 1 {
-            let back = usize::from(!matches!(page, Page::Recipe(_) | Page::Info));
+            let back = usize::from(!matches!(
+                page,
+                Page::Recipe(_) | Page::ProcessingRecipes(_, _) | Page::Info
+            ));
             menu.set(
                 back,
                 icon(
@@ -739,6 +764,8 @@ struct Availability<'a> {
     output_chest: bool,
     tickers: Tickers,
     dimension: Option<&'a str>,
+    machine_settings: crate::machine::Settings,
+    machine_recipes: Option<&'a MachineRecipes>,
 }
 
 impl<'a> Availability<'a> {
@@ -747,6 +774,8 @@ impl<'a> Availability<'a> {
             output_chest: crate::output_chest::enabled(dimension),
             tickers: Tickers::current(),
             dimension: Some(dimension),
+            machine_settings: crate::machine::Settings::default(),
+            machine_recipes: None,
         }
     }
 
@@ -881,7 +910,10 @@ fn render(
             }
             pagination(host, &mut menu, group, page, pages);
         }
-        Page::Recipe(entry) => {
+        Page::Recipe(entry) | Page::ProcessingRecipes(entry, _) => {
+            let processing = processing::entries(
+                host, entry.id, availability.machine_settings, availability.machine_recipes,
+            );
             for (index, (slot, input)) in INGREDIENT_SLOTS
                 .into_iter()
                 .zip(entry.ingredients)
@@ -911,6 +943,13 @@ fn render(
             }
             menu.slots[RECIPE_METHOD_SLOT] = method_icon(host, entry);
             menu.slots[RECIPE_OUTPUT_SLOT] = entry_icon(host, entry, entry.item.count);
+            if !processing.is_empty() {
+                let page = match screen {
+                    Page::ProcessingRecipes(_, page) => *page,
+                    _ => 0,
+                };
+                show_processing_recipes(host, &mut menu, entry, processing, page, availability);
+            }
         }
         Page::Info => {
             menu.slots[2] = icon(
@@ -1063,6 +1102,50 @@ fn color_code(color: &str) -> char {
         "gold" => '6',
         "light_purple" => 'd',
         _ => '7',
+    }
+}
+
+fn show_processing_recipes(
+    host: &dyn Host,
+    menu: &mut Menu,
+    entry: &'static Entry,
+    recipes: Vec<Option<ItemStack>>,
+    page: usize,
+    availability: Availability<'_>,
+) {
+    let pages = recipes.len().div_ceil(PROCESSING_PAGE_SIZE);
+    let page = page.min(pages - 1);
+    let position = format!("&7({} / {pages})", page + 1);
+    let label = format!("&7⇩ {} ⇩", processing::label(entry.id));
+    for slot in 27..36 {
+        menu.slots[slot] = icon(host, "minecraft:gray_stained_glass_pane", &label, &[]);
+    }
+    for (slot, label, target) in [
+        (28, "⇦ 上一页", page.checked_sub(1)),
+        (34, "下一页 ⇨", (page + 1 < pages).then_some(page + 1)),
+    ] {
+        let (material, color) = if target.is_some() {
+            ("minecraft:lime_stained_glass_pane", "&f")
+        } else {
+            ("minecraft:black_stained_glass_pane", "&8")
+        };
+        menu.set(
+            slot,
+            icon(host, material, &format!("{color}{label}"), &["", &position]),
+            target.map(|next| Action::Replace(Page::ProcessingRecipes(entry, next))),
+        );
+    }
+    let mut rows = recipes.into_iter().skip(page * PROCESSING_PAGE_SIZE);
+    for column in 0..9 {
+        for slot in [36 + column, 45 + column] {
+            let item = rows.next().flatten();
+            let action = item.as_ref()
+                .and_then(crate::items::item_id)
+                .and_then(|id| lookup(&id))
+                .filter(|entry| availability.allows_search(entry))
+                .map(|entry| Action::Push(Page::Recipe(entry)));
+            menu.set(slot, item, action);
+        }
     }
 }
 
@@ -1502,6 +1585,53 @@ mod tests {
     }
 
     #[test]
+    fn auto_drier_shows_paper_processing_rows_navigation_and_localized_lore() {
+        mod_api::__private::initialize().unwrap();
+        let mut host = FakeHost::new();
+        let entry = lookup("AUTO_DRIER").unwrap();
+        let icons = [
+            "minecraft:gray_stained_glass_pane",
+            "minecraft:black_stained_glass_pane",
+            "minecraft:lime_stained_glass_pane",
+        ];
+        let process_materials = crate::thermal_machines::recipes(
+            crate::advanced_processing::Family::AutoDrier,
+            false,
+        ).flat_map(|recipe| recipe.inputs.iter().chain(recipe.outputs).map(|stack| stack.kind.material()));
+        host.registries.resolve_items(
+            icons.into_iter()
+                .chain(process_materials)
+                .chain(entry.ingredients.iter().flatten().map(|stack| stack.kind.material()))
+                .chain([entry.recipe_type.icon.material(), entry.item.kind.material()])
+                .map(|id| Identifier::parse(id).unwrap()),
+        ).unwrap();
+        let first = render(&host, None, &Page::Recipe(entry), 1, false, available(), false);
+        let slot_id = |menu: &Menu, slot: usize| menu.slots[slot].as_ref().unwrap().item().id(&host);
+        assert_eq!(slot_id(&first, RECIPE_OUTPUT_SLOT), "minecraft:smoker");
+        assert_eq!(slot_id(&first, 36), "minecraft:rotten_flesh");
+        assert_eq!(slot_id(&first, 45), "minecraft:leather");
+        assert_eq!(slot_id(&first, 44), "minecraft:cooked_porkchop");
+        assert_eq!(slot_id(&first, 28), "minecraft:black_stained_glass_pane");
+        assert!(first.actions[28].is_none());
+        let Some(Action::Replace(next @ Page::ProcessingRecipes(_, 1))) = &first.actions[34] else {
+            panic!("the remaining processing pairs must have a second page");
+        };
+        let second = render(&host, None, next, 1, false, available(), false);
+        assert_eq!(slot_id(&second, 36), "minecraft:cooked_chicken");
+        let jerky = second.slots[45].as_ref().unwrap();
+        assert_eq!(jerky.item().id(&host), "minecraft:cooked_chicken");
+        assert_eq!(crate::items::item_id(jerky).as_deref(), Some("CHICKEN_JERKY"));
+        assert_eq!(
+            jerky.components().unwrap().as_nbt().get(&"minecraft:lore".into()),
+            Some(&Tag::List(vec![colored_lore(""), colored_lore("&r横扫饥饿!")])),
+        );
+        assert_eq!(slot_id(&second, 34), "minecraft:black_stained_glass_pane");
+        assert!(second.actions[34].is_none());
+        assert!(matches!(second.actions[28], Some(Action::Replace(Page::ProcessingRecipes(_, 0)))));
+        assert!(matches!(&second.actions[45], Some(Action::Push(Page::Recipe(recipe))) if recipe.id == "CHICKEN_JERKY"));
+    }
+
+    #[test]
     fn basic_machine_page_keeps_navigation_above_the_recipe() {
         let mut host = FakeHost::new();
         let materials = [
@@ -1550,11 +1680,11 @@ mod tests {
                 .as_ref()
                 .map(|item| item.item().id(&host))
         };
-        assert_eq!(shown(19).as_deref(), Some("minecraft:bricks"));
-        assert_eq!(shown(22).as_deref(), Some("minecraft:crafting_table"));
-        assert_eq!(shown(25).as_deref(), Some("minecraft:crafting_table"));
-        assert_eq!(shown(31).as_deref(), Some("minecraft:dispenser"));
-        assert_eq!(shown(4).as_deref(), Some("minecraft:gray_stained_glass_pane"));
+        assert_eq!(shown(RECIPE_METHOD_SLOT).as_deref(), Some("minecraft:bricks"));
+        assert_eq!(shown(INGREDIENT_SLOTS[4]).as_deref(), Some("minecraft:crafting_table"));
+        assert_eq!(shown(RECIPE_OUTPUT_SLOT).as_deref(), Some("minecraft:crafting_table"));
+        assert_eq!(shown(INGREDIENT_SLOTS[7]).as_deref(), Some("minecraft:dispenser"));
+        assert_eq!(shown(6).as_deref(), Some("minecraft:gray_stained_glass_pane"));
     }
 
     #[test]
@@ -1581,7 +1711,7 @@ mod tests {
         let listed = listed.as_ref().unwrap();
         assert_eq!(listed.count(), 1);
         let recipe = render(&host, None, &Page::Recipe(entry), 1, false, available(), false);
-        let output = recipe.slots[25].as_ref().unwrap();
+        let output = recipe.slots[RECIPE_OUTPUT_SLOT].as_ref().unwrap();
         assert_eq!(output.count(), 8);
         let lore = colored_lore("&d在彩虹的各个颜色之间循环切换！");
         for stack in [listed, output] {
@@ -1968,10 +2098,10 @@ mod tests {
         let table = lookup("TABLE_SAW").unwrap();
         let menu = render(&host, None, &Page::Recipe(table), 1, false, available(), false);
         for (slot, material) in [
-            (21, "smooth_stone_slab"),
-            (22, "stonecutter"),
-            (23, "smooth_stone_slab"),
-            (31, "iron_block"),
+            (INGREDIENT_SLOTS[3], "smooth_stone_slab"),
+            (INGREDIENT_SLOTS[4], "stonecutter"),
+            (INGREDIENT_SLOTS[5], "smooth_stone_slab"),
+            (INGREDIENT_SLOTS[7], "iron_block"),
         ] {
             assert_eq!(
                 menu.slots[slot].as_ref().unwrap().item().id(&host),
@@ -2022,15 +2152,15 @@ mod tests {
             assert_eq!(miner.research.unwrap().cost, cost);
             let shown = render(&host, None, &Page::Recipe(miner), 1, false, available(), false);
             assert_eq!(
-                shown.slots[22].as_ref().unwrap().item().id(&host),
+                shown.slots[INGREDIENT_SLOTS[4]].as_ref().unwrap().item().id(&host),
                 "minecraft:chest"
             );
-            assert_eq!(shown.slots[30].as_ref().unwrap().item().id(&host), base);
+            assert_eq!(shown.slots[INGREDIENT_SLOTS[6]].as_ref().unwrap().item().id(&host), base);
             assert_eq!(
-                shown.slots[31].as_ref().unwrap().item().id(&host),
+                shown.slots[INGREDIENT_SLOTS[7]].as_ref().unwrap().item().id(&host),
                 "minecraft:blast_furnace"
             );
-            assert_eq!(shown.slots[32].as_ref().unwrap().item().id(&host), base);
+            assert_eq!(shown.slots[INGREDIENT_SLOTS[8]].as_ref().unwrap().item().id(&host), base);
             let depicted = shown.slots[RECIPE_OUTPUT_SLOT].as_ref().unwrap();
             assert_eq!(depicted.item().id(&host), icon);
             let components = depicted.components().unwrap();
@@ -2040,7 +2170,7 @@ mod tests {
                 Some(&expected)
             );
             assert!(crate::items::item_id(depicted).is_none());
-            for slot in [21, 23] {
+            for slot in [INGREDIENT_SLOTS[3], INGREDIENT_SLOTS[5]] {
                 let parts = shown.slots[slot].as_ref().unwrap().components().unwrap();
                 assert_eq!(
                     parts.as_nbt().get(&"minecraft:custom_name".into()),
@@ -2073,7 +2203,7 @@ mod tests {
         assert_eq!(sifted.research.unwrap().id, "ore_washer");
         let circuit = lookup("BASIC_CIRCUIT_BOARD").unwrap();
         let shown = render(&host, None, &Page::Recipe(circuit), 1, false, available(), false);
-        let head = shown.slots[22].as_ref().unwrap();
+        let head = shown.slots[INGREDIENT_SLOTS[4]].as_ref().unwrap();
         assert_eq!(head.item().id(&host), "minecraft:player_head");
         assert!(
             head.components()
@@ -2082,7 +2212,7 @@ mod tests {
                 .contains_key(&"minecraft:profile".into())
         );
         assert_eq!(
-            shown.slots[19].as_ref().unwrap().item().id(&host),
+            shown.slots[RECIPE_METHOD_SLOT].as_ref().unwrap().item().id(&host),
             "minecraft:iron_sword"
         );
     }
@@ -2127,6 +2257,8 @@ mod tests {
             output_chest: true,
             tickers: Tickers::default(),
             dimension: None,
+            machine_settings: crate::machine::Settings::default(),
+            machine_recipes: None,
         }
     }
 
