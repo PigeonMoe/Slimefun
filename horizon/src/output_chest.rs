@@ -4,9 +4,10 @@ use std::collections::BTreeSet;
 use std::sync::RwLock;
 
 use mod_api::{
-    AttachmentCodec, AttachmentError, AttachmentType, BlockDropsEvent, Compound, Holder, Host,
-    HostSide, HostTransaction, ITEMS, InteractionResult, ItemKey, ItemPart, ItemStack, LevelHost,
-    LevelRef, OnBlockPlacedByEvent, ServerHost, Tag, Text, UseOnEvent,
+    AttachmentCodec, AttachmentError, AttachmentType, BlockDropsEvent, BlockPart, BlockUpdateFlags,
+    CanDropFromExplosionEvent, Compound, Holder, Host, HostSide, HostTransaction, ITEMS,
+    InteractionResult, ItemKey, ItemPart, ItemStack, LevelHost, LevelRef, OnBlockExplodedEvent,
+    OnBlockPlacedByEvent, ServerHost, Tag, Text, UseOnEvent,
 };
 
 use crate::items::OUTPUT_CHEST;
@@ -111,6 +112,52 @@ impl ItemPart for ChestPlacement {
             let _ = MARKER.set(host, Holder::BlockEntity(event.pos), true);
         }
     }
+}
+
+pub(crate) struct ChestExplosion;
+
+#[mod_api::horizon_part]
+impl BlockPart for ChestExplosion {
+    fn can_drop_from_explosion(
+        &self,
+        level: &dyn LevelHost,
+        event: &mut CanDropFromExplosionEvent<'_>,
+    ) -> Option<bool> {
+        let pos = [event.pos.x, event.pos.y, event.pos.z];
+        level
+            .block_entity_at(pos)
+            .is_some_and(|entity| marked(level, entity))
+            .then_some(false)
+    }
+
+    fn on_block_exploded(&self, host: &mut dyn ServerHost, event: &mut OnBlockExplodedEvent<'_>) {
+        if let Some(level) = host.level(event.explosion.dimension) {
+            discard_blast_chest(host, level, [event.pos.x, event.pos.y, event.pos.z]);
+        }
+    }
+}
+
+/// Paper's Output Chest handler permits the blast to delete the chest and has
+/// no explosion drops. Replacing it before vanilla's removal suppresses the
+/// separate block entity spill while still updating neighboring blocks.
+pub(crate) fn discard_blast_chest(
+    host: &mut dyn ServerHost,
+    level: LevelRef,
+    pos: [i32; 3],
+) -> bool {
+    if !host
+        .block_entity(level, pos)
+        .is_some_and(|entity| live_marker(host, entity))
+    {
+        return false;
+    }
+    let Some(air) = host.block_state_id("minecraft:air") else {
+        return false;
+    };
+    let flags = BlockUpdateFlags::NEIGHBORS
+        | BlockUpdateFlags::CLIENTS
+        | BlockUpdateFlags::SKIP_BLOCK_ENTITY_SIDE_EFFECTS;
+    level.set_block(host, pos, air, flags) == Ok(true)
 }
 
 pub(crate) fn restore_paper_marker(

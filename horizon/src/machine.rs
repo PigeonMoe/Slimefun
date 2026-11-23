@@ -58,6 +58,7 @@ pub(crate) struct Settings {
     pub solar_night_in_other_dimensions: bool,
     pub cargo_visualizer: bool,
     pub cargo_tick_delay: u32,
+    pub cargo_delete_excess_items: bool,
     pub block_ticker_delay: u32,
     pub network_discovery_budget: u32,
     pub produce_collector_range: u8,
@@ -85,6 +86,7 @@ impl Default for Settings {
             solar_night_in_other_dimensions: false,
             cargo_visualizer: true,
             cargo_tick_delay: 0,
+            cargo_delete_excess_items: false,
             block_ticker_delay: 10,
             network_discovery_budget: 200,
             produce_collector_range: crate::factory::produce_collector::DEFAULT_RANGE,
@@ -108,6 +110,9 @@ impl Settings {
             .and_then(toml::Value::as_integer)
             .and_then(|value| u32::try_from(value.max(0)).ok())
             .unwrap_or(defaults.cargo_tick_delay);
+        self.cargo_delete_excess_items = option("delete-excess-items")
+            .and_then(toml::Value::as_bool)
+            .unwrap_or(defaults.cargo_delete_excess_items);
     }
 }
 
@@ -884,6 +889,7 @@ mod tests {
 max-size = 1
 enable-visualizer = false
 cargo-ticker-delay = 4
+delete-excess-items = true
 "#
         .parse::<toml::Table>()
         .unwrap();
@@ -891,6 +897,7 @@ cargo-ticker-delay = 4
         assert_eq!(settings.network_discovery_budget, 1);
         assert!(!settings.cargo_visualizer);
         assert_eq!(settings.cargo_tick_delay, 4);
+        assert!(settings.cargo_delete_excess_items);
 
         let partial = "[networks]\nmax-size = 42\n"
             .parse::<toml::Table>()
@@ -899,11 +906,13 @@ cargo-ticker-delay = 4
         assert_eq!(settings.network_discovery_budget, 42);
         assert!(settings.cargo_visualizer);
         assert_eq!(settings.cargo_tick_delay, 0);
+        assert!(!settings.cargo_delete_excess_items);
 
         settings.update_networks(None);
         assert_eq!(settings.network_discovery_budget, 200);
         assert!(settings.cargo_visualizer);
         assert_eq!(settings.cargo_tick_delay, 0);
+        assert!(!settings.cargo_delete_excess_items);
     }
 
     #[test]

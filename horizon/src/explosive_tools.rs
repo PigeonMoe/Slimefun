@@ -221,9 +221,11 @@ impl ExplosiveTools {
         let positions = if rules.call_explosion_event {
             // Paper announces the original list before checking each position's normal
             // permissions. A removed position cannot be restored by the tool.
-            level
+            let mut positions = level
                 .filter_block_explosion(host, event.pos, &positions)
-                .unwrap_or_default()
+                .unwrap_or_default();
+            positions.retain(|&pos| !crate::output_chest::discard_blast_chest(host, level, pos));
+            positions
         } else {
             positions
         };

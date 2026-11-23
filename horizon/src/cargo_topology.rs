@@ -5,7 +5,7 @@ use std::{collections::BTreeMap, ops::Range, sync::Mutex};
 use mod_api::{
     AttachmentError, BlockEntityItemError, BlockItemPlacePreEvent, Compound, HostTransaction,
     ITEMS, ItemKey, ItemResource, ItemStack, LevelRef, ServerHost, StackWriteError, Tag, Text,
-    UseOnEvent, java_double_to_string, java_float_to_string,
+    Transaction, UseOnEvent, java_double_to_string, java_float_to_string,
 };
 
 use super::{
@@ -869,6 +869,7 @@ pub(super) fn tick(
     network: (&str, Position),
     active: &BTreeMap<Position, (&Node, u32)>,
     group: &[Position],
+    delete_excess_items: bool,
     profile: &mut crate::timings::Cycle,
 ) -> u64 {
     let mut inputs = Vec::new();
@@ -922,13 +923,25 @@ pub(super) fn tick(
             } else {
                 0
             };
-            let next = route(
+            let next = route_with_overflow(
                 host,
                 level,
                 input,
                 outputs,
                 cursor,
+                delete_excess_items,
                 |host, from, to, stack| level.allow_inventory_transfer(host, from, to, stack),
+                |host, remainder| {
+                    let [x, y, z] = input
+                        .inventory
+                        .map(|coordinate| f64::from(coordinate) + 0.5);
+                    level
+                        .spawn_item(host, x, y + 0.5, z, remainder, 10)
+                        .ok()
+                        .flatten()
+                        .map(|_| ())
+                        .ok_or(())
+                },
             );
             if let Some(next) = next
                 && input.options.round_robin
@@ -950,21 +963,236 @@ struct Terminal {
     filter: Filter,
 }
 
-fn route(
+struct Withdrawal {
+    slot: usize,
+    position: Position,
+    resource: ItemResource,
+    stack: ItemStack,
+}
+
+fn route_with_overflow(
     host: &mut dyn ServerHost,
     level: LevelRef,
     input: &Terminal,
     outputs: &[Option<Terminal>],
     cursor: usize,
+    delete_excess_items: bool,
     mut permit: impl FnMut(&mut dyn ServerHost, Position, Position, &ItemStack) -> bool,
+    mut overflow: impl FnMut(&mut dyn ServerHost, ItemStack) -> Result<(), ()>,
 ) -> Option<usize> {
     let source = level.capability(host, &ITEMS, input.inventory, None)?;
-    let (slot, mut stack) = input.kind.extract(source.size(host)).find_map(|slot| {
-        let stack = source
-            .resource(host, slot)?
-            .to_stack(source.amount(host, slot))?;
-        input.filter.accepts(host, &stack).then_some((slot, stack))
+    let size = source.size(host);
+    let withdrawal = input.kind.extract(size).find_map(|slot| {
+        let resource = source.resource(host, slot)?;
+        let stack = resource.to_stack(source.amount(host, slot))?;
+        if !input.filter.accepts(host, &stack) {
+            return None;
+        }
+        let position = input
+            .kind
+            .slot_position(host, level, input.inventory, size, slot)?;
+        Some(Withdrawal {
+            slot,
+            position,
+            resource,
+            stack,
+        })
     })?;
+    let original_holder = host.block_entity(level, withdrawal.position);
+    let furnace = original_holder.filter(|holder| {
+        matches!(input.kind, InventoryKind::Smelter)
+            && size == 3
+            && source.owner() == "the game"
+            && holder
+                .item_slot(host, withdrawal.slot as u32)
+                .ok()
+                .flatten()
+                .as_ref()
+                == Some(&withdrawal.stack)
+    });
+    if furnace.is_none()
+        && source.capacity(host, withdrawal.slot, &withdrawal.resource) < withdrawal.stack.count()
+    {
+        // Keep sources without a verified write-back path in their slots during transfer.
+        return distribute(
+            host,
+            outputs,
+            cursor,
+            withdrawal.stack,
+            |host, output, stack| {
+                move_to_first(
+                    host,
+                    level,
+                    input,
+                    TransferSource::InPlace(withdrawal.slot),
+                    output,
+                    stack,
+                    &mut permit,
+                )
+            },
+        )
+        .0;
+    }
+    let available = withdrawal.stack.count();
+    host.transaction(|host, tx| {
+        if source.extract(host, tx, withdrawal.slot, &withdrawal.resource, available) != available {
+            return Err(());
+        }
+        let (next, remainder) = distribute(
+            host,
+            outputs,
+            cursor,
+            withdrawal.stack,
+            |host, output, stack| {
+                move_to_first(
+                    host,
+                    level,
+                    input,
+                    TransferSource::Withdrawn(withdrawal.position),
+                    output,
+                    stack,
+                    &mut permit,
+                )
+            },
+        );
+        if let Some(remainder) = remainder {
+            if remainder.count() == available {
+                // Roll back the temporary withdrawal if no shipment was authorized and accepted.
+                return Err(());
+            }
+            let source = level
+                .capability(host, &ITEMS, input.inventory, None)
+                .ok_or(())?;
+            if source.size(host) != size
+                || input
+                    .kind
+                    .slot_position(host, level, input.inventory, size, withdrawal.slot)
+                    != Some(withdrawal.position)
+                || host.block_entity(level, withdrawal.position) != original_holder
+            {
+                return Err(());
+            }
+            let rest = if let Some(holder) = furnace {
+                if source.owner() != "the game" {
+                    return Err(());
+                }
+                let slots = [
+                    holder.item_slot(host, 0).map_err(|_| ())?,
+                    holder.item_slot(host, 1).map_err(|_| ())?,
+                    holder.item_slot(host, 2).map_err(|_| ())?,
+                ];
+                restore_furnace(slots, withdrawal.slot, remainder, |slot, stack| {
+                    holder.set_item_slot(host, tx, slot, Some(stack))
+                })
+                .map_err(|_| ())?
+            } else {
+                restore_withdrawal(
+                    host,
+                    tx,
+                    &source,
+                    input.kind,
+                    withdrawal.slot,
+                    &withdrawal.resource,
+                    remainder.count(),
+                )?
+            };
+            if let Some(rest) = rest.filter(|_| !delete_excess_items) {
+                overflow(host, rest)?;
+            }
+        }
+        Ok(next)
+    })
+    .ok()
+    .flatten()
+}
+
+fn restore_withdrawal(
+    host: &mut dyn ServerHost,
+    tx: &Transaction,
+    source: &mod_api::Capability<dyn mod_api::ResourceHandler<ItemResource>>,
+    kind: InventoryKind,
+    original: usize,
+    resource: &ItemResource,
+    mut count: u32,
+) -> Result<Option<ItemStack>, ()> {
+    let size = source.size(host);
+    if original >= size {
+        return Err(());
+    }
+    if source.resource(host, original).is_none() {
+        return (source.insert(host, tx, original, resource, count) == count)
+            .then_some(None)
+            .ok_or(());
+    }
+    if matches!(
+        kind,
+        InventoryKind::Ordinary
+            | InventoryKind::Chest
+            | InventoryKind::Smelter
+            | InventoryKind::Brewer
+    ) {
+        // Bukkit Inventory.addItem first merges identical stacks, then fills empty slots.
+        for merge in [true, false] {
+            for slot in 0..size {
+                let suitable = match source.resource(host, slot) {
+                    Some(held) => merge && resource.matches(held.as_stack()),
+                    None => !merge,
+                };
+                if suitable {
+                    count -= source.insert(host, tx, slot, resource, count);
+                    if count == 0 {
+                        return Ok(None);
+                    }
+                }
+            }
+        }
+    }
+    // BlockMenu restoration only writes back to the original slot.
+    resource.to_stack(count).map(Some).ok_or(())
+}
+
+fn restore_furnace(
+    slots: [Option<ItemStack>; 3],
+    original: usize,
+    mut remainder: ItemStack,
+    mut write: impl FnMut(u32, ItemStack) -> Result<bool, BlockEntityItemError>,
+) -> Result<Option<ItemStack>, BlockEntityItemError> {
+    if slots[original].is_none() {
+        return write(original as u32, remainder)?
+            .then_some(None)
+            .ok_or(BlockEntityItemError::Unavailable);
+    }
+
+    // Bukkit inventory insertion sees all physical slots, including fuel and output.
+    let resource = ItemResource::of(&remainder);
+    for merge in [true, false] {
+        for (slot, held) in slots.iter().enumerate() {
+            if held.is_some() != merge {
+                continue;
+            }
+            let moved =
+                insert_direct_slot(&remainder, &resource, held.clone(), |stack| {
+                    match write(slot as u32, stack) {
+                        Ok(false) => Err(BlockEntityItemError::Unavailable),
+                        result => result,
+                    }
+                })?;
+            let Some(rest) = remainder.shrink(moved) else {
+                return Ok(None);
+            };
+            remainder = rest;
+        }
+    }
+    Ok(Some(remainder))
+}
+
+fn distribute(
+    host: &mut dyn ServerHost,
+    outputs: &[Option<Terminal>],
+    cursor: usize,
+    mut stack: ItemStack,
+    mut deliver: impl FnMut(&mut dyn ServerHost, &Terminal, &ItemStack) -> u32,
+) -> (Option<usize>, Option<ItemStack>) {
     // Paper skips rotation when this channel has shrunk past the saved cursor.
     // Its running index still starts at the old cursor.
     let start = if cursor < outputs.len() { cursor } else { 0 };
@@ -976,16 +1204,42 @@ fn route(
         if !output.filter.accepts(host, &stack) {
             continue;
         }
-        let moved = move_to_first(host, level, input, slot, output, &stack, &mut permit);
-        // Each destination fills its first compatible stack, and the next output can receive the remainder.
+        let moved = deliver(host, output, &stack);
+        // Each destination fills its first compatible stack; the next output can receive the remainder.
         if moved == stack.count() {
-            return Some((cursor % outputs.len() + offset + 1) % outputs.len());
+            return (
+                Some((cursor % outputs.len() + offset + 1) % outputs.len()),
+                None,
+            );
         }
         if moved != 0 {
-            stack = stack.shrink(moved)?;
+            stack = stack
+                .shrink(moved)
+                .expect("a partial shipment leaves items");
         }
     }
-    None
+    (None, Some(stack))
+}
+
+#[cfg(test)]
+fn route(
+    host: &mut dyn ServerHost,
+    level: LevelRef,
+    input: &Terminal,
+    outputs: &[Option<Terminal>],
+    cursor: usize,
+    permit: impl FnMut(&mut dyn ServerHost, Position, Position, &ItemStack) -> bool,
+) -> Option<usize> {
+    route_with_overflow(
+        host,
+        level,
+        input,
+        outputs,
+        cursor,
+        false,
+        permit,
+        |_, _| Err(()),
+    )
 }
 
 // Paper spreads the same item only among inputs already holding that item.
@@ -1032,44 +1286,56 @@ fn pressure_slots(
     preferred.into_iter().map(|(slot, _)| slot).collect()
 }
 
+#[derive(Clone, Copy)]
+enum TransferSource {
+    InPlace(usize),
+    Withdrawn(Position),
+}
+
 fn move_to_first(
     host: &mut dyn ServerHost,
     level: LevelRef,
     input: &Terminal,
-    source_slot: usize,
+    origin: TransferSource,
     output: &Terminal,
     stack: &ItemStack,
     mut permit: impl FnMut(&mut dyn ServerHost, Position, Position, &ItemStack) -> bool,
 ) -> u32 {
     let source_resource = ItemResource::of(stack);
     host.transaction(|host, tx| {
-        let source = level
-            .capability(host, &ITEMS, input.inventory, None)
-            .ok_or(())?;
         let destination = level
             .capability(host, &ITEMS, output.inventory, None)
             .ok_or(())?;
         let size = destination.size(host);
-        let source_size = source.size(host);
-        let from = input
-            .kind
-            .slot_position(host, level, input.inventory, source_size, source_slot)
-            .ok_or(())?;
-        let shared_inventory = input.inventory == output.inventory
-            || (matches!(
-                (input.kind, output.kind),
-                (InventoryKind::Chest, InventoryKind::Chest)
-            ) && source_size == 54
-                && size == 54
-                && input
+        let (from, in_place) = match origin {
+            TransferSource::Withdrawn(position) => (position, None),
+            TransferSource::InPlace(source_slot) => {
+                let source = level
+                    .capability(host, &ITEMS, input.inventory, None)
+                    .ok_or(())?;
+                let source_size = source.size(host);
+                let from = input
                     .kind
-                    .slot_position(host, level, input.inventory, source_size, 0)
-                    .is_some_and(|first| {
-                        output
+                    .slot_position(host, level, input.inventory, source_size, source_slot)
+                    .ok_or(())?;
+                let shared_inventory = input.inventory == output.inventory
+                    || (matches!(
+                        (input.kind, output.kind),
+                        (InventoryKind::Chest, InventoryKind::Chest)
+                    ) && source_size == 54
+                        && size == 54
+                        && input
                             .kind
-                            .slot_position(host, level, output.inventory, size, 0)
-                            == Some(first)
-                    }));
+                            .slot_position(host, level, input.inventory, source_size, 0)
+                            .is_some_and(|first| {
+                                output
+                                    .kind
+                                    .slot_position(host, level, output.inventory, size, 0)
+                                    == Some(first)
+                            }));
+                (from, Some((source, source_slot, shared_inventory)))
+            }
+        };
         let mut endpoint_allowed = BTreeMap::new();
         let preferred = match output.kind {
             InventoryKind::Factory { smeltery: true } => smeltery_slots(size, |slot| {
@@ -1095,7 +1361,9 @@ fn move_to_first(
                 && slot == 3
                 && destination.owner() == "the game";
             // Paper has already withdrawn the source when it searches the destination.
-            let vacated = shared_inventory && slot == source_slot;
+            let vacated = in_place
+                .as_ref()
+                .is_some_and(|(_, source, shared)| *shared && slot == *source);
             let stored = if vacated {
                 None
             } else {
@@ -1132,7 +1400,8 @@ fn move_to_first(
             {
                 return Err(());
             }
-            if vacated {
+            if vacated && let Some((source, source_slot, _)) = &in_place {
+                let source_slot = *source_slot;
                 let amount = stack.count();
                 if destination.capacity(host, slot, &source_resource) < amount {
                     continue;
@@ -1152,7 +1421,7 @@ fn move_to_first(
                 // and rejects non-reagents even though Paper cargo sends them to this slot.
                 let brewer = host.block_entity(level, to).ok_or(())?;
                 let held = brewer.item_slot(host, 3).map_err(|_| ())?;
-                insert_brewing_ingredient(stack, insert_resource, held, |replacement| {
+                insert_direct_slot(stack, insert_resource, held, |replacement| {
                     brewer.set_item_slot(host, tx, 3, Some(replacement))
                 })
                 .map_err(|_| ())?
@@ -1167,7 +1436,9 @@ fn move_to_first(
                 }
                 continue;
             }
-            return if source.extract(host, tx, source_slot, &source_resource, moved) == moved {
+            return if in_place.as_ref().is_none_or(|(source, slot, _)| {
+                source.extract(host, tx, *slot, &source_resource, moved) == moved
+            }) {
                 Ok(moved)
             } else {
                 Err(())
@@ -1178,7 +1449,7 @@ fn move_to_first(
     .unwrap_or(0)
 }
 
-fn insert_brewing_ingredient(
+fn insert_direct_slot(
     incoming: &ItemStack,
     resource: &ItemResource,
     held: Option<ItemStack>,
@@ -1273,7 +1544,10 @@ mod tests {
     fn round_robin_fixture() -> (FakeHost, ItemKey, Terminal, [Option<Terminal>; 3]) {
         let mut host = FakeHost::new();
         let material = Identifier::parse("minecraft:stone").unwrap();
-        host.registries.resolve_items([material.clone()]).unwrap();
+        let dirt = Identifier::parse("minecraft:dirt").unwrap();
+        host.registries
+            .resolve_items([material.clone(), dirt])
+            .unwrap();
         let item = host.item_key(&material).unwrap();
         let mut terminal = |x| {
             let pos = [x, 70, 0];
@@ -1370,6 +1644,189 @@ mod tests {
             cargo_test_count(&host, outputs[1].as_ref().unwrap().inventory),
             0
         );
+    }
+
+    fn occupy_checkout(
+        host: &mut dyn ServerHost,
+        level: LevelRef,
+        source: Position,
+        blocker: &ItemResource,
+    ) -> bool {
+        let inventory = level.capability(host, &ITEMS, source, None).unwrap();
+        assert_eq!(inventory.amount(host, 0), 0);
+        assert_eq!(
+            host.transaction(|host, tx| { Ok::<_, ()>(inventory.insert(host, tx, 0, blocker, 1)) }),
+            Ok(1)
+        );
+        true
+    }
+
+    #[test]
+    fn cargo_commits_only_one_real_overflow_remainder_or_rolls_back() {
+        let (mut host, item, input, outputs) = round_robin_fixture();
+        let level = host.level.level();
+        let output = outputs[0].as_ref().unwrap().inventory;
+        let position = input.inventory;
+        let blocker_id = Identifier::parse("minecraft:dirt").unwrap();
+        let blocker = ItemStack::new(host.item_key(&blocker_id).unwrap(), 1).unwrap();
+        let blocker_resource = ItemResource::of(&blocker);
+        let resource = ItemResource::of(&ItemStack::new(item, 1).unwrap());
+        let slots = |host: &FakeHost, pos| -> Vec<Option<ItemStack>> {
+            host.level
+                .block_entity_at(pos)
+                .unwrap()
+                .items
+                .as_ref()
+                .unwrap()
+                .slots
+                .clone()
+        };
+        for delete_excess in [false, true] {
+            host.level
+                .block_entity(position)
+                .items
+                .as_mut()
+                .unwrap()
+                .slots[0] = resource.to_stack(3);
+            host.level
+                .block_entity(output)
+                .items
+                .as_mut()
+                .unwrap()
+                .slots[0] = resource.to_stack(63);
+            let mut dropped = Vec::new();
+            assert_eq!(
+                route_with_overflow(
+                    &mut host,
+                    level,
+                    &input,
+                    &outputs[..1],
+                    0,
+                    delete_excess,
+                    |host, from, to, _| {
+                        assert_eq!((from, to), (position, output));
+                        occupy_checkout(host, level, position, &blocker_resource)
+                    },
+                    |_, remainder| {
+                        dropped.push(remainder);
+                        Ok(())
+                    },
+                ),
+                None
+            );
+            assert_eq!(slots(&host, position), [Some(blocker.clone())]);
+            assert_eq!(slots(&host, output), [resource.to_stack(64)]);
+            assert_eq!(
+                dropped,
+                if delete_excess {
+                    vec![]
+                } else {
+                    vec![resource.to_stack(2).unwrap()]
+                }
+            );
+        }
+        host.level
+            .block_entity(position)
+            .items
+            .as_mut()
+            .unwrap()
+            .slots[0] = resource.to_stack(3);
+        host.level
+            .block_entity(output)
+            .items
+            .as_mut()
+            .unwrap()
+            .slots[0] = resource.to_stack(63);
+        assert_eq!(
+            route_with_overflow(
+                &mut host,
+                level,
+                &input,
+                &outputs[..1],
+                0,
+                false,
+                |host, _, _, _| occupy_checkout(host, level, position, &blocker_resource),
+                |_, remainder| {
+                    assert_eq!(remainder, resource.to_stack(2).unwrap());
+                    Err(())
+                },
+            ),
+            None
+        );
+        assert_eq!(slots(&host, position), [resource.to_stack(3)]);
+        assert_eq!(slots(&host, output), [resource.to_stack(63)]);
+        assert_eq!(
+            route_with_overflow(
+                &mut host,
+                level,
+                &input,
+                &outputs[..1],
+                0,
+                false,
+                |host, _, _, _| {
+                    occupy_checkout(host, level, position, &blocker_resource);
+                    false
+                },
+                |_, _| panic!("an unauthorized shipment must not overflow"),
+            ),
+            None
+        );
+        assert_eq!(slots(&host, position), [resource.to_stack(3)]);
+        assert_eq!(slots(&host, output), [resource.to_stack(63)]);
+    }
+
+    #[test]
+    fn cargo_returns_remainders_to_vanilla_source_partials_before_empty_slots() {
+        let (mut host, item, input, outputs) = round_robin_fixture();
+        let level = host.level.level();
+        let output = outputs[0].as_ref().unwrap().inventory;
+        let position = input.inventory;
+        let blocker_id = Identifier::parse("minecraft:dirt").unwrap();
+        let blocker = ItemStack::new(host.item_key(&blocker_id).unwrap(), 1).unwrap();
+        let blocker_resource = ItemResource::of(&blocker);
+        let resource = ItemResource::of(&ItemStack::new(item, 1).unwrap());
+        let contents = &mut host
+            .level
+            .block_entity(position)
+            .with_items(3)
+            .items
+            .as_mut()
+            .unwrap()
+            .slots;
+        contents[0] = resource.to_stack(3);
+        contents[2] = resource.to_stack(63);
+        host.level
+            .block_entity(output)
+            .items
+            .as_mut()
+            .unwrap()
+            .slots[0] = resource.to_stack(63);
+        assert_eq!(
+            route_with_overflow(
+                &mut host,
+                level,
+                &input,
+                &outputs[..1],
+                0,
+                false,
+                |host, _, _, _| occupy_checkout(host, level, position, &blocker_resource),
+                |_, _| panic!("available source slots must absorb the remainder"),
+            ),
+            None
+        );
+        let contents = &host
+            .level
+            .block_entity_at(position)
+            .unwrap()
+            .items
+            .as_ref()
+            .unwrap()
+            .slots;
+        assert_eq!(
+            contents,
+            &[Some(blocker), resource.to_stack(1), resource.to_stack(64)]
+        );
+        assert_eq!(cargo_test_count(&host, output), 64);
     }
 
     #[test]
@@ -1489,6 +1946,92 @@ mod tests {
     }
 
     #[test]
+    fn cargo_returns_furnace_output_to_its_original_slot_before_matching_partials() {
+        let (host, item, _, _) = round_robin_fixture();
+        let mut incoming = ItemStack::new(item, 3).unwrap();
+        incoming
+            .set_components(Compound::from([(
+                "minecraft:custom_data".into(),
+                Tag::compound([("cargo", Tag::Int(7))]),
+            )]))
+            .unwrap();
+        let resource = ItemResource::of(&incoming);
+        let original = [resource.to_stack(2), None, None];
+        assert_eq!(
+            restore_furnace(original.clone(), 2, incoming.clone(), |slot, stack| {
+                assert_eq!((slot, stack), (2, incoming.clone()));
+                Ok(true)
+            }),
+            Ok(None)
+        );
+        assert_eq!(
+            restore_furnace(original, 2, incoming.clone(), |_, _| Ok(false)),
+            Err(BlockEntityItemError::Unavailable)
+        );
+        let other = host
+            .item_key(&Identifier::parse("minecraft:dirt").unwrap())
+            .unwrap();
+        let taken = [None, resource.to_stack(3), ItemStack::new(other, 1)];
+        let mut stored = taken.clone();
+        let mut written = Vec::new();
+        assert_eq!(
+            restore_furnace(taken, 2, incoming, |slot, stack| {
+                let count = stack.count();
+                if count > 4 {
+                    return Err(BlockEntityItemError::StackTooLarge { count, limit: 4 });
+                }
+                written.push(slot);
+                stored[slot as usize] = Some(stack);
+                Ok(true)
+            }),
+            Ok(None)
+        );
+        assert_eq!(written, [1, 0]);
+        assert_eq!(
+            stored,
+            [
+                resource.to_stack(2),
+                resource.to_stack(4),
+                ItemStack::new(other, 1)
+            ]
+        );
+    }
+
+    #[test]
+    fn cargo_furnace_overflow_keeps_components_and_rejects_a_stale_write() {
+        let (_, item, _, _) = round_robin_fixture();
+        let mut incoming = ItemStack::new(item, 3).unwrap();
+        incoming
+            .set_components(Compound::from([(
+                "minecraft:custom_data".into(),
+                Tag::compound([("cargo", Tag::Int(7))]),
+            )]))
+            .unwrap();
+        let resource = ItemResource::of(&incoming);
+        let taken = [
+            ItemStack::new(item, 1),
+            resource.to_stack(3),
+            resource.to_stack(4),
+        ];
+        assert_eq!(
+            restore_furnace(taken.clone(), 2, incoming.clone(), |slot, stack| {
+                let count = stack.count();
+                if count > 4 {
+                    return Err(BlockEntityItemError::StackTooLarge { count, limit: 4 });
+                }
+                assert_eq!(slot, 1);
+                assert_eq!(stack, resource.to_stack(4).unwrap());
+                Ok(true)
+            }),
+            Ok(resource.to_stack(2))
+        );
+        assert_eq!(
+            restore_furnace(taken, 2, incoming, |_, _| Err(BlockEntityItemError::Stale)),
+            Err(BlockEntityItemError::Stale)
+        );
+    }
+
+    #[test]
     fn cargo_brewing_ingredient_preserves_components_and_retries_both_stack_limits() {
         let mut host = FakeHost::new();
         let material = Identifier::parse("minecraft:dirt").unwrap();
@@ -1507,7 +2050,7 @@ mod tests {
         assert_eq!(brewer.extract(5), 0..3);
 
         assert_eq!(
-            insert_brewing_ingredient(&incoming, &resource, None, |replacement| {
+            insert_direct_slot(&incoming, &resource, None, |replacement| {
                 assert_eq!(replacement, incoming);
                 Ok(true)
             }),
@@ -1517,7 +2060,7 @@ mod tests {
         let held = resource.to_stack(63);
         let mut proposals = Vec::new();
         assert_eq!(
-            insert_brewing_ingredient(&incoming, &resource, held, |replacement| {
+            insert_direct_slot(&incoming, &resource, held, |replacement| {
                 assert!(resource.matches(&replacement));
                 let count = replacement.count();
                 proposals.push(count);
@@ -1532,13 +2075,13 @@ mod tests {
         );
         assert_eq!(proposals, [66, 65, 64]);
         assert_eq!(
-            insert_brewing_ingredient(&incoming, &resource, ItemStack::new(dirt, 1), |_| {
+            insert_direct_slot(&incoming, &resource, ItemStack::new(dirt, 1), |_| {
                 panic!("a different component patch must never be overwritten")
             }),
             Ok(0)
         );
         assert_eq!(
-            insert_brewing_ingredient(&incoming, &resource, resource.to_stack(64), |stack| {
+            insert_direct_slot(&incoming, &resource, resource.to_stack(64), |stack| {
                 Err(BlockEntityItemError::StackTooLarge {
                     count: stack.count(),
                     limit: 64,
@@ -1909,7 +2452,7 @@ mod tests {
                 host,
                 level,
                 &input,
-                0,
+                TransferSource::InPlace(0),
                 &output,
                 &incoming,
                 |_, from, to, _| {
@@ -2046,7 +2589,7 @@ mod tests {
                 host,
                 level,
                 input,
-                0,
+                TransferSource::InPlace(0),
                 &output,
                 stack,
                 |_, from, to, offered| {
@@ -2081,7 +2624,7 @@ mod tests {
                 &mut host,
                 level,
                 &input,
-                0,
+                TransferSource::InPlace(0),
                 &output,
                 &remaining,
                 |host, _, _, _| {
@@ -2197,7 +2740,7 @@ mod tests {
             true
         };
         assert_eq!(
-            move_to_first(&mut host, level, &input, 0, &output, &stack, permit),
+            move_to_first(&mut host, level, &input, TransferSource::InPlace(0), &output, &stack, permit),
             1
         );
         let count = |host: &FakeHost, pos| {
@@ -2219,7 +2762,7 @@ mod tests {
             .unwrap()
             .slots[0] = None;
         assert_eq!(
-            move_to_first(&mut host, level, &input, 0, &output, &stack, permit),
+            move_to_first(&mut host, level, &input, TransferSource::InPlace(0), &output, &stack, permit),
             0
         );
         assert_eq!((count(&host, source), count(&host, target)), (2, 0));

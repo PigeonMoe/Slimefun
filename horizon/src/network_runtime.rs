@@ -1591,6 +1591,7 @@ pub(crate) fn tick(
                             (&dimension, start),
                             &active,
                             &group,
+                            settings.cargo_delete_excess_items,
                             profile,
                         );
                         profile.record_parent(host, &active[&start].0.id, start, started, inputs);
