@@ -172,7 +172,6 @@ pub(crate) fn menu_click(
     {
         return;
     }
-    networks.lock().unwrap().round_robin.remove(&(level, pos));
     let cargo = data.cargo.expect("calculated this session's settings");
     // Rebuild other viewers of this same block, since the inventory and controls are shared.
     let viewers: Vec<_> = networks
