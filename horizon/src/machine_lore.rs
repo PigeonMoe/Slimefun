@@ -27,6 +27,16 @@ pub(crate) fn lore(id: &str) -> Option<Tag> {
             ]));
         }
         "REFINERY" => return Some(lines(&["", "&fRefines Oil to create Fuel"])),
+        "REACTOR_ACCESS_PORT" => {
+            return Some(lines(&[
+                "",
+                "&fAllows you to interact with a Reactor",
+                "&fvia Cargo Nodes, can also be used",
+                "&fas a Buffer",
+                "",
+                "&8⇨ &eMust be placed &a3 Blocks &eabove the Reactor",
+            ]));
+        }
         _ => {}
     }
 
@@ -58,7 +68,7 @@ pub(crate) fn lore(id: &str) -> Option<Tag> {
         "ELECTRIC_INGOT_FACTORY" => (BASIC, 1, 8),
         "ELECTRIC_INGOT_FACTORY_2" => (BASIC, 2, 14),
         "ELECTRIC_INGOT_FACTORY_3" => (END_GAME, 8, 40),
-        _ => return None,
+        _ => return generator_lore(id),
     };
     let description = match id {
         "ELECTRIC_ORE_GRINDER" | "ELECTRIC_ORE_GRINDER_2" | "ELECTRIC_ORE_GRINDER_3" => {
@@ -78,6 +88,39 @@ pub(crate) fn lore(id: &str) -> Option<Tag> {
         colored_lore(&format!("&8⇨ &e⚡ &7{joules_per_second} J/s")),
     ]);
     Some(Tag::List(lore))
+}
+
+fn generator_lore(id: &str) -> Option<Tag> {
+    let (tier, buffer, power) = match id {
+        "SOLAR_GENERATOR" => ("&eBasic Generator", 0, 4),
+        "SOLAR_GENERATOR_2" => ("&aMedium Generator", 0, 16),
+        "SOLAR_GENERATOR_3" => ("&4End-Game Generator", 0, 64),
+        "SOLAR_GENERATOR_4" => {
+            return Some(lines(&[
+                "",
+                "&9Works at Night",
+                "",
+                "&4End-Game Generator",
+                "&8⇨ &e⚡ &70 J Buffer",
+                "&8⇨ &e⚡ &7256 J/s (Day)",
+                "&8⇨ &e⚡ &7128 J/s (Night)",
+            ]));
+        }
+        "COAL_GENERATOR" => ("&6Average Generator", 64, 16),
+        "COAL_GENERATOR_2" => ("&6Advanced Generator", 256, 30),
+        "LAVA_GENERATOR" => ("&6Average Generator", 512, 20),
+        "LAVA_GENERATOR_2" => ("&6Advanced Generator", 1024, 40),
+        "BIO_REACTOR" => ("&6Average Generator", 128, 8),
+        "MAGNESIUM_GENERATOR" => ("&aMedium Generator", 128, 36),
+        "COMBUSTION_REACTOR" => ("&6Advanced Generator", 256, 24),
+        _ => return None,
+    };
+    Some(lines(&[
+        "",
+        tier,
+        &format!("&8⇨ &e⚡ &7{buffer} J Buffer"),
+        &format!("&8⇨ &e⚡ &7{power} J/s"),
+    ]))
 }
 
 fn lines(lore: &[&str]) -> Tag {
@@ -102,8 +145,171 @@ pub(crate) fn localize(line: &str) -> Option<String> {
             "§aMedium Machine" => "&a中级机器",
             "§6Advanced Machine" => "&6高级机器",
             "§4End-Game Machine" => "&4终局机器",
+            "§eBasic Generator" => "&e基础发电机",
+            "§6Average Generator" => "&6普通发电机",
+            "§aMedium Generator" => "&a中级发电机",
+            "§6Advanced Generator" => "&6高级发电机",
+            "§4End-Game Generator" => "&4终局发电机",
+            "§9Works at Night" => "&9夜间也能发电",
+            "§8⇨ §e⚡ §7256 J/s (Day)" => "&8⇨ &e⚡ &7256 J/s（白天）",
+            "§8⇨ §e⚡ §7128 J/s (Night)" => "&8⇨ &e⚡ &7128 J/s（夜间）",
+            "§fAllows you to interact with a Reactor" => "&f可通过货运节点与反应堆交互，",
+            "§fvia Cargo Nodes, can also be used" => "&f也可用作",
+            "§fas a Buffer" => "&f缓冲库存",
+            "§8⇨ §eMust be placed §a3 Blocks §eabove the Reactor" => {
+                "&8⇨ &e必须放在反应堆正上方 &a3 格 &e处"
+            }
             _ => return None,
         }
         .into(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{lines, lore};
+    use mod_api::{Identifier, testing::FakeHost};
+
+    #[test]
+    fn generator_and_reactor_port_items_keep_the_paper_lines_and_chinese_descriptions() {
+        mod_api::__private::initialize().unwrap();
+        let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
+        let mut host = FakeHost::new();
+        host.registries
+            .resolve_items(
+                [
+                    "daylight_detector",
+                    "player_head",
+                    "lime_terracotta",
+                    "cyan_terracotta",
+                ]
+                .map(|item| Identifier::parse(&format!("minecraft:{item}")).unwrap()),
+            )
+            .unwrap();
+        let check = |id: &str, original: &[&str], translated: &[&str]| {
+            assert_eq!(lore(id), Some(lines(original)), "{id}");
+            let kind = crate::guide::command_item(id).unwrap().unwrap();
+            let stack = kind.stack(&host, 1).unwrap();
+            let components = stack.components().unwrap();
+            assert_eq!(crate::items::item_id(&stack).as_deref(), Some(id));
+            assert_eq!(
+                components.as_nbt().get(&"minecraft:lore".into()),
+                Some(&lines(translated)),
+                "{id}"
+            );
+        };
+
+        for (id, tier, translated, buffer, power) in [
+            ("SOLAR_GENERATOR", "&eBasic Generator", "&e基础发电机", 0, 4),
+            (
+                "SOLAR_GENERATOR_2",
+                "&aMedium Generator",
+                "&a中级发电机",
+                0,
+                16,
+            ),
+            (
+                "SOLAR_GENERATOR_3",
+                "&4End-Game Generator",
+                "&4终局发电机",
+                0,
+                64,
+            ),
+            (
+                "COAL_GENERATOR",
+                "&6Average Generator",
+                "&6普通发电机",
+                64,
+                16,
+            ),
+            (
+                "COAL_GENERATOR_2",
+                "&6Advanced Generator",
+                "&6高级发电机",
+                256,
+                30,
+            ),
+            (
+                "LAVA_GENERATOR",
+                "&6Average Generator",
+                "&6普通发电机",
+                512,
+                20,
+            ),
+            (
+                "LAVA_GENERATOR_2",
+                "&6Advanced Generator",
+                "&6高级发电机",
+                1024,
+                40,
+            ),
+            ("BIO_REACTOR", "&6Average Generator", "&6普通发电机", 128, 8),
+            (
+                "MAGNESIUM_GENERATOR",
+                "&aMedium Generator",
+                "&a中级发电机",
+                128,
+                36,
+            ),
+            (
+                "COMBUSTION_REACTOR",
+                "&6Advanced Generator",
+                "&6高级发电机",
+                256,
+                24,
+            ),
+        ] {
+            let output = format!("&8⇨ &e⚡ &7{power} J/s");
+            check(
+                id,
+                &["", tier, &format!("&8⇨ &e⚡ &7{buffer} J Buffer"), &output],
+                &[
+                    "",
+                    translated,
+                    &format!("&8⇨ &e⚡ &7{buffer} J 缓冲"),
+                    &output,
+                ],
+            );
+        }
+        check(
+            "SOLAR_GENERATOR_4",
+            &[
+                "",
+                "&9Works at Night",
+                "",
+                "&4End-Game Generator",
+                "&8⇨ &e⚡ &70 J Buffer",
+                "&8⇨ &e⚡ &7256 J/s (Day)",
+                "&8⇨ &e⚡ &7128 J/s (Night)",
+            ],
+            &[
+                "",
+                "&9夜间也能发电",
+                "",
+                "&4终局发电机",
+                "&8⇨ &e⚡ &70 J 缓冲",
+                "&8⇨ &e⚡ &7256 J/s（白天）",
+                "&8⇨ &e⚡ &7128 J/s（夜间）",
+            ],
+        );
+        check(
+            "REACTOR_ACCESS_PORT",
+            &[
+                "",
+                "&fAllows you to interact with a Reactor",
+                "&fvia Cargo Nodes, can also be used",
+                "&fas a Buffer",
+                "",
+                "&8⇨ &eMust be placed &a3 Blocks &eabove the Reactor",
+            ],
+            &[
+                "",
+                "&f可通过货运节点与反应堆交互，",
+                "&f也可用作",
+                "&f缓冲库存",
+                "",
+                "&8⇨ &e必须放在反应堆正上方 &a3 格 &e处",
+            ],
+        );
+    }
 }
