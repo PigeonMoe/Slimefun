@@ -29,6 +29,7 @@ mod catalog;
 mod learning;
 mod locale;
 mod processing;
+mod vanilla;
 use catalog::{Entry, GROUPS, Group, group_entries, lookup, named_group_entries};
 use learning::Preference;
 pub(crate) use learning::launch_random_fireworks;
@@ -248,6 +249,7 @@ enum Page {
     Group(&'static Group, usize),
     Recipe(&'static Entry),
     ProcessingRecipes(&'static Entry, usize),
+    VanillaRecipe(ItemResource, usize),
     Info,
     Search(Arc<str>),
 }
@@ -269,15 +271,16 @@ enum Action {
     LeaveCheat,
     Grant(&'static Entry),
     SearchPrompt,
+    FollowVanilla,
     Link(&'static str),
 }
 
-#[derive(Clone)]
 struct View {
     window: i32,
     path: Vec<Page>,
     presentation: Presentation,
     actions: [Option<Action>; 54],
+    vanilla_rotation: Option<vanilla::Rotation>,
 }
 
 #[derive(Default)]
@@ -291,6 +294,7 @@ pub(crate) struct Guide {
     readers: Mutex<BTreeMap<u128, Reader>>,
     receive_on_first_join: AtomicBool,
     show_hidden_groups_in_search: AtomicBool,
+    show_vanilla_recipes: AtomicBool,
     learning: learning::Learning,
     machine_settings: Mutex<crate::machine::Settings>,
     machine_recipes: Mutex<Arc<MachineRecipes>>,
@@ -302,6 +306,7 @@ impl Default for Guide {
             readers: Mutex::new(BTreeMap::new()),
             receive_on_first_join: AtomicBool::new(true),
             show_hidden_groups_in_search: AtomicBool::new(false),
+            show_vanilla_recipes: AtomicBool::new(true),
             learning: learning::Learning::default(),
             machine_settings: Mutex::default(),
             machine_recipes: Mutex::default(),
@@ -335,6 +340,11 @@ impl Guide {
             .unwrap_or(false);
         self.show_hidden_groups_in_search
             .store(show_hidden, Ordering::Relaxed);
+        let show_vanilla = section
+            .and_then(|section| section.get("show-vanilla-recipes"))
+            .and_then(toml::Value::as_bool)
+            .unwrap_or(true);
+        self.show_vanilla_recipes.store(show_vanilla, Ordering::Relaxed);
     }
 
     pub(crate) fn first_join(&self, host: &mut dyn ServerHost, uuid: u128) {
@@ -397,6 +407,12 @@ impl Guide {
     pub(crate) fn tick(&self, host: &mut dyn ServerHost, player: PlayerRef) {
         if let Some((path, presentation)) = self.learning.tick(host, player) {
             self.show(host, player, path, presentation);
+        }
+        let update = self.readers.lock().unwrap().get_mut(&player.uuid())
+            .and_then(|reader| reader.view.as_mut())
+            .and_then(|view| Some((view.window, view.vanilla_rotation.as_mut()?.advance()?)));
+        if let Some((window, items)) = update {
+            let _ = host.menu_set_items(player.uuid(), window, items);
         }
     }
 
@@ -483,6 +499,7 @@ impl Guide {
         let availability = Availability {
             machine_settings: *self.machine_settings.lock().unwrap(),
             machine_recipes: Some(&recipes),
+            show_vanilla_recipes: self.show_vanilla_recipes.load(Ordering::Relaxed),
             ..Availability::for_dimension(host.dimension())
         };
         if matches!(path.last(), Some(Page::Group(group, _)) if !group.in_season(month))
@@ -505,6 +522,11 @@ impl Guide {
             availability,
             cheat,
         );
+        if matches!(page, Page::VanillaRecipe(_, _)) && !menu.vanilla_recipe_exists {
+            path.pop();
+            self.show(host, player, path, presentation);
+            return;
+        }
         if matches!(page, Page::Info) {
             let options = [Preference::Fireworks, Preference::Animation]
                 .into_iter()
@@ -551,7 +573,7 @@ impl Guide {
         if path.len() > 1 {
             let back = usize::from(!matches!(
                 page,
-                Page::Recipe(_) | Page::ProcessingRecipes(_, _) | Page::Info
+                Page::Recipe(_) | Page::ProcessingRecipes(_, _) | Page::VanillaRecipe(_, _) | Page::Info
             ));
             menu.set(
                 back,
@@ -577,6 +599,7 @@ impl Guide {
         if matches!(presentation, Presentation::Dashboard) {
             title.style.insertion = Some(DASHBOARD_STYLE.into());
         }
+        let vanilla_rotation = vanilla::Rotation::new(menu.vanilla_choices, &menu.slots);
         if let Ok(Some(window)) =
             host.open_menu(player.uuid(), 6, title, menu.slots, MenuReplace::CloseFirst)
         {
@@ -592,6 +615,7 @@ impl Guide {
                 path,
                 presentation,
                 actions: menu.actions,
+                vanilla_rotation,
             });
             reader.waiting_for_search = None;
             drop(readers);
@@ -611,25 +635,20 @@ impl Guide {
         let Ok(slot) = usize::try_from(event.slot) else {
             return;
         };
-        let Some(view) = self
+        let Some((mut path, presentation, action)) = self
             .readers
             .lock()
             .unwrap()
             .get(&event.uuid)
             .and_then(|reader| reader.view.as_ref())
             .filter(|view| view.window == event.window)
-            .cloned()
+            .and_then(|view| Some((view.path.clone(), view.presentation, view.actions.get(slot)?.clone()?)))
         else {
-            return;
-        };
-        let Some(Some(action)) = view.actions.get(slot).cloned() else {
             return;
         };
         let Some(player) = host.player(event.uuid) else {
             return;
         };
-        let mut path = view.path;
-        let presentation = view.presentation;
         if matches!(path.first(), Some(Page::Cheat)) && !can_cheat(host, player) {
             host.close_menu(event.uuid);
             let _ = player.tell(host, colored_label("&c只有二级及以上管理员可以使用作弊模式。"));
@@ -637,6 +656,22 @@ impl Guide {
         }
         match action {
             Action::Push(page) => path.push(page),
+            Action::FollowVanilla => {
+                if !self.show_vanilla_recipes.load(Ordering::Relaxed) {
+                    return;
+                }
+                let Some(stack) = host.menu(event.uuid, event.window)
+                    .and_then(|menu| menu.slot(host, slot))
+                    .flatten()
+                else {
+                    return;
+                };
+                let item = ItemResource::of(&stack);
+                if vanilla::recipes_for(host, &item).is_empty() {
+                    return;
+                }
+                path.push(Page::VanillaRecipe(item, 0));
+            }
             Action::Replace(page) => {
                 path.pop();
                 path.push(page);
@@ -737,6 +772,8 @@ impl Guide {
 struct Menu {
     slots: Vec<Option<ItemStack>>,
     actions: [Option<Action>; 54],
+    vanilla_choices: Vec<vanilla::Choice>,
+    vanilla_recipe_exists: bool,
 }
 
 impl Menu {
@@ -766,6 +803,7 @@ struct Availability<'a> {
     dimension: Option<&'a str>,
     machine_settings: crate::machine::Settings,
     machine_recipes: Option<&'a MachineRecipes>,
+    show_vanilla_recipes: bool,
 }
 
 impl<'a> Availability<'a> {
@@ -776,6 +814,7 @@ impl<'a> Availability<'a> {
             dimension: Some(dimension),
             machine_settings: crate::machine::Settings::default(),
             machine_recipes: None,
+            show_vanilla_recipes: true,
         }
     }
 
@@ -803,6 +842,8 @@ fn render(
     let mut menu = Menu {
         slots: vec![None; 54],
         actions: std::array::from_fn(|_| None),
+        vanilla_choices: Vec::new(),
+        vanilla_recipe_exists: false,
     };
     let pane = icon(host, "minecraft:gray_stained_glass_pane", " ", &[]);
     if matches!(screen, Page::Info) {
@@ -937,7 +978,11 @@ fn render(
                     menu.set(
                         slot,
                         input.and_then(|item| ingredient_icon(host, entry, index, item)),
-                        linked.map(|entry| Action::Push(Page::Recipe(entry))),
+                        linked.map(|entry| Action::Push(Page::Recipe(entry))).or_else(|| {
+                            input.filter(|stack| !matches!(stack.kind, Kind::Slimefun(_)))
+                                .filter(|_| availability.show_vanilla_recipes)
+                                .map(|_| Action::FollowVanilla)
+                        }),
                     );
                 }
             }
@@ -949,6 +994,11 @@ fn render(
                     _ => 0,
                 };
                 show_processing_recipes(host, &mut menu, entry, processing, page, availability);
+            }
+        }
+        Page::VanillaRecipe(item, index) => {
+            if availability.show_vanilla_recipes {
+                show_vanilla_recipe(host, &mut menu, item, *index);
             }
         }
         Page::Info => {
@@ -1105,6 +1155,73 @@ fn color_code(color: &str) -> char {
     }
 }
 
+fn show_vanilla_recipe(host: &dyn Host, menu: &mut Menu, item: &ItemResource, index: usize) {
+    let recipes = vanilla::recipes_for(host, item);
+    paint_vanilla_recipe(host, menu, item, &recipes, index);
+}
+
+fn paint_vanilla_recipe(
+    host: &dyn Host,
+    menu: &mut Menu,
+    item: &ItemResource,
+    recipes: &[vanilla::Match],
+    index: usize,
+) {
+    let Some(index) = recipes.len().checked_sub(1).map(|last| index.min(last)) else {
+        return;
+    };
+    let selected = &recipes[index];
+    menu.vanilla_recipe_exists = true;
+    if let Some((material, key)) = vanilla::method(&selected.recipe) {
+        for choice in vanilla::choices(host, &selected.recipe) {
+            menu.set(choice.slot, choice.items.first().cloned(), Some(Action::FollowVanilla));
+            if choice.items.len() > 1 {
+                menu.vanilla_choices.push(choice);
+            }
+        }
+        if let Some((name, lore)) = locale::recipe_badge(key) {
+            menu.slots[RECIPE_METHOD_SLOT] = icon(host, material, &format!("&b{name}"), &lore);
+        }
+        menu.slots[RECIPE_OUTPUT_SLOT] = Some(selected.result.clone());
+    } else {
+        menu.slots[INGREDIENT_SLOTS[4]] = icon(host, "minecraft:barrier", "&4无法在指南中显示此配方 :/", &[]);
+    }
+    if recipes.len() > 1 {
+        recipe_pages(host, menu, index, recipes.len(), " ", |page| {
+            Page::VanillaRecipe(item.clone(), page)
+        });
+    }
+}
+
+fn recipe_pages(
+    host: &dyn Host,
+    menu: &mut Menu,
+    page: usize,
+    count: usize,
+    label: &str,
+    screen: impl Fn(usize) -> Page,
+) {
+    let position = format!("&7({} / {count})", page + 1);
+    for slot in 27..36 {
+        menu.slots[slot] = icon(host, "minecraft:gray_stained_glass_pane", label, &[]);
+    }
+    for (slot, label, target) in [
+        (28, "⇦ 上一页", page.checked_sub(1)),
+        (34, "下一页 ⇨", (page + 1 < count).then_some(page + 1)),
+    ] {
+        let (material, color) = if target.is_some() {
+            ("minecraft:lime_stained_glass_pane", "&f")
+        } else {
+            ("minecraft:black_stained_glass_pane", "&8")
+        };
+        menu.set(
+            slot,
+            icon(host, material, &format!("{color}{label}"), &["", &position]),
+            target.map(|next| Action::Replace(screen(next))),
+        );
+    }
+}
+
 fn show_processing_recipes(
     host: &dyn Host,
     menu: &mut Menu,
@@ -1115,35 +1232,23 @@ fn show_processing_recipes(
 ) {
     let pages = recipes.len().div_ceil(PROCESSING_PAGE_SIZE);
     let page = page.min(pages - 1);
-    let position = format!("&7({} / {pages})", page + 1);
     let label = format!("&7⇩ {} ⇩", processing::label(entry.id));
-    for slot in 27..36 {
-        menu.slots[slot] = icon(host, "minecraft:gray_stained_glass_pane", &label, &[]);
-    }
-    for (slot, label, target) in [
-        (28, "⇦ 上一页", page.checked_sub(1)),
-        (34, "下一页 ⇨", (page + 1 < pages).then_some(page + 1)),
-    ] {
-        let (material, color) = if target.is_some() {
-            ("minecraft:lime_stained_glass_pane", "&f")
-        } else {
-            ("minecraft:black_stained_glass_pane", "&8")
-        };
-        menu.set(
-            slot,
-            icon(host, material, &format!("{color}{label}"), &["", &position]),
-            target.map(|next| Action::Replace(Page::ProcessingRecipes(entry, next))),
-        );
-    }
+    recipe_pages(host, menu, page, pages, &label, |next| {
+        Page::ProcessingRecipes(entry, next)
+    });
     let mut rows = recipes.into_iter().skip(page * PROCESSING_PAGE_SIZE);
     for column in 0..9 {
         for slot in [36 + column, 45 + column] {
             let item = rows.next().flatten();
-            let action = item.as_ref()
-                .and_then(crate::items::item_id)
-                .and_then(|id| lookup(&id))
-                .filter(|entry| availability.allows_search(entry))
-                .map(|entry| Action::Push(Page::Recipe(entry)));
+            let action = item.as_ref().and_then(|stack| {
+                if let Some(id) = crate::items::item_id(stack) {
+                    lookup(&id)
+                        .filter(|entry| availability.allows_search(entry))
+                        .map(|entry| Action::Push(Page::Recipe(entry)))
+                } else {
+                    availability.show_vanilla_recipes.then_some(Action::FollowVanilla)
+                }
+            });
             menu.set(slot, item, action);
         }
     }
@@ -1611,6 +1716,13 @@ mod tests {
         assert_eq!(slot_id(&first, 36), "minecraft:rotten_flesh");
         assert_eq!(slot_id(&first, 45), "minecraft:leather");
         assert_eq!(slot_id(&first, 44), "minecraft:cooked_porkchop");
+        assert!(matches!(first.actions[44], Some(Action::FollowVanilla)));
+        assert!(matches!(first.actions[INGREDIENT_SLOTS[4]], Some(Action::FollowVanilla)));
+        let mut disabled = available();
+        disabled.show_vanilla_recipes = false;
+        let without_links = render(&host, None, &Page::Recipe(entry), 1, false, disabled, false);
+        assert!(without_links.actions[44].is_none());
+        assert!(without_links.actions[INGREDIENT_SLOTS[4]].is_none());
         assert_eq!(slot_id(&first, 28), "minecraft:black_stained_glass_pane");
         assert!(first.actions[28].is_none());
         let Some(Action::Replace(next @ Page::ProcessingRecipes(_, 1))) = &first.actions[34] else {
@@ -1629,6 +1741,40 @@ mod tests {
         assert!(second.actions[34].is_none());
         assert!(matches!(second.actions[28], Some(Action::Replace(Page::ProcessingRecipes(_, 0)))));
         assert!(matches!(&second.actions[45], Some(Action::Push(Page::Recipe(recipe))) if recipe.id == "CHICKEN_JERKY"));
+    }
+
+    #[test]
+    fn vanilla_recipe_detail_keeps_paper_slots_metadata_and_page_navigation() {
+        mod_api::__private::initialize().unwrap();
+        let mut host = FakeHost::new();
+        host.registries.resolve_items([
+            "minecraft:gray_stained_glass_pane", "minecraft:black_stained_glass_pane",
+            "minecraft:lime_stained_glass_pane", "minecraft:cooked_porkchop", "minecraft:porkchop",
+            "minecraft:furnace", "minecraft:smoker", "minecraft:campfire",
+        ].map(|id| Identifier::parse(id).unwrap())).unwrap();
+        let target = Kind::Vanilla("minecraft:cooked_porkchop").stack(&host, 1).unwrap();
+        let item = ItemResource::of(&target);
+        let mut recipes = Vec::new();
+        for kind in ["smelting", "smoking", "campfire_cooking"] {
+            let mut recipe = mod_api::Recipe::new(format!("test:{kind}"), format!("minecraft:{kind}"), Arc::new(serde_json::json!({})));
+            recipe.ingredients.push(mod_api::Ingredient::of(vec!["minecraft:porkchop".into()]));
+            recipes.push(vanilla::Match { recipe, result: target.clone() });
+        }
+        let mut menu = render(&host, None, &Page::Main, 1, false, available(), false);
+        paint_vanilla_recipe(&host, &mut menu, &item, &recipes, 0);
+        let id = |menu: &Menu, slot: usize| menu.slots[slot].as_ref().unwrap().item().id(&host);
+        assert_eq!(id(&menu, INGREDIENT_SLOTS[4]), "minecraft:porkchop");
+        assert_eq!(id(&menu, RECIPE_METHOD_SLOT), "minecraft:furnace");
+        assert_eq!(menu.slots[RECIPE_OUTPUT_SLOT], Some(target));
+        assert!(matches!(menu.actions[INGREDIENT_SLOTS[4]], Some(Action::FollowVanilla)));
+        assert!(menu.actions[28].is_none());
+        let Some(Action::Replace(Page::VanillaRecipe(item, index))) = &menu.actions[34] else {
+            panic!("next cooking recipe must replace this history page");
+        };
+        let mut next = render(&host, None, &Page::Main, 1, false, available(), false);
+        paint_vanilla_recipe(&host, &mut next, item, &recipes, *index);
+        assert_eq!(id(&next, RECIPE_METHOD_SLOT), "minecraft:smoker");
+        assert!(matches!(next.actions[28], Some(Action::Replace(Page::VanillaRecipe(_, 0)))));
     }
 
     #[test]
@@ -2259,6 +2405,7 @@ mod tests {
             dimension: None,
             machine_settings: crate::machine::Settings::default(),
             machine_recipes: None,
+            show_vanilla_recipes: true,
         }
     }
 
@@ -2350,6 +2497,7 @@ mod tests {
                     path: history,
                     presentation: Presentation::Book,
                     actions: std::array::from_fn(|_| None),
+                    vanilla_rotation: None,
                 }),
                 waiting_for_search: None,
             },

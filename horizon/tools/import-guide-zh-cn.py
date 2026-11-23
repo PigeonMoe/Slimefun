@@ -27,12 +27,17 @@ def main():
         key: value.replace("Slimefun", "远古工艺")
         for key, value in read("researches")["slimefun"].items()
     }
-    barter = read("recipes")["slimefun"]["barter_drop"]
+    recipe_sections = read("recipes")
+    guide_badges = {
+        "barter_drop": recipe_sections["slimefun"]["barter_drop"],
+        **{f"minecraft:{key}": recipe for key, recipe in recipe_sections["minecraft"].items()},
+    }
     recipes = {
-        "barter_drop": {
-            "name": barter["name"],
-            "lore": [f"&7{line}" for line in barter["lore"]],
-        },
+        key: {
+            "name": value["name"],
+            "lore": [f"&7{line}" for line in value["lore"]],
+        }
+        for key, value in guide_badges.items()
     }
     data = {"items": items, "recipes": recipes, "researches": researches}
     OUTPUT.write_text(
