@@ -7,7 +7,7 @@ use mod_api::{
     AttachmentCodec, AttachmentError, AttachmentType, BlockDropsEvent, BlockPart, BlockUpdateFlags,
     CanDropFromExplosionEvent, Compound, Holder, Host, HostSide, HostTransaction, ITEMS,
     InteractionResult, ItemKey, ItemPart, ItemStack, LevelHost, LevelRef, OnBlockExplodedEvent,
-    OnBlockPlacedByEvent, ServerHost, Tag, Text, UseOnEvent,
+    OnBlockPlacedByEvent, OnMobBlockBreakEvent, ServerHost, Tag, Text, UseOnEvent,
 };
 
 use crate::items::OUTPUT_CHEST;
@@ -114,10 +114,10 @@ impl ItemPart for ChestPlacement {
     }
 }
 
-pub(crate) struct ChestExplosion;
+pub(crate) struct ChestDestruction;
 
 #[mod_api::horizon_part]
-impl BlockPart for ChestExplosion {
+impl BlockPart for ChestDestruction {
     fn can_drop_from_explosion(
         &self,
         level: &dyn LevelHost,
@@ -132,15 +132,23 @@ impl BlockPart for ChestExplosion {
 
     fn on_block_exploded(&self, host: &mut dyn ServerHost, event: &mut OnBlockExplodedEvent<'_>) {
         if let Some(level) = host.level(event.explosion.dimension) {
-            discard_blast_chest(host, level, [event.pos.x, event.pos.y, event.pos.z]);
+            discard_without_drops(host, level, [event.pos.x, event.pos.y, event.pos.z]);
+        }
+    }
+
+    fn on_mob_block_break(&self, host: &mut dyn ServerHost, event: &mut OnMobBlockBreakEvent<'_>) {
+        if event.kind == "minecraft:wither"
+            && let Some(level) = host.level(host.dimension())
+        {
+            discard_without_drops(host, level, [event.pos.x, event.pos.y, event.pos.z]);
         }
     }
 }
 
-/// Paper's Output Chest handler permits the blast to delete the chest and has
-/// no explosion drops. Replacing it before vanilla's removal suppresses the
-/// separate block entity spill while still updating neighboring blocks.
-pub(crate) fn discard_blast_chest(
+/// Paper removes an Output Chest hit by an explosion or a direct Wither
+/// break. Replacing it before vanilla removal suppresses the inventory spill
+/// and still updates neighboring blocks.
+pub(crate) fn discard_without_drops(
     host: &mut dyn ServerHost,
     level: LevelRef,
     pos: [i32; 3],

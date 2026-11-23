@@ -6,7 +6,7 @@ use std::{collections::BTreeMap, sync::Mutex};
 
 use mod_api::{Compound, GameMode, Host, Identifier, PlayerRef, ServerHost, SoundSource, Tag};
 
-use super::{Page, Presentation, catalog, colored_label, research_name};
+use super::{Language, Page, Presentation, catalog, colored_label};
 use crate::{random::Rolls, recipes::Research, research};
 
 pub(super) use fireworks::research_rocket;
@@ -122,6 +122,7 @@ impl Learning {
         topic: &'static Research,
         path: &[Page],
         presentation: Presentation,
+        language: Language,
     ) -> bool {
         let Settings {
             free_in_creative, ..
@@ -133,7 +134,7 @@ impl Learning {
             return false;
         }
         if !delayed {
-            self.announce_completion(host, player, research_name(topic.id));
+            self.announce_completion(host, player, language.research(topic.id), language);
             return true;
         }
         self.active.lock().unwrap().insert(
@@ -179,6 +180,7 @@ impl Learning {
         &self,
         host: &mut dyn ServerHost,
         player: PlayerRef,
+        language: impl Fn(&dyn Host, PlayerRef) -> Language,
     ) -> Option<(Vec<Page>, Presentation)> {
         let uuid = player.uuid();
         let (topic, step, percent) = {
@@ -191,9 +193,11 @@ impl Learning {
                     return active.remove(&uuid)?.return_path;
                 }
                 if elapsed == FULL_PROGRESS_TICKS {
-                    let name = research_name(study.topic.id);
+                    let topic = study.topic;
                     drop(active);
-                    let title = colored_label("&a解锁成功");
+                    let language = language(host, player);
+                    let name = language.research(topic.id);
+                    let title = colored_label(if language == Language::CHINESE { "&a解锁成功" } else { "&aResearch complete" });
                     let subtitle = colored_label(&format!("&f“{name}”"));
                     let _ = player.title(host, &title, &subtitle, [0, SUCCESS_DISPLAY_TICKS as i32, 0]);
                 }
@@ -224,17 +228,19 @@ impl Learning {
                     0.7,
                     1.0,
                 );
-                let title = colored_label(&format!("&b正在解锁“{}”", research_name(topic.id)));
-                let subtitle = progress_bar(percent);
+                let language = language(host, player);
+                let title = progress_title(language, topic, percent);
+                let subtitle = progress_bar(language, percent);
                 let _ = player.title(host, &title, &subtitle, [0, 25, 5]);
                 None
             }
             Ok(true) => {
-                let name = research_name(topic.id);
-                let title = colored_label(&format!("&b正在解锁“{name}”"));
-                let subtitle = progress_bar(percent);
+                let language = language(host, player);
+                let name = language.research(topic.id);
+                let title = progress_title(language, topic, percent);
+                let subtitle = progress_bar(language, percent);
                 let _ = player.title(host, &title, &subtitle, [0, FULL_PROGRESS_TICKS as i32, 0]);
-                self.announce_completion(host, player, name);
+                self.announce_completion(host, player, name, language);
                 let mut active = self.active.lock().unwrap();
                 if let Some(study) = active.get_mut(&uuid) {
                     study.step = PROGRESS.len();
@@ -249,14 +255,17 @@ impl Learning {
         host: &mut dyn ServerHost,
         player: PlayerRef,
         name: &str,
+        language: Language,
     ) {
         if self.option(host, player, Preference::Fireworks) == Some(true) {
             fireworks::launch_random(host, player, &self.rolls, 1);
         }
-        let _ = player.tell(
-            host,
-            colored_label(&format!("&b已解锁“{name}”")),
-        );
+        let notice = if language == Language::CHINESE {
+            format!("&b已解锁“{name}”")
+        } else {
+            language.research_message("unlocked").replace("%research%", name)
+        };
+        let _ = player.tell(host, colored_label(&notice));
     }
 
     pub(super) fn forget(&self, player: u128) {
@@ -269,11 +278,23 @@ impl Learning {
     }
 }
 
-fn progress_bar(percent: u8) -> mod_api::Text {
+fn progress_title(language: Language, topic: &Research, percent: u8) -> mod_api::Text {
+    let name = language.research(topic.id);
+    let title = if language == Language::CHINESE {
+        format!("&b正在解锁“{name}”")
+    } else {
+        language.research_message("progress").replace("%research%", name)
+            .replace("%progress%", &format!("{percent}%"))
+    };
+    colored_label(&title)
+}
+
+fn progress_bar(language: Language, percent: u8) -> mod_api::Text {
     const WIDTH: usize = 20;
     let filled = usize::from(percent) * WIDTH / 100;
+    let label = if language == Language::CHINESE { "&7进度 " } else { "" };
     colored_label(&format!(
-        "&7进度 &a{}&7{}",
+        "{label}&a{}&7{}",
         "■".repeat(filled),
         "□".repeat(WIDTH - filled),
     ))
@@ -477,15 +498,15 @@ mod tests {
         assert!(super::super::can_cheat(&host, player));
 
         let guide = Learning::default();
-        assert!(!guide.start(&mut host, player, topic, &[Page::Main], Presentation::Book));
+        assert!(!guide.start(&mut host, player, topic, &[Page::Main], Presentation::Book, Language::CHINESE));
         assert_eq!(host.state, (Compound::new(), topic.cost + 4));
         assert_eq!(host.journal.closed(), [(1, false)]);
 
         host.deny_experience_write = false;
-        assert!(!guide.start(&mut host, player, topic, &[Page::Main], Presentation::Book));
+        assert!(!guide.start(&mut host, player, topic, &[Page::Main], Presentation::Book, Language::CHINESE));
         assert_eq!(host.state.1, 4);
         for _ in 0..20 {
-            assert!(guide.tick(&mut host, player).is_none());
+            assert!(guide.tick(&mut host, player, |_, _| Language::CHINESE).is_none());
         }
         assert_eq!(host.sounds, 2);
         assert_eq!(research::pending(&host.state.0), Some((topic.id.into(), 2)));
@@ -495,26 +516,26 @@ mod tests {
         let config: toml::Table = "[researches]\nenable-fireworks = false".parse().unwrap();
         reopened.configure(config.get("researches"));
         reopened.resume(&host, player);
-        assert!(!reopened.start(&mut host, player, topic, &[Page::Main], Presentation::Book));
+        assert!(!reopened.start(&mut host, player, topic, &[Page::Main], Presentation::Book, Language::CHINESE));
         for _ in 0..79 {
-            assert!(reopened.tick(&mut host, player).is_none());
+            assert!(reopened.tick(&mut host, player, |_, _| Language::CHINESE).is_none());
         }
         assert!(!research::unlocked(&host.state.0, topic));
-        assert!(reopened.tick(&mut host, player).is_none());
+        assert!(reopened.tick(&mut host, player, |_, _| Language::CHINESE).is_none());
         assert!(research::unlocked(&host.state.0, topic));
         assert_eq!(research::pending(&host.state.0), None);
         assert_eq!(host.state.1, 4);
         assert_eq!(host.sounds, 5);
-        let name = research_name(topic.id);
+        let name = Language::CHINESE.research(topic.id);
         assert_eq!(host.titles[0], (format!("正在解锁“{name}”"), format!("进度 {}", "□".repeat(20))));
         assert_eq!(host.titles[1].1, format!("进度 {}{}", "■".repeat(4), "□".repeat(16)));
         let full = (format!("正在解锁“{name}”"), format!("进度 {}", "■".repeat(20)));
         assert_eq!(host.titles.last(), Some(&full));
         for _ in 1..FULL_PROGRESS_TICKS {
-            assert!(reopened.tick(&mut host, player).is_none());
+            assert!(reopened.tick(&mut host, player, |_, _| Language::CHINESE).is_none());
         }
         assert_eq!(host.titles.last(), Some(&full));
-        assert!(reopened.tick(&mut host, player).is_none());
+        assert!(reopened.tick(&mut host, player, |_, _| Language::CHINESE).is_none());
         assert_eq!(host.titles.last(), Some(&("解锁成功".into(), format!("“{name}”"))));
     }
 

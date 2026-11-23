@@ -110,10 +110,35 @@ impl Kind {
     }
 
     pub fn stack(self, host: &dyn Host, count: u32) -> Option<ItemStack> {
+        self.stack_with(host, count, SlimefunItem::components)
+    }
+
+    pub(crate) fn guide_stack(
+        self,
+        host: &dyn Host,
+        count: u32,
+        language: crate::guide::Language,
+    ) -> Option<ItemStack> {
+        if language == crate::guide::Language::CHINESE {
+            return self.stack(host, count);
+        }
+        self.stack_with(host, count, |item| {
+            let mut components = item.base_components(false);
+            language.localize_components(item.id, &mut components);
+            components
+        })
+    }
+
+    fn stack_with(
+        self,
+        host: &dyn Host,
+        count: u32,
+        components: impl FnOnce(&SlimefunItem) -> Compound,
+    ) -> Option<ItemStack> {
         let material = Identifier::parse(self.material()).ok()?;
         let mut stack = ItemStack::new(host.item_key(&material)?, count)?;
         match self {
-            Self::Slimefun(item) => stack.set_components(item.components()).ok()?,
+            Self::Slimefun(item) => stack.set_components(components(item)).ok()?,
             Self::Potion(potion) => stack
                 .set_components(Compound::from([(
                     "minecraft:potion_contents".into(),
@@ -159,7 +184,13 @@ fn matches_potion(stack: &ItemStack, expected: &str) -> bool {
 
 impl SlimefunItem {
     fn components(&self) -> Compound {
-        let name = crate::machine_lore::name(self.id)
+        let mut components = self.base_components(true);
+        crate::guide::localize_item_components(self.id, &mut components);
+        components
+    }
+
+    fn base_components(&self, legacy_name: bool) -> Compound {
+        let name = legacy_name.then(|| crate::machine_lore::name(self.id)).flatten()
             .unwrap_or_else(|| text(self.name, self.color, false));
         let mut components = Compound::from([
             ("minecraft:custom_name".into(), name),
@@ -403,7 +434,6 @@ impl SlimefunItem {
                 );
             }
         }
-        crate::guide::localize_item_components(self.id, &mut components);
         components
     }
 }

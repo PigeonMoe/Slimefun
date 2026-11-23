@@ -21,6 +21,11 @@ pub(super) struct RecipeType {
 }
 
 impl RecipeType {
+    const fn local(mut self, key: &'static str) -> Self {
+        self.locale_key = Some(key);
+        self
+    }
+
     const fn plain(material: &'static str, name: &'static str) -> Self {
         Self::device(Kind::Vanilla(material), name)
     }
@@ -36,16 +41,16 @@ impl RecipeType {
 }
 
 pub(super) const ENHANCED_CRAFTING: RecipeType =
-    RecipeType::plain("minecraft:crafting_table", "增强型工作台");
-const MAGIC_WORKBENCH: RecipeType = RecipeType::plain("minecraft:crafting_table", "魔法工作台");
-const ARMOR_FORGE: RecipeType = RecipeType::plain("minecraft:anvil", "盔甲锻造台");
-const ANCIENT_ALTAR: RecipeType = RecipeType::plain("minecraft:enchanting_table", "古代祭坛");
-const SMELTERY: RecipeType = RecipeType::plain("minecraft:furnace", "冶炼炉");
-const MULTIBLOCK: RecipeType = RecipeType::plain("minecraft:bricks", "多方块结构");
+    RecipeType::plain("minecraft:crafting_table", "增强型工作台").local("enhanced_crafting_table");
+const MAGIC_WORKBENCH: RecipeType = RecipeType::plain("minecraft:crafting_table", "魔法工作台").local("magic_workbench");
+const ARMOR_FORGE: RecipeType = RecipeType::plain("minecraft:anvil", "盔甲锻造台").local("armor_forge");
+const ANCIENT_ALTAR: RecipeType = RecipeType::plain("minecraft:enchanting_table", "古代祭坛").local("ancient_altar");
+const SMELTERY: RecipeType = RecipeType::plain("minecraft:furnace", "冶炼炉").local("smeltery");
+const MULTIBLOCK: RecipeType = RecipeType::plain("minecraft:bricks", "多方块结构").local("multiblock");
 
 const WASHER: RecipeType = RecipeType {
     lore: &["", "&a&o使用洗矿机清洗"],
-    ..RecipeType::plain("minecraft:cauldron", "洗矿机")
+    ..RecipeType::plain("minecraft:cauldron", "洗矿机").local("ore_washer")
 };
 const GOLD_PAN: RecipeType = RecipeType {
     lore: &["", "&a&o对砂砾使用淘金盘即可获得"],
@@ -53,7 +58,7 @@ const GOLD_PAN: RecipeType = RecipeType {
 };
 const MOB_DROP: RecipeType = RecipeType {
     lore: &["", "&r击杀指定生物即可获得"],
-    ..RecipeType::plain("minecraft:iron_sword", "生物掉落")
+    ..RecipeType::plain("minecraft:iron_sword", "生物掉落").local("mob_drop")
 };
 const BARTER_DROP: RecipeType = RecipeType {
     locale_key: Some("barter_drop"),
@@ -620,21 +625,21 @@ fn build() -> BTreeMap<String, Entry> {
                 research: recipes::output_research(r.output.kind),
             });
     }
-    for (material, name, recipes) in [
-        ("minecraft:dispenser", "磨石", recipes::GRINDING),
-        ("minecraft:dispenser", "矿石粉碎机", recipes::CRUSHING),
+    for (material, name, key, recipes) in [
+        ("minecraft:dispenser", "磨石", "grind_stone", recipes::GRINDING),
+        ("minecraft:dispenser", "矿石粉碎机", "ore_crusher", recipes::CRUSHING),
         (
             "minecraft:piston",
             "压缩机",
-            recipes::COMPRESSING,
+            "compressor", recipes::COMPRESSING,
         ),
-        ("minecraft:glass", "压力舱", recipes::PRESSING),
-        ("minecraft:glass_bottle", "榨汁机", recipes::JUICING),
-        ("minecraft:cauldron", "洗矿机", recipes::WASHING),
+        ("minecraft:glass", "压力舱", "pressure_chamber", recipes::PRESSING),
+        ("minecraft:glass_bottle", "榨汁机", "juicer", recipes::JUICING),
+        ("minecraft:cauldron", "洗矿机", "ore_washer", recipes::WASHING),
     ] {
         for recipe in recipes {
             if matches!(recipe.output.kind, Kind::Slimefun(_)) {
-                let recipe_type = RecipeType::plain(material, name);
+                let recipe_type = RecipeType::plain(material, name).local(key);
                 entries
                     .entry(canonical(recipe.output.kind.id()))
                     .or_insert_with(|| processing(recipe_type, recipe));

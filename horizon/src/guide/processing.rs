@@ -18,13 +18,18 @@ mod resources;
 
 type DisplayItems = Vec<Option<ItemStack>>;
 
-pub(super) fn label(id: &str) -> &'static str {
-    match id {
-        "GEO_MINER" => "此采矿机可以获得的资源",
-        "GOLD_PAN" | "NETHER_GOLD_PAN" => "你可以获得的资源",
-        "CLIMBING_PICK" => "你可以攀爬的平面",
-        _ if fuel::has_fuels(id) => "可用的燃料类型",
-        _ => "此机器可用的合成配方",
+pub(super) fn label(id: &str, language: super::Language) -> &'static str {
+    let (key, chinese) = match id {
+        "GEO_MINER" => ("miner", "此采矿机可以获得的资源"),
+        "GOLD_PAN" | "NETHER_GOLD_PAN" => ("gold-pan", "你可以获得的资源"),
+        "CLIMBING_PICK" => ("climbing-pick", "你可以攀爬的平面"),
+        _ if fuel::has_fuels(id) => ("generator", "可用的燃料类型"),
+        _ => ("machine", "此机器可用的合成配方"),
+    };
+    if language == super::Language::CHINESE {
+        chinese
+    } else {
+        language.message(&format!("tooltips.recipes.{key}"))
     }
 }
 
