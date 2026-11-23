@@ -34,6 +34,10 @@ pub(crate) const PANS: &[Pan] = &[
     },
 ];
 
+pub(crate) fn held(host: &dyn Host, stack: &ItemStack) -> Option<&'static Pan> {
+    PANS.iter().find(|pan| pan.item.matches(host, stack))
+}
+
 const OVERWORLD_KEYS: [&str; 4] = ["FLINT", "CLAY", "SIFTED_ORE", "IRON_NUGGET"];
 const NETHER_KEYS: [&str; 6] = [
     "QUARTZ",
@@ -99,6 +103,28 @@ fn apply_weights<const COUNT: usize>(
 }
 
 impl Pan {
+    pub(crate) fn can_use(&self, host: &mut dyn ServerHost, player: PlayerRef) -> bool {
+        if research::can_use(host, player, self.research) {
+            return true;
+        }
+        let text = format!(
+            "Unlock {} with /sf research {}.",
+            self.research.name, self.research.id,
+        );
+        let _ = player.tell(host, Text::literal(text));
+        false
+    }
+
+    pub(crate) fn allows_entity_use(
+        &self,
+        host: &mut dyn ServerHost,
+        player: PlayerRef,
+        kind: &str,
+    ) -> bool {
+        self.can_use(host, player)
+            && matches!(kind, "minecraft:item_frame" | "minecraft:glow_item_frame")
+    }
+
     pub(crate) fn use_on(
         &self,
         host: &mut dyn ServerHost,
@@ -107,7 +133,6 @@ impl Pan {
         pos: [i32; 3],
         rolls: &Rolls,
         weights: &Weights,
-        require_research: bool,
     ) {
         let Some(state) = level.block_state(host, pos) else {
             return;
@@ -115,28 +140,20 @@ impl Pan {
         let Some(sound) = self.target_sound(&state.block().id(host)) else {
             return;
         };
-        if require_research && !research::can_use(host, player, self.research) {
-            let text = format!(
-                "Unlock {} with /sf research {}.",
-                self.research.name, self.research.id,
-            );
-            let _ = player.tell(host, Text::literal(text));
-            return;
-        }
-
-        let Ok(stack) = self.roll_stack(host, weights, |bound| rolls.next(host, level, bound))
-        else {
-            return;
-        };
+        // Preserve the successful action's original seed without drawing on denied breaks.
+        let mut seed = level.random(host);
         if !player.remove_block_without_drops(host, pos, state) {
             return;
         }
 
-        let [x, y, z] = pos.map(|axis| f64::from(axis) + 0.5);
-        if let Some(stack) = stack {
+        if let Ok(Some(stack)) =
+            self.roll_stack(host, weights, |bound| rolls.next_from(bound, || seed.take()))
+        {
+            let [x, y, z] = crate::random::natural_drop_position(host, level, pos);
             let _ = level.spawn_item(host, x, y, z, stack, 10);
         }
-        let _ = level.play_sound(host, sound, [x, y, z], SoundSource::Blocks, 1.0, 1.0);
+        let center = pos.map(|axis| f64::from(axis) + 0.5);
+        let _ = level.play_sound(host, sound, center, SoundSource::Blocks, 1.0, 1.0);
     }
 
     pub(crate) fn target_sound(&self, block: &str) -> Option<&'static str> {
@@ -196,6 +213,10 @@ impl Pan {
         Ok(None)
     }
 }
+
+#[cfg(test)]
+#[path = "gold_pan_interaction_tests.rs"]
+mod interaction_tests;
 
 #[cfg(test)]
 mod tests {

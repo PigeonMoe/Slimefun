@@ -156,7 +156,7 @@ python3 horizon/tools/import-research.py probe-horizon-catalog.json \
 
 本地开发版 `0.1.0-dev.4` 加入下界淘金盘。花费 8 级经验研究 `nether_gold_pan`，在增强工作台用普通淘金盘和五块下界砖制作。右击灵魂沙或灵魂土时会检查方块破坏权限，再按 Paper 默认权重从石英、金粒、下界疣、烈焰粉、荧石粉和恶魂之泪中产出一件物品。可用 `/sf recipe ghast_tear` 等命令查询权重。
 
-当前开发版可通过本节上方的 `[items.NETHER_GOLD_PAN.chance]` 设置自定义掉落权重。Bukkit 物品生成事件仍待移植。
+普通和下界淘金盘支持主手、副手及潜行右击。方块通过破坏检查后，产物沿用 Paper 的随机掉落位置。可通过本节上方的 `[items.NETHER_GOLD_PAN.chance]` 设置自定义掉落权重。依赖可取消的 Bukkit `SlimefunItemSpawnEvent` 的插件仍需要 Java 事件兼容层。
 
 ### Paper 方块存档与基础网络
 

@@ -25,9 +25,17 @@ pub(crate) struct Rolls(Mutex<Option<LegacyRandom>>);
 
 impl Rolls {
     pub fn next(&self, host: &dyn Host, level: LevelRef, bound: u32) -> Option<u32> {
+        self.next_from(bound, || level.random(host))
+    }
+
+    pub(crate) fn next_from(
+        &self,
+        bound: u32,
+        seed: impl FnOnce() -> Option<LegacyRandom>,
+    ) -> Option<u32> {
         let mut state = self.0.lock().unwrap();
         if state.is_none() {
-            *state = Some(level.random(host)?);
+            *state = Some(seed()?);
         }
         let roll = state
             .as_mut()?

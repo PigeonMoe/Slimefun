@@ -252,7 +252,7 @@ impl Slimefun {
                     let _permitted = multi_tool::PanUse::new(player, level, pos);
                     let pan = &gold_pan::PANS[usize::from(mode == Mode::NetherPan)];
                     let weights = self.settings.lock().unwrap().pan_weights;
-                    pan.use_on(host, player, level, pos, &self.rolls, &weights, false);
+                    pan.use_on(host, player, level, pos, &self.rolls, &weights);
                 }
             }
             Mode::Grapple => {}
@@ -720,6 +720,18 @@ impl Hooks for Slimefun {
         let HostSide::Server(host) = host else {
             return None;
         };
+        if let Some(stack) = event.stack
+            && let Some(pan) = gold_pan::held(host, stack)
+            && let Some(player) = host.players().acting_player()
+        {
+            if let Some(denied) = availability::stack_denial(host.dimension(), stack) {
+                denied.tell(host, player);
+                return Some(InteractionResult::Consume);
+            }
+            if !pan.allows_entity_use(host, player, event.kind) {
+                return Some(InteractionResult::Consume);
+            }
+        }
         if let Some(result) = nether_goo::interact(host, event)
             .or_else(|| zombie_pills::interact(host, event))
             .or_else(|| villager_rune::interact(host, event, &self.rolls))
@@ -1274,6 +1286,20 @@ impl Hooks for Slimefun {
             self.item_clicks.record_block_use(host, event.click.player, event.click.hand, held);
             denied.tell(host, player);
         }
+        if *event.use_item != TriState::False
+            && let Some(stack) = event.click.stack
+            && let Some(pan) = gold_pan::held(host, stack)
+            && matches!(player.game_mode(host), Some(GameMode::Survival | GameMode::Creative))
+            && let Some(level) = player.level(host)
+        {
+            if pan.can_use(host, player) {
+                let weights = self.settings.lock().unwrap().pan_weights;
+                pan.use_on(host, player, level, event.click.pos, &self.rolls, &weights);
+                *event.cancellation_result = InteractionResult::Consume;
+                return Flow::Cancel;
+            }
+            *event.use_item = TriState::False;
+        }
         if *event.use_item != TriState::False && event.click.stack.is_some_and(|stack| {
             zombie_pills::MAGICAL_ZOMBIE_PILLS.matches(host, stack)
         }) {
@@ -1501,25 +1527,6 @@ impl Hooks for Slimefun {
         }
         if player.entity().is_crouching(host) != Some(false) {
             return Flow::Continue;
-        }
-        if *event.use_item != TriState::False
-            && let Some(stack) = event.click.stack
-            && let Some(pan) = gold_pan::PANS
-                .iter()
-                .find(|pan| pan.item.matches(host, stack))
-        {
-            let weights = self.settings.lock().unwrap().pan_weights;
-            pan.use_on(
-                host,
-                player,
-                level,
-                event.click.pos,
-                &self.rolls,
-                &weights,
-                true,
-            );
-            *event.cancellation_result = InteractionResult::Consume;
-            return Flow::Cancel;
         }
         if self
             .industrial_miners
