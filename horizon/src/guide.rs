@@ -36,7 +36,6 @@ pub(crate) use learning::launch_random_fireworks;
 pub(crate) use locale::{Language, localize_item_components};
 pub(crate) use locale::research_name;
 
-const TITLE: &str = "远古工艺之书";
 const DASHBOARD_STYLE: &str = "pigeonmoe:life_skills_menu";
 const BOOK_LORE: &[&str] = &[
     "",
@@ -605,14 +604,10 @@ impl Guide {
             );
         }
         let mut title = match page {
-            Page::Languages => Text::literal(language.message("title.languages")),
-            Page::Info if language == Language::CHINESE => Text::literal("设置与关于"),
-            Page::Info => Text::literal(language.message("title.settings")),
-            Page::Search(query) => Text::literal(search_title(query, language)),
-            _ if cheat && language == Language::CHINESE => Text::literal("远古工艺之书 · 作弊模式"),
-            _ if cheat => Text::literal(language.message("modes.CHEAT_MODE")),
-            _ if language == Language::CHINESE => Text::literal(TITLE),
-            _ => Text::literal(language.message("title.main")),
+            Page::Languages => colored_label(language.message("title.languages")),
+            Page::Info => colored_label(language.message("title.settings")),
+            Page::Search(query) => search_title(query, language),
+            _ => colored_label(language.message("title.main")),
         };
         if matches!(presentation, Presentation::Dashboard) {
             title.style.insertion = Some(DASHBOARD_STYLE.into());
@@ -1133,7 +1128,7 @@ pub(crate) fn strip_colors(input: &str) -> String {
     plain
 }
 
-fn search_title(query: &str, language: Language) -> String {
+fn search_title(query: &str, language: Language) -> Text {
     let mut plain = strip_colors(query);
     if plain.encode_utf16().count() > 19 {
         let mut length = 0;
@@ -1146,11 +1141,10 @@ fn search_title(query: &str, language: Language) -> String {
             .collect();
         plain.push_str("...");
     }
-    if language == Language::CHINESE {
-        format!("搜索：{plain}")
-    } else {
-        language.message("search.inventory").replace("%item%", &plain)
-    }
+    let title = language
+        .message("search.inventory")
+        .replace("%item%", &format!("&f{plain}"));
+    colored_label(&title)
 }
 
 fn search_matches(
@@ -1392,24 +1386,27 @@ fn group_icon(host: &dyn Host, group: &Group, name: &str) -> Option<ItemStack> {
 
 fn method_icon(host: &dyn Host, entry: &Entry, language: Language) -> Option<ItemStack> {
     let method = entry.recipe_type;
-    if matches!(method.icon, Kind::Vanilla(_)) {
-        let translated = method.locale_key
-            .filter(|key| language != Language::CHINESE || *key == "barter_drop")
-            .and_then(|key| language.recipe_badge(key));
-        let name = translated.as_ref().map_or(method.name, |(name, _)| *name);
-        let lore: Vec<_> = if entry.label.is_some() && language == Language::CHINESE {
-            vec!["", "&a&o请在世界中搭建"]
-        } else {
-            translated.as_ref().map_or_else(|| method.lore.to_vec(), |(_, lore)| lore.iter().map(String::as_str).collect())
-        };
-        return icon(
-            host,
-            method.icon.material(),
-            &format!("&b{name}"),
-            &lore,
-        );
-    }
     let mut stack = method.icon.guide_stack(host, 1, language)?;
+    if let Some((name, lore)) = method.locale_key.and_then(|key| language.recipe_badge(key)) {
+        stack
+            .apply_components(&Compound::from([
+                ("minecraft:custom_name".into(), colored_lore(&format!("&b{name}"))),
+                (
+                    "minecraft:lore".into(),
+                    Tag::List(lore.iter().map(|line| colored_lore(line)).collect()),
+                ),
+            ]))
+            .ok()?;
+        return Some(stack);
+    }
+    if matches!(method.icon, Kind::Vanilla(_)) {
+        let lore = if entry.label.is_some() && language == Language::CHINESE {
+            &["", "&a&o请在世界中搭建"][..]
+        } else {
+            method.lore
+        };
+        return icon(host, method.icon.material(), &format!("&b{}", method.name), lore);
+    }
     if !method.lore.is_empty() {
         let mut lore = stack
             .components()
@@ -1609,6 +1606,51 @@ mod tests {
             );
             assert_eq!(components.get(&"minecraft:lore".into()), Some(&expected));
         }
+    }
+
+    #[test]
+    fn the_enhanced_crafting_table_badge_uses_the_whole_paper_translation() {
+        mod_api::__private::initialize().unwrap();
+        let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
+        let mut host = FakeHost::new();
+        host.registries
+            .resolve_items([Identifier::parse("minecraft:crafting_table").unwrap()])
+            .unwrap();
+        let entry = lookup("AUTO_DRIER").unwrap();
+        let badge = method_icon(&host, entry, Language::CHINESE).unwrap();
+        let components = badge.components().unwrap().as_nbt();
+        assert_eq!(
+            components.get(&"minecraft:custom_name".into()),
+            Some(&colored_lore("&b增强型工作台 (Enhanced Crafting Table)")),
+        );
+        assert_eq!(
+            components.get(&"minecraft:lore".into()),
+            Some(&Tag::List(
+                ["&7如合成表所示", "&7在增强型工作台中合成.", "&7一个普通的工作台远远不够!"]
+                    .into_iter()
+                    .map(colored_lore)
+                    .collect(),
+            )),
+        );
+    }
+
+    #[test]
+    fn the_gold_pan_badge_localizes_a_copy_of_the_original_device() {
+        mod_api::__private::initialize().unwrap();
+        let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
+        let mut host = FakeHost::new();
+        let material = crate::items::GOLD_PAN.material();
+        host.registries.resolve_items([Identifier::parse(material).unwrap()]).unwrap();
+        let original = crate::items::GOLD_PAN.stack(&host, 1).unwrap();
+        let badge = method_icon(&host, lookup("SIFTED_ORE").unwrap(), Language::CHINESE).unwrap();
+        assert_eq!(badge.item(), original.item());
+        assert_eq!(crate::items::item_id(&badge).as_deref(), Some("GOLD_PAN"));
+        let components = badge.components().unwrap().as_nbt();
+        assert_eq!(
+            components.get(&"minecraft:custom_name".into()),
+            Some(&colored_lore("&b淘金盘 (Gold Pan)")),
+        );
+        assert_ne!(badge.components(), original.components());
     }
 
     #[test]
@@ -2521,10 +2563,24 @@ mod tests {
             .count(),
             0
         );
-        assert_eq!(search_title("§bCoal", Language::CHINESE), "搜索：Coal");
+    }
+
+    #[test]
+    fn the_search_window_uses_papers_template_white_query_and_length_limit() {
+        let title = search_title("§bCoal", Language::CHINESE);
+        assert_eq!(title, colored_label("正在搜索: &fCoal"));
+        assert_eq!(title.children[1].style.color.as_deref(), Some("white"));
         assert_eq!(
-            search_title("012345678901234567890", Language::CHINESE),
-            "搜索：0123456789012345..."
+            search_title("0123456789012345678", Language::CHINESE),
+            colored_label("正在搜索: &f0123456789012345678"),
+        );
+        assert_eq!(
+            search_title("01234567890123456789", Language::CHINESE),
+            colored_label("正在搜索: &f0123456789012345..."),
+        );
+        assert_eq!(
+            search_title("Coal", Language::ENGLISH),
+            colored_label("Searching for: &fCoal"),
         );
     }
 

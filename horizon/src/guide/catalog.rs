@@ -54,7 +54,7 @@ const WASHER: RecipeType = RecipeType {
 };
 const GOLD_PAN: RecipeType = RecipeType {
     lore: &["", "&a&o对砂砾使用淘金盘即可获得"],
-    ..RecipeType::device(items::GOLD_PAN, "淘金盘")
+    ..RecipeType::device(items::GOLD_PAN, "淘金盘").local("gold_pan")
 };
 const MOB_DROP: RecipeType = RecipeType {
     lore: &["", "&r击杀指定生物即可获得"],
@@ -69,19 +69,19 @@ const BARTER_DROP: RecipeType = RecipeType {
     ..RecipeType::plain("minecraft:gold_ingot", "Piglin Bartering Drop")
 };
 const FOOD_FABRICATOR: RecipeType =
-    RecipeType::device(food_machines::FOOD_FABRICATOR, "食物加工机");
+    RecipeType::device(food_machines::FOOD_FABRICATOR, "食物加工机").local("food_fabricator");
 const FOOD_COMPOSTER: RecipeType =
-    RecipeType::device(food_machines::FOOD_COMPOSTER, "食物堆肥机");
+    RecipeType::device(food_machines::FOOD_COMPOSTER, "食物堆肥机").local("food_composter");
 
 const HEATED_PRESSURE: RecipeType =
-    RecipeType::device(heated_pressure::HEATED_PRESSURE_CHAMBER, "加热压力舱");
-const FREEZER: RecipeType = RecipeType::device(thermal_machines::FREEZER, "冰箱");
-const GEO_MINER: RecipeType = RecipeType::device(geology::GEO_MINER, "自然资源开采机");
-const OIL_PUMP: RecipeType = RecipeType::device(geology::OIL_PUMP, "原油泵");
-const REFINERY: RecipeType = RecipeType::device(advanced_processing::REFINERY, "炼油机");
-const NUCLEAR_REACTOR: RecipeType = RecipeType::device(reactors::NUCLEAR_REACTOR, "核反应堆");
+    RecipeType::device(heated_pressure::HEATED_PRESSURE_CHAMBER, "加热压力舱").local("heated_pressure_chamber");
+const FREEZER: RecipeType = RecipeType::device(thermal_machines::FREEZER, "冰箱").local("freezer");
+const GEO_MINER: RecipeType = RecipeType::device(geology::GEO_MINER, "自然资源开采机").local("geo_miner");
+const OIL_PUMP: RecipeType = RecipeType::device(geology::OIL_PUMP, "原油泵").local("oil_pump");
+const REFINERY: RecipeType = RecipeType::device(advanced_processing::REFINERY, "炼油机").local("refinery");
+const NUCLEAR_REACTOR: RecipeType = RecipeType::device(reactors::NUCLEAR_REACTOR, "核反应堆").local("nuclear_reactor");
 const CONTAINMENT: RecipeType =
-    RecipeType::device(spawner_repair::PICKAXE_OF_CONTAINMENT, "刷怪笼之镐");
+    RecipeType::device(spawner_repair::PICKAXE_OF_CONTAINMENT, "刷怪笼之镐").local("pickaxe_of_containment");
 
 const NETHER_ICE_RESEARCH: Research = Research {
     id: "nether_ice",
