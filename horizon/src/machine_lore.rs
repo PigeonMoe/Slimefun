@@ -11,6 +11,7 @@ const END_GAME: &str = "&4End-Game Machine";
 const GRINDING: &str = "&fWorks as an Ore Crusher and Grind Stone";
 const PULVERIZING: &str = "&fPulverizes Ingots into Dust";
 const SMELTING: &str = "&4Alloys-Only, doesn't smelt Dust into Ingots";
+const WATER_COOLING: &str = "&8⇨ &bMust be surrounded by Water";
 
 // The published ratings come from SlimefunItems and LoreBuilder. They describe
 // the stock items and are independent of the server's current ticker settings.
@@ -27,6 +28,31 @@ pub(crate) fn lore(id: &str) -> Option<Tag> {
             ]));
         }
         "REFINERY" => return Some(lines(&["", "&fRefines Oil to create Fuel"])),
+        "NUCLEAR_REACTOR" => {
+            return Some(lines(&[
+                "",
+                "&fRequires Cooling!",
+                WATER_COOLING,
+                "&8⇨ &bMust be supplied with Reactor Coolant Cells",
+                "",
+                "&4End-Game Generator",
+                "&8⇨ &e⚡ &716384 J Buffer",
+                "&8⇨ &e⚡ &7500 J/s",
+            ]));
+        }
+        "NETHERSTAR_REACTOR" => {
+            return Some(lines(&[
+                "",
+                "&fRuns on Nether Stars",
+                WATER_COOLING,
+                "&8⇨ &bMust be supplied with Nether Ice Coolant Cells",
+                "",
+                "&4End-Game Generator",
+                "&8⇨ &e⚡ &732768 J Buffer",
+                "&8⇨ &e⚡ &71024 J/s",
+                "&8⇨ &4Causes nearby Entities to get Withered",
+            ]));
+        }
         "REACTOR_ACCESS_PORT" => {
             return Some(lines(&[
                 "",
@@ -37,6 +63,19 @@ pub(crate) fn lore(id: &str) -> Option<Tag> {
                 "&8⇨ &eMust be placed &a3 Blocks &eabove the Reactor",
             ]));
         }
+        "XP_COLLECTOR" => {
+            return Some(lines(&[
+                "",
+                "&fCollects nearby Exp and stores it",
+                "",
+                END_GAME,
+                "&8⇨ &e⚡ &71024 J Buffer",
+                "&8⇨ &e⚡ &720 J/s",
+            ]));
+        }
+        "FLUID_PUMP" => return Some(lines(&["", ADVANCED, "&8⇨ &e⚡ &732 J/Block"])),
+        "IRON_GOLEM_ASSEMBLER" => return Some(assembler_lore("&8⇨ &e⚡ &72048 J/Golem")),
+        "WITHER_ASSEMBLER" => return Some(assembler_lore("&8⇨ &e⚡ &74096 J/Wither")),
         _ => {}
     }
 
@@ -68,6 +107,12 @@ pub(crate) fn lore(id: &str) -> Option<Tag> {
         "ELECTRIC_INGOT_FACTORY" => (BASIC, 1, 8),
         "ELECTRIC_INGOT_FACTORY_2" => (BASIC, 2, 14),
         "ELECTRIC_INGOT_FACTORY_3" => (END_GAME, 8, 40),
+        "FREEZER" => (ADVANCED, 1, 18),
+        "FREEZER_2" => (END_GAME, 2, 30),
+        "FREEZER_3" => (END_GAME, 3, 42),
+        "CARBON_PRESS" => (END_GAME, 1, 20),
+        "CARBON_PRESS_2" => (END_GAME, 3, 50),
+        "CARBON_PRESS_3" => (END_GAME, 15, 180),
         _ => return generator_lore(id),
     };
     let description = match id {
@@ -85,9 +130,22 @@ pub(crate) fn lore(id: &str) -> Option<Tag> {
     lore.extend([
         colored_lore(tier),
         colored_lore(&format!("&8⇨ &b⚡ &7Speed: &b{speed}.0x")),
-        colored_lore(&format!("&8⇨ &e⚡ &7{joules_per_second} J/s")),
     ]);
+    if matches!(id, "FREEZER" | "FREEZER_2" | "FREEZER_3") {
+        lore.push(colored_lore("&8⇨ &e⚡ &7256 J Buffer"));
+    }
+    lore.push(colored_lore(&format!("&8⇨ &e⚡ &7{joules_per_second} J/s")));
     Some(Tag::List(lore))
+}
+
+fn assembler_lore(assembly_cost: &str) -> Tag {
+    lines(&[
+        "",
+        END_GAME,
+        "&8⇨ &7Cooldown: &b30 Seconds",
+        "&8⇨ &e⚡ &74096 J Buffer",
+        assembly_cost,
+    ])
 }
 
 fn generator_lore(id: &str) -> Option<Tag> {
@@ -168,6 +226,8 @@ pub(crate) fn localize(line: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::{lines, lore};
+    use crate::hologram_projector::colored_lore;
+    use crate::items::Kind;
     use mod_api::{Identifier, testing::FakeHost};
 
     #[test]
@@ -311,5 +371,145 @@ mod tests {
                 "&8⇨ &e必须放在反应堆正上方 &a3 格 &e处",
             ],
         );
+    }
+
+    #[test]
+    fn reactor_titles_profiles_and_lore_match_paper_english_and_chinese() {
+        mod_api::__private::initialize().unwrap();
+        let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
+        let mut host = FakeHost::new();
+        host.registries
+            .resolve_items([Identifier::parse("minecraft:player_head").unwrap()])
+            .unwrap();
+
+        let cases: [(_, _, _, _, &[_], &[_]); 2] = [
+            (
+                "NUCLEAR_REACTOR",
+                "Nuclear Reactor",
+                "dark_green",
+                "&2核反应堆",
+                &[
+                    "",
+                    "&fRequires Cooling!",
+                    "&8⇨ &bMust be surrounded by Water",
+                    "&8⇨ &bMust be supplied with Reactor Coolant Cells",
+                    "",
+                    "&4End-Game Generator",
+                    "&8⇨ &e⚡ &716384 J Buffer",
+                    "&8⇨ &e⚡ &7500 J/s",
+                ],
+                &[
+                    "",
+                    "&r需要冷却剂!",
+                    "&8⇨ &b必须被水包围",
+                    "&8⇨ &b必须使用反应堆冷却剂工作",
+                    "",
+                    "&4终局发电机",
+                    "&8⇨ &e⚡ &716384 J 缓冲",
+                    "&8⇨ &e⚡ &7500 J/s",
+                ],
+            ),
+            (
+                "NETHERSTAR_REACTOR",
+                "Nether Star Reactor",
+                "white",
+                "&r下界之星反应堆",
+                &[
+                    "",
+                    "&fRuns on Nether Stars",
+                    "&8⇨ &bMust be surrounded by Water",
+                    "&8⇨ &bMust be supplied with Nether Ice Coolant Cells",
+                    "",
+                    "&4End-Game Generator",
+                    "&8⇨ &e⚡ &732768 J Buffer",
+                    "&8⇨ &e⚡ &71024 J/s",
+                    "&8⇨ &4Causes nearby Entities to get Withered",
+                ],
+                &[
+                    "",
+                    "&r需要下界之星",
+                    "&8⇨ &b必须被水包围",
+                    "&8⇨ &b必须使用下界冰冷却剂工作",
+                    "",
+                    "&4终局发电机",
+                    "&8⇨ &e⚡ &732768 J 缓冲",
+                    "&8⇨ &e⚡ &71024 J/s",
+                    "&8⇨ &4会导致附近的生物获得凋零效果",
+                ],
+            ),
+        ];
+        for (id, english_name, color, chinese_name, english_lore, chinese_lore) in cases {
+            let kind = crate::guide::command_item(id).unwrap().unwrap();
+            let Kind::Slimefun(template) = kind else {
+                panic!("{id} is not a Slimefun item");
+            };
+            assert_eq!((template.name, template.color), (english_name, color));
+            assert_eq!(lore(id), Some(lines(english_lore)), "{id}");
+
+            let stack = kind.stack(&host, 1).unwrap();
+            let components = stack.components().unwrap();
+            let components = components.as_nbt();
+            assert_eq!(crate::items::item_id(&stack).as_deref(), Some(id));
+            assert_eq!(
+                components.get(&"minecraft:custom_name".into()),
+                Some(&colored_lore(chinese_name)),
+                "{id}"
+            );
+            assert_eq!(
+                components.get(&"minecraft:lore".into()),
+                Some(&lines(chinese_lore)),
+                "{id}"
+            );
+            assert_eq!(
+                components.get(&"minecraft:profile".into()),
+                Some(&template.texture.as_ref().unwrap().component()),
+                "{id}"
+            );
+        }
+    }
+
+    #[test]
+    fn electric_machine_capacity_and_operation_costs_reach_inventory_stacks() {
+        mod_api::__private::initialize().unwrap();
+        let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
+        let mut host = FakeHost::new();
+        host.registries
+            .resolve_items(
+                [
+                    "light_blue_stained_glass",
+                    "black_stained_glass",
+                    "blue_terracotta",
+                    "iron_block",
+                    "obsidian",
+                    "player_head",
+                ]
+                .map(|item| Identifier::parse(&format!("minecraft:{item}")).unwrap()),
+            )
+            .unwrap();
+        for (id, expected_lines, last_line) in [
+            ("FREEZER", 5, "&8⇨ &e⚡ &718 J/s"),
+            ("FREEZER_2", 5, "&8⇨ &e⚡ &730 J/s"),
+            ("FREEZER_3", 5, "&8⇨ &e⚡ &742 J/s"),
+            ("CARBON_PRESS", 4, "&8⇨ &e⚡ &720 J/s"),
+            ("CARBON_PRESS_2", 4, "&8⇨ &e⚡ &750 J/s"),
+            ("CARBON_PRESS_3", 4, "&8⇨ &e⚡ &7180 J/s"),
+            ("XP_COLLECTOR", 6, "&8⇨ &e⚡ &720 J/s"),
+            ("FLUID_PUMP", 3, "&8⇨ &e⚡ &732 J/个方块"),
+            ("IRON_GOLEM_ASSEMBLER", 5, "&8⇨ &e⚡ &72048 J/个铁傀儡"),
+            ("WITHER_ASSEMBLER", 5, "&8⇨ &e⚡ &74096 J/个凋灵"),
+        ] {
+            let kind = crate::guide::command_item(id).unwrap().unwrap();
+            let stack = kind.stack(&host, 1).unwrap();
+            let components = stack.components().unwrap();
+            let Some(mod_api::Tag::List(lore)) = components.as_nbt().get(&"minecraft:lore".into())
+            else {
+                panic!("missing Paper lore on {id}");
+            };
+            assert_eq!(lore.len(), expected_lines, "{id}");
+            assert_eq!(lore.last(), Some(&colored_lore(last_line)), "{id}");
+            if id.starts_with("FREEZER") {
+                assert_eq!(lore[3], colored_lore("&8⇨ &e⚡ &7256 J 缓冲"), "{id}");
+            }
+        }
     }
 }
