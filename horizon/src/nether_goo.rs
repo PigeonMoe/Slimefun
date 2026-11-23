@@ -208,7 +208,9 @@ mod tests {
 
         let goo = STRANGE_NETHER_GOO.stack(&host, 1).unwrap();
         let bio = generator("BIO_REACTOR").unwrap();
-        let fuel = bio.fuel(&host, &goo).unwrap();
+        let fuel = bio
+            .fuel(&host, &crate::fuel_generators::TagFuels::default(), &goo)
+            .unwrap();
         assert_eq!(fuel.ticks, 32);
         assert!(!fuel.returns_bucket);
     }

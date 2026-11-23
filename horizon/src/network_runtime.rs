@@ -526,9 +526,14 @@ pub(crate) struct Networks {
     discoveries: BTreeMap<String, Discovery>,
     gps_signals: BTreeMap<String, BTreeMap<Position, (u128, u32)>>,
     pylon_phase: crate::rainbow::placed::Phase,
+    tagged_fuels: Arc<crate::fuel_generators::TagFuels>,
 }
 
 impl Networks {
+    pub(crate) fn register_fuels(&mut self, host: &dyn mod_api::Host) {
+        self.tagged_fuels = Arc::new(crate::fuel_generators::TagFuels::register(host));
+    }
+
     pub(crate) fn gps_network(&self, player: u128) -> Vec<(String, Position, u32)> {
         self.gps_signals
             .iter()
@@ -564,6 +569,7 @@ impl Networks {
         self.discoveries.clear();
         self.gps_signals.clear();
         self.pylon_phase = crate::rainbow::placed::Phase::default();
+        self.tagged_fuels = Arc::default();
         plain_network::clear();
     }
 
@@ -1425,8 +1431,12 @@ pub(crate) fn tick(
         return;
     };
     let dimension = profile.dimension.clone();
-    let Ok(nodes) = networks.lock().unwrap().nodes(host, &dimension) else {
-        return;
+    let (nodes, tagged_fuels) = {
+        let mut networks = networks.lock().unwrap();
+        let Ok(nodes) = networks.nodes(host, &dimension) else {
+            return;
+        };
+        (nodes, networks.tagged_fuels.clone())
     };
     let active: BTreeMap<_, _> = nodes
         .iter()
@@ -1521,6 +1531,7 @@ pub(crate) fn tick(
                         &group,
                         rolls,
                         settings.solar_night_in_other_dimensions,
+                        &tagged_fuels,
                         profile,
                         &mut generators,
                     )
@@ -1810,6 +1821,7 @@ fn tick_energy(
     group: &[Position],
     rolls: &Rolls,
     solar_night_in_other_dimensions: bool,
+    tagged_fuels: &crate::fuel_generators::TagFuels,
     profile: &mut crate::timings::Cycle,
     generator_elapsed: &mut u64,
 ) -> Option<Status> {
@@ -1845,8 +1857,16 @@ fn tick_energy(
                                 }
                                 return Ok((!melt).then_some(energy));
                             }
-                            crate::factory::generate(host, tx, level, pos, &node.id, charge)
-                                .map(Some)
+                            crate::factory::generate(
+                                host,
+                                tx,
+                                level,
+                                pos,
+                                &node.id,
+                                charge,
+                                tagged_fuels,
+                            )
+                            .map(Some)
                         });
                         *generator_elapsed = generator_elapsed.saturating_add(elapsed);
                         let Some(production) = production? else {

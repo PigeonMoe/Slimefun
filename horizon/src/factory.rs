@@ -19,7 +19,7 @@ use crate::recipes::{
 use crate::{
     advanced_processing,
     electric_processing::{self, Family, MachineSpec},
-    fuel_generators::{self, Generator},
+    fuel_generators::{self, Generator, TagFuels},
     geo_deposits::{self, Mining, Resource},
     geology,
     gold_pan::PANS,
@@ -2056,6 +2056,7 @@ pub(crate) fn generate(
     pos: Position,
     id: &str,
     charge: u32,
+    tagged: &TagFuels,
 ) -> Result<u32, ()> {
     let machine = ElectricMachine::for_item(id).ok_or(())?;
     let RecipeFamily::Fuel(generator) = machine.family else {
@@ -2091,7 +2092,7 @@ pub(crate) fn generate(
         None => {
             let Some((index, stack, fuel)) = INPUT.into_iter().find_map(|index| {
                 let stack = stack_in(host, &data, index)?;
-                let fuel = generator.fuel(host, &stack)?;
+                let fuel = generator.fuel(host, tagged, &stack)?;
                 Some((index, stack, fuel))
             }) else {
                 return Ok(0);
@@ -2614,13 +2615,14 @@ mod tests {
             (RETURNS_BUCKET.into(), Tag::Byte(1)),
         ]);
         assert!(save(&mut host, storage, burn.clone()));
+        let tagged = TagFuels::default();
         let produced = host
-            .transaction(|host, tx| generate(host, tx, level, pos, id, 503))
+            .transaction(|host, tx| generate(host, tx, level, pos, id, 503, &tagged))
             .unwrap();
         assert_eq!(produced, 0);
         assert_eq!(data_at(&mut host, storage), Some(burn));
         let produced = host
-            .transaction(|host, tx| generate(host, tx, level, pos, id, 502))
+            .transaction(|host, tx| generate(host, tx, level, pos, id, 502, &tagged))
             .unwrap();
         assert_eq!(produced, 10);
         assert_eq!(remaining(&data_at(&mut host, storage).unwrap()), Some(1));
@@ -3637,7 +3639,11 @@ mod tests {
         );
         let fuel = fuel_generators::generator("LAVA_GENERATOR")
             .unwrap()
-            .fuel(&host, &melt.outputs[0])
+            .fuel(
+                &host,
+                &TagFuels::default(),
+                &melt.outputs[0],
+            )
             .unwrap();
         assert_eq!(fuel.ticks, 80);
         assert!(fuel.returns_bucket);
@@ -3679,7 +3685,11 @@ mod tests {
         );
         let fuel = fuel_generators::generator("COMBUSTION_REACTOR")
             .unwrap()
-            .fuel(&host, &refined.outputs[0])
+            .fuel(
+                &host,
+                &TagFuels::default(),
+                &refined.outputs[0],
+            )
             .unwrap();
         assert_eq!(fuel.ticks, 180);
         assert!(fuel.returns_bucket);

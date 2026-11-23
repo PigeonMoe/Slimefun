@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
+use std::collections::BTreeMap;
+
 use mod_api::{Host, Identifier, ItemStack};
 
 use crate::{
@@ -178,6 +180,65 @@ const GENERATORS: &[Generator] = &[
     },
 ];
 
+const COAL_BLOCK_TAGS: &[(&str, u32)] = &[
+    ("minecraft:logs", 4),
+    ("minecraft:planks", 1),
+    ("minecraft:wooden_slabs", 1),
+    ("minecraft:wooden_buttons", 1),
+    ("minecraft:wooden_fences", 1),
+    ("minecraft:wooden_trapdoors", 3),
+    ("minecraft:wooden_pressure_plates", 2),
+    ("minecraft:wooden_doors", 2),
+    ("minecraft:standing_signs", 2),
+];
+
+const BIO_BLOCK_TAGS: &[(&str, u32)] = &[
+    ("minecraft:small_flowers", 1),
+    ("minecraft:leaves", 1),
+    ("minecraft:saplings", 1),
+    ("minecraft:corals", 2),
+    ("minecraft:coral_blocks", 2),
+];
+
+#[derive(Default)]
+pub(crate) struct TagFuels {
+    coal: BTreeMap<String, u32>,
+    bio: BTreeMap<String, u32>,
+}
+
+impl TagFuels {
+    /// Paper registers material fuel templates at generator construction.
+    /// A datapack reload changes the tags but leaves those recipes in place.
+    pub(crate) fn register(host: &dyn Host) -> Self {
+        let mut coal = block_fuels(host, COAL_BLOCK_TAGS);
+        let boats = Identifier::parse("minecraft:boats").expect("valid vanilla tag");
+        let tags = host.tags();
+        if let Some(items) = tags.key(&boats).and_then(|tag| tags.items(tag)) {
+            for item in items {
+                coal.insert(item.id(host), 5);
+            }
+        }
+        Self {
+            coal,
+            bio: block_fuels(host, BIO_BLOCK_TAGS),
+        }
+    }
+}
+
+fn block_fuels(host: &dyn Host, groups: &[(&str, u32)]) -> BTreeMap<String, u32> {
+    let tags = host.tags();
+    let mut fuels = BTreeMap::new();
+    for &(id, seconds) in groups {
+        let id = Identifier::parse(id).expect("valid vanilla tag");
+        if let Some(blocks) = tags.key(&id).and_then(|tag| tags.blocks(tag)) {
+            for block in blocks {
+                fuels.entry(block.id(host)).or_insert(seconds);
+            }
+        }
+    }
+    fuels
+}
+
 pub(crate) struct Fuel {
     pub ticks: u32,
     pub returns_bucket: bool,
@@ -192,15 +253,20 @@ impl Generator {
         }
     }
 
-    pub(crate) fn fuel(self, host: &dyn Host, stack: &ItemStack) -> Option<Fuel> {
+    pub(crate) fn fuel(
+        self,
+        host: &dyn Host,
+        tagged: &TagFuels,
+        stack: &ItemStack,
+    ) -> Option<Fuel> {
         let seconds = match self.fuel {
-            FuelKind::Coal => coal_fuel(host, stack),
+            FuelKind::Coal => coal_fuel(host, &tagged.coal, stack),
             FuelKind::Lava => Kind::Vanilla("minecraft:lava_bucket")
                 .matches(host, stack)
                 .then_some(40),
             FuelKind::Magnesium => MAGNESIUM_SALT.matches(host, stack).then_some(20),
             FuelKind::Bio if STRANGE_NETHER_GOO.matches(host, stack) => Some(16),
-            FuelKind::Bio => bio_fuel(host, stack),
+            FuelKind::Bio => bio_fuel(host, &tagged.bio, stack),
             FuelKind::Combustion if BUCKET_OF_OIL.matches(host, stack) => Some(30),
             FuelKind::Combustion if BUCKET_OF_FUEL.matches(host, stack) => Some(90),
             FuelKind::Combustion => None,
@@ -212,7 +278,7 @@ impl Generator {
     }
 }
 
-fn coal_fuel(host: &dyn Host, stack: &ItemStack) -> Option<u32> {
+fn coal_fuel(host: &dyn Host, tagged: &BTreeMap<String, u32>, stack: &ItemStack) -> Option<u32> {
     if stack.components().is_some() || stack.damage_component().is_some() {
         return None;
     }
@@ -221,26 +287,11 @@ fn coal_fuel(host: &dyn Host, stack: &ItemStack) -> Option<u32> {
         "minecraft:blaze_rod" => Some(12),
         "minecraft:dried_kelp_block" => Some(20),
         "minecraft:coal" | "minecraft:charcoal" => Some(8),
-        _ if item_in_tag(host, stack, "minecraft:boats") => Some(5),
-        id => block_tag_fuel(
-            host,
-            id,
-            &[
-                ("minecraft:logs", 4),
-                ("minecraft:planks", 1),
-                ("minecraft:wooden_slabs", 1),
-                ("minecraft:wooden_buttons", 1),
-                ("minecraft:wooden_fences", 1),
-                ("minecraft:wooden_trapdoors", 3),
-                ("minecraft:wooden_pressure_plates", 2),
-                ("minecraft:wooden_doors", 2),
-                ("minecraft:standing_signs", 2),
-            ],
-        ),
+        id => tagged.get(id).copied(),
     }
 }
 
-fn bio_fuel(host: &dyn Host, stack: &ItemStack) -> Option<u32> {
+fn bio_fuel(host: &dyn Host, tagged: &BTreeMap<String, u32>, stack: &ItemStack) -> Option<u32> {
     if stack.components().is_some() || stack.damage_component().is_some() {
         return None;
     }
@@ -283,34 +334,8 @@ fn bio_fuel(host: &dyn Host, stack: &ItemStack) -> Option<u32> {
         "minecraft:dried_kelp_block" | "minecraft:spore_blossom" => Some(20),
         "minecraft:melon" => Some(27),
         "minecraft:honeycomb_block" => Some(40),
-        id => block_tag_fuel(
-            host,
-            id,
-            &[
-                ("minecraft:small_flowers", 1),
-                ("minecraft:leaves", 1),
-                ("minecraft:saplings", 1),
-                ("minecraft:corals", 2),
-                ("minecraft:coral_blocks", 2),
-            ],
-        ),
+        id => tagged.get(id).copied(),
     }
-}
-
-fn item_in_tag(host: &dyn Host, stack: &ItemStack, id: &str) -> bool {
-    Identifier::parse(id)
-        .ok()
-        .and_then(|tag| host.tags().key(&tag))
-        .and_then(|tag| host.tags().is_in_tag(stack.item(), tag))
-        == Some(true)
-}
-
-fn block_tag_fuel(host: &dyn Host, id: &str, tags: &[(&str, u32)]) -> Option<u32> {
-    // Bukkit's generator tags are block tags except for ITEMS_BOATS above.
-    let block = host.block_key(id)?;
-    tags.iter().find_map(|&(tag, seconds)| {
-        (host.block_in_tag(block, tag) == Some(true)).then_some(seconds)
-    })
 }
 
 const COAL: Research = Research {

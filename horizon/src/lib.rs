@@ -2029,9 +2029,14 @@ impl Hooks for Slimefun {
         }
     }
 
-    fn tags_updated(&self, _: HostSide<'_>, event: &mut mod_api::TagsUpdatedEvent) {
-        if matches!(event.cause, mod_api::TagsUpdateCause::ServerDataLoad { .. }) {
+    fn tags_updated(&self, host: HostSide<'_>, event: &mut mod_api::TagsUpdatedEvent) {
+        if let mod_api::TagsUpdateCause::ServerDataLoad { reload } = event.cause {
             auto_crafter::invalidate_vanilla_recipes();
+            if let HostSide::Server(host) = host
+                && !reload
+            {
+                self.networks.lock().unwrap().register_fuels(host);
+            }
         }
     }
 
