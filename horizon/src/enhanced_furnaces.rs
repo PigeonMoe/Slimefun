@@ -1,15 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
+use std::sync::Mutex;
+
 use mod_api::{
-    BlockEntityRef, ComponentId, Compound, FurnaceProcessEvent, FurnaceProcessStage, Host,
-    ItemResource, ItemStack, ServerHost, Tag,
+    BlockEntityRef, Compound, FurnaceProcessEvent, FurnaceProcessStage, Host, ItemStack,
+    ServerHost, Tag,
 };
 
 use crate::{
     items::{
         BASIC_CIRCUIT_BOARD, CARBONADO, ELECTRIC_MOTOR, HEATING_COIL, Kind, REINFORCED_ALLOY_INGOT,
-        STEEL_INGOT, item, text,
+        STEEL_INGOT, item, stack_limit, text,
     },
+    network_runtime::{self, Networks},
     random::Rolls,
     recipes::{CraftingRecipe, Research, Stack},
 };
@@ -320,6 +323,26 @@ impl Furnace {
         };
         spare.min(amount)
     }
+
+    fn adjust_result(
+        self,
+        host: &dyn Host,
+        input: &ItemStack,
+        previous: Option<&ItemStack>,
+        registered: Option<&ItemStack>,
+        result: &mut Option<ItemStack>,
+        roll: impl FnOnce(u32) -> Option<u32>,
+    ) {
+        // Paper leaves a vanilla completion alone if no startup recipe matches.
+        let Some(registered) = registered.filter(|_| result.is_some()) else {
+            return;
+        };
+        let existing = previous.map_or(0, ItemStack::count);
+        let spare = stack_limit(host, registered).saturating_sub(existing);
+        let count = self.quantity(&input.item().id(host), spare, roll);
+        // Paper makes a fresh stack of the cached material when it replaces the result.
+        *result = ItemStack::new(registered.item(), count);
+    }
 }
 
 pub(crate) fn decorate(id: &str, name: &str, components: &mut Compound) {
@@ -362,6 +385,7 @@ fn line(children: Vec<Tag>) -> Tag {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mod_api::{Identifier, testing::FakeHost};
 
     #[test]
     fn paper_lore_and_runtime_multipliers_are_distinct() {
@@ -405,9 +429,73 @@ mod tests {
             assert_eq!(recipe.inputs[4], Some(prior));
         }
     }
+
+    #[test]
+    fn enhanced_furnace_only_rewrites_results_found_at_startup() {
+        mod_api::__private::initialize().unwrap();
+        let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
+        let mut host = FakeHost::new();
+        host.registries
+            .resolve_items(
+                [
+                    "minecraft:raw_iron",
+                    "minecraft:blue_dye",
+                    "minecraft:red_dye",
+                ]
+                .map(|id| Identifier::parse(id).unwrap()),
+            )
+            .unwrap();
+        let furnace = by_id("CARBONADO_EDGED_FURNACE").unwrap();
+        let input = Kind::Vanilla("minecraft:raw_iron").stack(&host, 1).unwrap();
+        let mut startup = Kind::Vanilla("minecraft:blue_dye").stack(&host, 2).unwrap();
+        startup
+            .apply_components(&Compound::from([(
+                "minecraft:max_stack_size".into(),
+                Tag::Int(2),
+            )]))
+            .unwrap();
+        let previous = ItemStack::new(startup.item(), 1);
+        let mut live = Kind::Vanilla("minecraft:red_dye").stack(&host, 3).unwrap();
+        live.apply_components(&Compound::from([(
+            "minecraft:custom_name".into(),
+            text("Late Dye", "red", false),
+        )]))
+        .unwrap();
+
+        let mut result = Some(live.clone());
+        furnace.adjust_result(
+            &host,
+            &input,
+            previous.as_ref(),
+            Some(&startup),
+            &mut result,
+            |bound| Some(bound - 1),
+        );
+        assert_eq!(result, ItemStack::new(startup.item(), 1));
+
+        let mut result = Some(live.clone());
+        furnace.adjust_result(&host, &input, None, None, &mut result, |_| unreachable!());
+        assert_eq!(result, Some(live));
+
+        let mut cancelled = None;
+        furnace.adjust_result(
+            &host,
+            &input,
+            None,
+            Some(&startup),
+            &mut cancelled,
+            |_| unreachable!(),
+        );
+        assert_eq!(cancelled, None);
+    }
 }
 
-pub(crate) fn process(host: &dyn Host, event: &mut FurnaceProcessEvent<'_>, rolls: &Rolls) {
+pub(crate) fn process(
+    host: &dyn Host,
+    event: &mut FurnaceProcessEvent<'_>,
+    rolls: &Rolls,
+    networks: &Mutex<Networks>,
+) {
     if !matches!(
         event.stage,
         FurnaceProcessStage::Fuel { .. } | FurnaceProcessStage::Result { .. }
@@ -441,25 +529,15 @@ pub(crate) fn process(host: &dyn Host, event: &mut FurnaceProcessEvent<'_>, roll
             previous,
             result,
         } => {
-            let Some(proposed) = result else {
-                return;
-            };
-            let Some(max_stack_size) = ComponentId::new("minecraft:max_stack_size") else {
-                return;
-            };
-            let Some(Tag::Int(limit)) = ItemResource::of(proposed).value(host, &max_stack_size)
-            else {
-                return;
-            };
-            let existing = previous.as_ref().map_or(0, ItemStack::count);
-            let spare = u32::try_from(limit)
-                .unwrap_or_default()
-                .saturating_sub(existing);
-            let count = furnace.quantity(&input.item().id(host), spare, |bound| {
-                rolls.next(host, level, bound)
-            });
-            // Paper constructs a new material stack instead of copying the recipe result's components.
-            *result = ItemStack::new(proposed.item(), count);
+            let registered = network_runtime::registered_furnace_output(networks, input.item());
+            furnace.adjust_result(
+                host,
+                input,
+                previous.as_ref(),
+                registered.as_ref(),
+                result,
+                |bound| rolls.next(host, level, bound),
+            );
         }
         _ => {}
     }

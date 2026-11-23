@@ -1447,6 +1447,14 @@ impl FurnaceRecipes {
         )
     }
 
+    /// Paper's enhanced furnace tests the vanilla MaterialChoice directly.
+    /// A stack's name, other components and count do not change that choice.
+    pub(crate) fn material_output(&self, item: ItemKey) -> Option<&ItemStack> {
+        self.0
+            .iter()
+            .find_map(|(keys, output)| keys.contains(&item).then_some(output))
+    }
+
     fn find(&self, inputs: &[Option<ItemStack>; 2]) -> Option<RecipeRun> {
         for (keys, output) in &self.0 {
             // Paper registers one machine recipe per choice, in choice order.
@@ -2370,10 +2378,14 @@ mod tests {
         assert_eq!(first.outputs, vec![blue.clone()]);
 
         let only_shard = [None, Some(a.clone())];
-        assert_eq!(registered.find(&only_shard).unwrap().outputs, vec![blue]);
+        assert_eq!(
+            registered.find(&only_shard).unwrap().outputs,
+            vec![blue.clone()]
+        );
         assert_eq!(restarted.find(&only_shard).unwrap().outputs, vec![red]);
         let mut renamed = a;
         renamed.apply_components(&name).unwrap();
+        assert_eq!(registered.material_output(renamed.item()), Some(&blue));
         assert!(registered.find(&[Some(renamed), None]).is_none());
     }
 

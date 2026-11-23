@@ -1391,6 +1391,14 @@ pub(crate) fn toggle_reactor_focus(host: &mut dyn ServerHost, level: LevelRef, p
     }
 }
 
+pub(crate) fn registered_furnace_output(
+    networks: &Mutex<Networks>,
+    input: mod_api::ItemKey,
+) -> Option<ItemStack> {
+    let recipes = networks.lock().unwrap().machine_recipes.clone();
+    recipes.furnaces.material_output(input).cloned()
+}
+
 pub(crate) fn tick_enhanced_furnaces(
     networks: &Mutex<Networks>,
     host: &mut dyn ServerHost,

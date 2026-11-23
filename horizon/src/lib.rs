@@ -2168,7 +2168,7 @@ impl Hooks for Slimefun {
         host: &dyn mod_api::Host,
         event: &mut mod_api::FurnaceProcessEvent<'_>,
     ) {
-        enhanced_furnaces::process(host, event, &self.rolls);
+        enhanced_furnaces::process(host, event, &self.rolls, &self.networks);
     }
 
     fn level_tick_pre(&self, host: HostSide<'_>, event: &mut LevelTickPreEvent) {
