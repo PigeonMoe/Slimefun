@@ -866,6 +866,7 @@ pub(super) fn tick(
     networks: &Mutex<Networks>,
     host: &mut dyn ServerHost,
     level: LevelRef,
+    network: (&str, Position),
     active: &BTreeMap<Position, (&Node, u32)>,
     group: &[Position],
     profile: &mut crate::timings::Cycle,
@@ -881,8 +882,8 @@ pub(super) fn tick(
         ) {
             continue;
         }
-        let started = (node.component == Component::CargoInput)
-            .then(|| host.server_monotonic_nanos());
+        let started =
+            (node.component == Component::CargoInput).then(|| host.server_monotonic_nanos());
         let options = node.cargo_settings(host, level, pos);
         let channel = options.channel;
         let terminal = attached_inventory(host, level, pos).and_then(|(inventory, kind)| {
@@ -910,29 +911,30 @@ pub(super) fn tick(
             let Some(outputs) = outputs.get(&input.options.channel) else {
                 return;
             };
-            let cursor_key = (level, input.pos);
             let cursor = if input.options.round_robin {
                 networks
                     .lock()
                     .unwrap()
-                    .round_robin
-                    .get(&cursor_key)
+                    .cargo_cursors(network)
+                    .and_then(|cursors| cursors.get(&input.pos))
                     .copied()
                     .unwrap_or(0)
             } else {
                 0
             };
-            let next = route(host, level, input, outputs, cursor, |host, from, to, stack| {
-                from != to && level.allow_inventory_transfer(host, from, to, stack)
-            });
+            let next = route(
+                host,
+                level,
+                input,
+                outputs,
+                cursor,
+                |host, from, to, stack| level.allow_inventory_transfer(host, from, to, stack),
+            );
             if let Some(next) = next
                 && input.options.round_robin
+                && let Some(cursors) = networks.lock().unwrap().cargo_cursors(network)
             {
-                networks
-                    .lock()
-                    .unwrap()
-                    .round_robin
-                    .insert(cursor_key, next);
+                cursors.insert(input.pos, next);
             }
         });
         input_elapsed = input_elapsed.saturating_add(elapsed);
@@ -971,7 +973,7 @@ fn route(
         let Some(output) = &outputs[index] else {
             continue;
         };
-        if !output.filter.accepts(host, &stack) || input.inventory == output.inventory {
+        if !output.filter.accepts(host, &stack) {
             continue;
         }
         let moved = move_to_first(host, level, input, slot, output, &stack, &mut permit);
@@ -1053,6 +1055,21 @@ fn move_to_first(
             .kind
             .slot_position(host, level, input.inventory, source_size, source_slot)
             .ok_or(())?;
+        let shared_inventory = input.inventory == output.inventory
+            || (matches!(
+                (input.kind, output.kind),
+                (InventoryKind::Chest, InventoryKind::Chest)
+            ) && source_size == 54
+                && size == 54
+                && input
+                    .kind
+                    .slot_position(host, level, input.inventory, source_size, 0)
+                    .is_some_and(|first| {
+                        output
+                            .kind
+                            .slot_position(host, level, output.inventory, size, 0)
+                            == Some(first)
+                    }));
         let mut endpoint_allowed = BTreeMap::new();
         let preferred = match output.kind {
             InventoryKind::Factory { smeltery: true } => smeltery_slots(size, |slot| {
@@ -1077,7 +1094,13 @@ fn move_to_first(
             let direct_ingredient = matches!(output.kind, InventoryKind::Brewer)
                 && slot == 3
                 && destination.owner() == "the game";
-            let stored = destination.resource(host, slot);
+            // Paper has already withdrawn the source when it searches the destination.
+            let vacated = shared_inventory && slot == source_slot;
+            let stored = if vacated {
+                None
+            } else {
+                destination.resource(host, slot)
+            };
             let mut insert_resource = &source_resource;
             if let Some(held) = &stored
                 && let Some(current) = held.to_stack(destination.amount(host, slot))
@@ -1108,6 +1131,21 @@ fn move_to_first(
                 && destination.resource(host, slot).as_ref() != Some(insert_resource)
             {
                 return Err(());
+            }
+            if vacated {
+                let amount = stack.count();
+                if destination.capacity(host, slot, &source_resource) < amount {
+                    continue;
+                }
+                // This slot aliases the source, including opposite halves of a double chest.
+                // Withdraw and replace it in the same transaction before trying another output.
+                if source.amount(host, source_slot) != amount
+                    || source.extract(host, tx, source_slot, &source_resource, amount) != amount
+                    || destination.insert(host, tx, slot, &source_resource, amount) != amount
+                {
+                    return Err(());
+                }
+                return Ok(amount);
             }
             let moved = if direct_ingredient {
                 // Paper writes the brewer's inventory directly. ITEMS follows hopper rules
@@ -1267,6 +1305,113 @@ mod tests {
             .slots[0]
             .as_ref()
             .map_or(0, ItemStack::count)
+    }
+
+    #[test]
+    fn cargo_reinserts_in_the_same_chest_and_checks_transfer_permission() {
+        let (mut host, item, mut input, mut outputs) = round_robin_fixture();
+        let level = host.level.level();
+        input.kind = InventoryKind::Chest;
+        let output = outputs[0].as_mut().unwrap();
+        output.inventory = input.inventory;
+        output.kind = InventoryKind::Chest;
+        let chest = input.inventory;
+        let stock = ItemStack::new(item, 3).unwrap();
+        host.level
+            .block_entity(chest)
+            .with_items(27)
+            .items
+            .as_mut()
+            .unwrap()
+            .slots[4] = Some(stock.clone());
+
+        let permission = |_: &mut dyn ServerHost, from, to, stack: &ItemStack| {
+            assert_eq!(from, chest);
+            assert_eq!(stack, &stock);
+            to == chest
+        };
+        assert_eq!(
+            route(
+                &mut host,
+                level,
+                &input,
+                &outputs[..1],
+                0,
+                |_, from, to, _| {
+                    assert_eq!((from, to), (chest, chest));
+                    false
+                }
+            ),
+            None
+        );
+        assert_eq!(cargo_test_count(&host, chest), 0);
+        assert_eq!(
+            route(&mut host, level, &input, &outputs[..2], 0, permission),
+            Some(1)
+        );
+        assert_eq!(cargo_test_count(&host, chest), 3);
+        assert!(
+            host.level
+                .block_entity_at(chest)
+                .unwrap()
+                .items
+                .as_ref()
+                .unwrap()
+                .slots[4]
+                .is_none()
+        );
+        // Slot 0 becomes the first free slot after withdrawal on the next routing pass too.
+        assert_eq!(
+            route(&mut host, level, &input, &outputs[..2], 0, permission),
+            Some(1)
+        );
+        assert_eq!(cargo_test_count(&host, chest), 3);
+        assert_eq!(
+            cargo_test_count(&host, outputs[1].as_ref().unwrap().inventory),
+            0
+        );
+    }
+
+    #[test]
+    fn cargo_sends_the_remainder_after_a_partial_delivery_to_the_same_inventory() {
+        let (mut host, item, mut input, mut outputs) = round_robin_fixture();
+        let level = host.level.level();
+        input.kind = InventoryKind::Factory { smeltery: false };
+        let output = outputs[0].as_mut().unwrap();
+        output.inventory = input.inventory;
+        output.kind = input.kind;
+        let machine = input.inventory;
+        let slots = &mut host
+            .level
+            .block_entity(machine)
+            .with_items(4)
+            .items
+            .as_mut()
+            .unwrap()
+            .slots;
+        slots[0] = ItemStack::new(item, 63);
+        slots[2] = ItemStack::new(item, 3);
+        assert_eq!(
+            route(&mut host, level, &input, &outputs[..2], 0, |_, _, _, _| {
+                true
+            }),
+            Some(0)
+        );
+        assert_eq!(cargo_test_count(&host, machine), 64);
+        assert!(
+            host.level
+                .block_entity_at(machine)
+                .unwrap()
+                .items
+                .as_ref()
+                .unwrap()
+                .slots[2]
+                .is_none()
+        );
+        assert_eq!(
+            cargo_test_count(&host, outputs[1].as_ref().unwrap().inventory),
+            2
+        );
     }
 
     #[test]

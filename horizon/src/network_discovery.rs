@@ -154,6 +154,12 @@ impl Discovery {
         true
     }
 
+    pub(super) fn cargo_cursors(&mut self, root: Position) -> Option<&mut BTreeMap<Position, usize>> {
+        self.graphs
+            .get_mut(&root)
+            .map(|graph| &mut graph.cargo_cursors)
+    }
+
     fn update(&mut self, topology: Topology) {
         if self.topology == topology {
             return;
@@ -206,6 +212,8 @@ struct Graph {
     pending: VecDeque<Position>,
     members: BTreeSet<Position>,
     cargo_elapsed: u32,
+    // A rebuilt CargoNet starts again at the first output for each input.
+    cargo_cursors: BTreeMap<Position, usize>,
 }
 
 impl Graph {
@@ -216,6 +224,7 @@ impl Graph {
             pending: VecDeque::from([start]),
             members: BTreeSet::from([start]),
             cargo_elapsed: 0,
+            cargo_cursors: BTreeMap::new(),
         }
     }
 
@@ -347,7 +356,7 @@ mod tests {
     }
 
     #[test]
-    fn a_parked_cargo_manager_keeps_conflicts_and_resumes_its_existing_tick_counter() {
+    fn a_parked_cargo_manager_resumes_its_tick_counter_and_round_robin_cursor() {
         let manager = node("CARGO_MANAGER");
         let terminal = node("CARGO_NODE_INPUT");
         let older = [33, 70, 0];
@@ -360,6 +369,7 @@ mod tests {
             [input, older]
         );
         assert!(!discovery.cargo_due(older, 1));
+        discovery.cargo_cursors(older).unwrap().insert(input, 1);
 
         active.remove(&older);
         active.insert(later, (&manager, 0));
@@ -374,12 +384,14 @@ mod tests {
         assert_eq!(groups[0].0, older);
         assert_eq!(groups[0].2, [input, later, older]);
         assert!(discovery.cargo_due(older, 1));
+        assert_eq!(discovery.cargo_cursors(older).unwrap().get(&input), Some(&1));
 
         assert!(!discovery.cargo_due(older, 1));
         discovery.retire_regulator(older);
         active.remove(&later);
         discovery.discover(&active, 200, |_| true);
         assert!(!discovery.cargo_due(older, 1));
+        assert!(discovery.cargo_cursors(older).unwrap().is_empty());
     }
 
     #[test]

@@ -2,7 +2,7 @@
 
 use std::{
     cell::OnceCell,
-    collections::{BTreeMap, HashMap},
+    collections::BTreeMap,
     fmt::Write,
     sync::{Arc, Mutex},
 };
@@ -528,7 +528,6 @@ struct MachineRecipes {
 pub(crate) struct Networks {
     levels: BTreeMap<String, Arc<Nodes>>,
     menus: BTreeMap<u128, cargo_menu::Session>,
-    round_robin: HashMap<(LevelRef, Position), usize>,
     discoveries: BTreeMap<String, Discovery>,
     gps_signals: BTreeMap<String, BTreeMap<Position, (u128, u32)>>,
     pylon_phase: crate::rainbow::placed::Phase,
@@ -574,7 +573,6 @@ impl Networks {
     pub(crate) fn clear(&mut self) {
         self.levels.clear();
         self.menus.clear();
-        self.round_robin.clear();
         self.discoveries.clear();
         self.gps_signals.clear();
         self.pylon_phase = crate::rainbow::placed::Phase::default();
@@ -584,6 +582,13 @@ impl Networks {
 
     pub(crate) fn unload_level(&mut self, dimension: &str) {
         self.discoveries.remove(dimension);
+    }
+
+    fn cargo_cursors(
+        &mut self,
+        (dimension, root): (&str, Position),
+    ) -> Option<&mut BTreeMap<Position, usize>> {
+        self.discoveries.get_mut(dimension)?.cargo_cursors(root)
     }
 
     pub(crate) fn installed_menu(
@@ -1582,6 +1587,7 @@ pub(crate) fn tick(
                             networks,
                             host,
                             level,
+                            (&dimension, start),
                             &active,
                             &group,
                             profile,
