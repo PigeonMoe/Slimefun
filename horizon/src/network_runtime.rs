@@ -519,6 +519,12 @@ fn accepts_carrier(component: Component, actual: &str) -> bool {
 }
 
 #[derive(Default)]
+struct MachineRecipes {
+    fuels: crate::fuel_generators::TagFuels,
+    furnaces: crate::factory::FurnaceRecipes,
+}
+
+#[derive(Default)]
 pub(crate) struct Networks {
     levels: BTreeMap<String, Arc<Nodes>>,
     menus: BTreeMap<u128, cargo_menu::Session>,
@@ -526,12 +532,15 @@ pub(crate) struct Networks {
     discoveries: BTreeMap<String, Discovery>,
     gps_signals: BTreeMap<String, BTreeMap<Position, (u128, u32)>>,
     pylon_phase: crate::rainbow::placed::Phase,
-    tagged_fuels: Arc<crate::fuel_generators::TagFuels>,
+    machine_recipes: Arc<MachineRecipes>,
 }
 
 impl Networks {
-    pub(crate) fn register_fuels(&mut self, host: &dyn mod_api::Host) {
-        self.tagged_fuels = Arc::new(crate::fuel_generators::TagFuels::register(host));
+    pub(crate) fn register_machine_recipes(&mut self, host: &dyn mod_api::Host) {
+        self.machine_recipes = Arc::new(MachineRecipes {
+            fuels: crate::fuel_generators::TagFuels::register(host),
+            furnaces: crate::factory::FurnaceRecipes::register(host),
+        });
     }
 
     pub(crate) fn gps_network(&self, player: u128) -> Vec<(String, Position, u32)> {
@@ -569,7 +578,7 @@ impl Networks {
         self.discoveries.clear();
         self.gps_signals.clear();
         self.pylon_phase = crate::rainbow::placed::Phase::default();
-        self.tagged_fuels = Arc::default();
+        self.machine_recipes = Arc::default();
         plain_network::clear();
     }
 
@@ -1431,12 +1440,12 @@ pub(crate) fn tick(
         return;
     };
     let dimension = profile.dimension.clone();
-    let (nodes, tagged_fuels) = {
+    let (nodes, machine_recipes) = {
         let mut networks = networks.lock().unwrap();
         let Ok(nodes) = networks.nodes(host, &dimension) else {
             return;
         };
-        (nodes, networks.tagged_fuels.clone())
+        (nodes, networks.machine_recipes.clone())
     };
     let active: BTreeMap<_, _> = nodes
         .iter()
@@ -1531,7 +1540,7 @@ pub(crate) fn tick(
                         &group,
                         rolls,
                         settings.solar_night_in_other_dimensions,
-                        &tagged_fuels,
+                        &machine_recipes.fuels,
                         profile,
                         &mut generators,
                     )
@@ -1706,9 +1715,16 @@ pub(crate) fn tick(
                         )?;
                         return write_data(host, pos, data).map_err(|_| ());
                     }
-                    if let Some(charge) =
-                        crate::factory::tick(host, level, settings, rolls, pos, &node.id, data.charge)
-                    {
+                    if let Some(charge) = crate::factory::tick(
+                        host,
+                        level,
+                        settings,
+                        rolls,
+                        pos,
+                        &node.id,
+                        data.charge,
+                        &machine_recipes.furnaces,
+                    ) {
                         data.charge = charge;
                         write_data(host, pos, data).map_err(|_| ())?;
                     }

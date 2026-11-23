@@ -2035,7 +2035,7 @@ impl Hooks for Slimefun {
             if let HostSide::Server(host) = host
                 && !reload
             {
-                self.networks.lock().unwrap().register_fuels(host);
+                self.networks.lock().unwrap().register_machine_recipes(host);
             }
         }
     }

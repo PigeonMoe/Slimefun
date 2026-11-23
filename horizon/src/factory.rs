@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::{collections::BTreeMap, sync::Mutex};
+use std::{
+    collections::BTreeMap,
+    sync::{Arc, Mutex},
+};
 
 use mod_api::{
     AttachmentCodec, AttachmentType, BlockDropsEvent, BlockEntityRef, ComponentId, Compound,
-    Holder, Host, HostTransaction, ITEMS, Identifier, ItemDrop, ItemPlace, ItemResource, ItemStack,
-    LevelHost, LevelRef, MenuClosedEvent, MenuReplace, MenuSlotPlace, PlayerRef, ResourceHandler,
-    ServerHost, Tag, Text, Transaction,
+    Holder, Host, HostTransaction, ITEMS, Identifier, ItemDrop, ItemKey, ItemPlace, ItemResource,
+    ItemStack, LevelHost, LevelRef, MenuClosedEvent, MenuReplace, MenuSlotPlace, PlayerRef,
+    ResourceHandler, ServerHost, Tag, Text, Transaction,
 };
 
 use crate::recipes::{
@@ -1416,26 +1419,51 @@ impl RecipeRun {
     }
 }
 
-fn furnace_recipe(host: &dyn Host, inputs: &[Option<ItemStack>; 2]) -> Option<RecipeRun> {
-    for recipe in host.recipes_of_type("minecraft:smelting").iter() {
-        let [ingredient] = recipe.ingredients.as_slice() else {
-            continue;
-        };
-        // Paper subscribes to FurnaceRecipe and accepts enumerable MaterialChoice ingredients.
-        let (Ok(keys), Some(output)) = (ingredient.item_keys(host), recipe.results.first()) else {
-            continue;
-        };
-        if let Some((index, input)) = INPUT.into_iter().zip(inputs).find_map(|(index, input)| {
-            let input = input.as_ref()?;
-            (input.components().is_none()
-                && input.damage_component().is_none()
-                && keys.contains(&input.item()))
-            .then_some((index, input))
-        }) {
-            return Some(RecipeRun::single(index, input.clone(), 1, output.clone()));
-        }
+#[derive(Default)]
+pub(crate) struct FurnaceRecipes(Vec<(Arc<[ItemKey]>, ItemStack)>);
+
+impl FurnaceRecipes {
+    pub(crate) fn register(host: &dyn Host) -> Self {
+        Self::resolve(&host.recipes_of_type("minecraft:smelting"), |ingredient| {
+            ingredient.item_keys(host).ok()
+        })
     }
-    None
+
+    fn resolve(
+        recipes: &[mod_api::Recipe],
+        mut keys: impl FnMut(&mod_api::Ingredient) -> Option<Arc<[ItemKey]>>,
+    ) -> Self {
+        Self(
+            recipes
+                .iter()
+                .filter_map(|recipe| {
+                    let [ingredient] = recipe.ingredients.as_slice() else {
+                        return None;
+                    };
+                    // Paper registers enumerable MaterialChoice inputs and the exact result.
+                    Some((keys(ingredient)?, recipe.results.first()?.clone()))
+                })
+                .collect(),
+        )
+    }
+
+    fn find(&self, inputs: &[Option<ItemStack>; 2]) -> Option<RecipeRun> {
+        for (keys, output) in &self.0 {
+            // Paper registers one machine recipe per choice, in choice order.
+            for &key in keys.iter() {
+                for (index, input) in INPUT.into_iter().zip(inputs) {
+                    if let Some(input) = input
+                        && input.item() == key
+                        && input.components().is_none()
+                        && input.damage_component().is_none()
+                    {
+                        return Some(RecipeRun::single(index, input.clone(), 1, output.clone()));
+                    }
+                }
+            }
+        }
+        None
+    }
 }
 
 fn grinder_recipes(settings: Settings) -> impl Iterator<Item = SingleRecipe> {
@@ -1633,6 +1661,7 @@ fn find_recipe(
     machine: ElectricMachine,
     settings: Settings,
     enchantment_viewed: bool,
+    furnace_recipes: &FurnaceRecipes,
     roll: impl FnMut(u32) -> Option<u32>,
 ) -> Option<RecipeRun> {
     let post_setup_recipes = crate::ticker_policy::Tickers::current().enabled();
@@ -1674,7 +1703,7 @@ fn find_recipe(
         return None;
     }
     let run = match machine.family {
-        RecipeFamily::Furnace => furnace_recipe(host, &inputs),
+        RecipeFamily::Furnace => furnace_recipes.find(&inputs),
         RecipeFamily::OreGrinder => single_recipe(
             host,
             &inputs,
@@ -1755,6 +1784,7 @@ pub(crate) fn tick(
     pos: Position,
     id: &str,
     charge: u32,
+    furnace_recipes: &FurnaceRecipes,
 ) -> Option<u32> {
     let furnace = ElectricMachine::for_item(id)?;
     if matches!(furnace.family, RecipeFamily::OilPump) && !Resource::Oil.enabled() {
@@ -1830,9 +1860,15 @@ pub(crate) fn tick(
         })
     } else {
         let viewed = furnace.enchanting().is_some() && VIEWERS.has_viewer(host, storage, furnace);
-        find_recipe(host, &data, furnace, settings, viewed, |bound| {
-            rolls.next(host, level, bound)
-        })
+        find_recipe(
+            host,
+            &data,
+            furnace,
+            settings,
+            viewed,
+            furnace_recipes,
+            |bound| rolls.next(host, level, bound),
+        )
     }?;
     let RecipeRun {
         inputs,
@@ -2256,6 +2292,90 @@ pub(crate) fn restore_paper_inventory(
 mod tests {
     use super::*;
     use mod_api::{prelude::ItemsHost, testing::FakeHost};
+
+    fn find_recipe(
+        host: &dyn Host,
+        data: &Compound,
+        machine: ElectricMachine,
+        settings: Settings,
+        enchantment_viewed: bool,
+        roll: impl FnMut(u32) -> Option<u32>,
+    ) -> Option<RecipeRun> {
+        super::find_recipe(
+            host,
+            data,
+            machine,
+            settings,
+            enchantment_viewed,
+            &FurnaceRecipes::default(),
+            roll,
+        )
+    }
+
+    #[test]
+    fn electric_furnaces_capture_ordered_recipes_and_exact_outputs_at_registration() {
+        let host = recipe_host([
+            "minecraft:amethyst_shard",
+            "minecraft:lapis_lazuli",
+            "minecraft:blue_dye",
+            "minecraft:red_dye",
+        ]);
+        let a = Kind::Vanilla("minecraft:amethyst_shard").stack(&host, 1).unwrap();
+        let b = Kind::Vanilla("minecraft:lapis_lazuli").stack(&host, 1).unwrap();
+        let mut blue = Kind::Vanilla("minecraft:blue_dye").stack(&host, 2).unwrap();
+        let red = Kind::Vanilla("minecraft:red_dye").stack(&host, 1).unwrap();
+        let name = Compound::from([(
+            "minecraft:custom_name".into(),
+            crate::hologram_projector::colored_lore("&9Startup Dye"),
+        )]);
+        blue.apply_components(&name).unwrap();
+        let recipe = |ingredients: &[&str], output: ItemStack| {
+            let mut recipe = mod_api::Recipe::new(
+                "pigeonprobe:smelt",
+                "minecraft:smelting",
+                Arc::new(serde_json::Value::Null),
+            );
+            recipe.ingredients = vec![mod_api::Ingredient::of(
+                ingredients.iter().map(|id| (*id).to_owned()).collect(),
+            )];
+            recipe.results.push(output);
+            recipe
+        };
+        let keys = |ingredient: &mod_api::Ingredient| {
+            if ingredient.custom.is_some() {
+                return None;
+            }
+            ingredient
+                .order
+                .iter()
+                .map(|id| host.item_key(&Identifier::parse(id).ok()?))
+                .collect::<Option<Vec<_>>>()
+                .map(Arc::from)
+        };
+        // These stand in for the publication events before and after a pack edit.
+        let mut data = [
+            recipe(&["minecraft:amethyst_shard"], red.clone()),
+            recipe(&["minecraft:lapis_lazuli", "minecraft:amethyst_shard"], blue.clone()),
+            recipe(&["minecraft:amethyst_shard"], red.clone()),
+        ];
+        data[0].ingredients[0].custom = Some(("pigeonprobe:exact".into(), Compound::new()));
+        let registered = FurnaceRecipes::resolve(&data, keys);
+        data[1].results[0] = red.clone();
+        let restarted = FurnaceRecipes::resolve(&data, keys);
+
+        let both = [Some(a.clone()), Some(b.clone())];
+        let first = registered.find(&both).unwrap();
+        assert_eq!(first.inputs[INPUT[0]], None);
+        assert_eq!(first.inputs[INPUT[1]], Some((b, 1)));
+        assert_eq!(first.outputs, vec![blue.clone()]);
+
+        let only_shard = [None, Some(a.clone())];
+        assert_eq!(registered.find(&only_shard).unwrap().outputs, vec![blue]);
+        assert_eq!(restarted.find(&only_shard).unwrap().outputs, vec![red]);
+        let mut renamed = a;
+        renamed.apply_components(&name).unwrap();
+        assert!(registered.find(&[Some(renamed), None]).is_none());
+    }
 
     #[test]
     fn factory_slots_render_paper_progress_for_enchantment_machines_and_geo() {
@@ -3847,6 +3967,7 @@ mod tests {
                 pos,
                 id,
                 joules,
+                &FurnaceRecipes::default(),
             )
         };
         assert_eq!(run(&mut host, 9), None);
