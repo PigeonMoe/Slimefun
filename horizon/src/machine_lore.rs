@@ -13,6 +13,19 @@ const PULVERIZING: &str = "&fPulverizes Ingots into Dust";
 const SMELTING: &str = "&4Alloys-Only, doesn't smelt Dust into Ingots";
 const WATER_COOLING: &str = "&8⇨ &bMust be surrounded by Water";
 
+pub(crate) fn name(id: &str) -> Option<Tag> {
+    let name = match id {
+        "COAL_GENERATOR_2" => "&cCoal Generator &7(&eII&7)",
+        "LAVA_GENERATOR_2" => "&4Lava Generator &7(&eII&7)",
+        "FREEZER_2" => "&bFreezer &7(&eII&7)",
+        "FREEZER_3" => "&bFreezer &7(&eIII&7)",
+        "CARBON_PRESS_2" => "&cCarbon Press &7- &eII",
+        "CARBON_PRESS_3" => "&cCarbon Press &7- &eIII",
+        _ => return None,
+    };
+    Some(colored_lore(name))
+}
+
 // The published ratings come from SlimefunItems and LoreBuilder. They describe
 // the stock items and are independent of the server's current ticker settings.
 pub(crate) fn lore(id: &str) -> Option<Tag> {

@@ -159,11 +159,10 @@ fn matches_potion(stack: &ItemStack, expected: &str) -> bool {
 
 impl SlimefunItem {
     fn components(&self) -> Compound {
+        let name = crate::machine_lore::name(self.id)
+            .unwrap_or_else(|| text(self.name, self.color, false));
         let mut components = Compound::from([
-            (
-                "minecraft:custom_name".into(),
-                text(self.name, self.color, false),
-            ),
+            ("minecraft:custom_name".into(), name),
             (
                 "minecraft:custom_data".into(),
                 Tag::compound([(

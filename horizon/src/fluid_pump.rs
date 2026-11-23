@@ -19,7 +19,7 @@ item!(
     FLUID_PUMP,
     "blue_terracotta",
     "Fluid Pump",
-    "dark_blue",
+    "blue",
     None,
     None
 );
