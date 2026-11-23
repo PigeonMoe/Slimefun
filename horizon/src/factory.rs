@@ -1350,11 +1350,9 @@ fn place(level: LevelRef, pos: Position, index: usize) -> ItemPlace {
 fn fits(host: &dyn Host, data: &Compound, output: &ItemStack) -> bool {
     let resource = ItemResource::of(output);
     let limit = max_stack(host, &resource);
-    OUTPUT
-        .into_iter()
-        .map(|index| output_space(limit, &resource, stack_in(host, data, index).as_ref()))
-        .sum::<u32>()
-        >= output.count()
+    OUTPUT.into_iter().any(|index| {
+        output_space(limit, &resource, stack_in(host, data, index).as_ref()) >= output.count()
+    })
 }
 
 fn output_space(limit: u32, resource: &ItemResource, stack: Option<&ItemStack>) -> u32 {
@@ -1373,29 +1371,19 @@ fn fits_all(host: &dyn Host, data: &Compound, outputs: &[ItemStack]) -> bool {
     for output in outputs {
         let resource = ItemResource::of(output);
         let limit = max_stack(host, &resource);
-        let mut left = output.count();
-        for slot in &mut slots {
-            let count = match slot.as_ref() {
-                Some(current) if resource.matches(current) => current.count(),
-                None => 0,
-                _ => continue,
-            };
-            let amount = left.min(limit.saturating_sub(count));
-            if amount == 0 {
-                continue;
-            }
-            let mut placed = output.clone();
-            if placed.set_count(count + amount).is_err() {
+        // Paper's preflight reserves each whole result in the first slot that fits it.
+        let Some(slot) = slots
+            .iter_mut()
+            .find(|slot| output_space(limit, &resource, slot.as_ref()) >= output.count())
+        else {
+            return false;
+        };
+        if let Some(current) = slot {
+            if current.set_count(current.count() + output.count()).is_err() {
                 return false;
             }
-            *slot = Some(placed);
-            left -= amount;
-            if left == 0 {
-                break;
-            }
-        }
-        if left != 0 {
-            return false;
+        } else {
+            *slot = Some(output.clone());
         }
     }
     !outputs.is_empty()
@@ -2824,7 +2812,7 @@ mod tests {
     }
 
     #[test]
-    fn furnace_slots_preserve_input_and_check_both_output_stacks() {
+    fn machine_preflight_checks_for_space_for_a_whole_result_in_one_output_slot() {
         let mut host = FakeHost::new();
         let identifiers = [
             "minecraft:raw_iron",
@@ -2844,9 +2832,46 @@ mod tests {
         assert!(write_stack(&host, &mut data, OUTPUT[1], Some(stack(2, 1))));
         assert!(!fits(&host, &data, &result));
         assert!(write_stack(&host, &mut data, OUTPUT[1], Some(stack(1, 63))));
+        assert!(!fits(&host, &data, &result));
+        assert!(write_stack(&host, &mut data, OUTPUT[1], Some(stack(1, 62))));
         assert!(fits(&host, &data, &result));
+        assert!(fits_all(&host, &data, &[result.clone(), stack(1, 1)]));
+        assert!(!fits_all(&host, &data, &[result.clone(), result]));
         assert_eq!(stack_in(&host, &data, INPUT[0]), Some(stack(0, 4)));
         assert!(matches!(data.get(&"19".into()), Some(Tag::Compound(_))));
+    }
+
+    #[test]
+    fn heated_pressure_waits_when_plastic_sheets_only_fit_across_two_output_slots() {
+        use crate::heated_pressure::{BUCKET_OF_OIL, PLASTIC_SHEET};
+
+        let host = recipe_host(["minecraft:player_head", "minecraft:paper"]);
+        let machine = ElectricMachine::for_item("HEATED_PRESSURE_CHAMBER_2").unwrap();
+        let settings = Settings::default();
+        let mut data = Compound::new();
+        let oil = BUCKET_OF_OIL.stack(&host, 1);
+        assert!(write_stack(&host, &mut data, INPUT[0], oil.clone()));
+        for slot in OUTPUT {
+            assert!(write_stack(
+                &host,
+                &mut data,
+                slot,
+                PLASTIC_SHEET.stack(&host, 60)
+            ));
+        }
+        assert!(find_recipe(&host, &data, machine, settings, false, |_| None).is_none());
+        assert_eq!(stack_in(&host, &data, INPUT[0]), oil);
+
+        assert!(write_stack(
+            &host,
+            &mut data,
+            OUTPUT[1],
+            PLASTIC_SHEET.stack(&host, 56)
+        ));
+        let run = find_recipe(&host, &data, machine, settings, false, |_| None).unwrap();
+        assert_eq!(run.quantity(), 1);
+        assert_eq!(run.outputs, vec![PLASTIC_SHEET.stack(&host, 8).unwrap()]);
+        assert_eq!(run.work_override, Some(18));
     }
 
     #[test]
