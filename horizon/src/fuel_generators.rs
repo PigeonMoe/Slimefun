@@ -221,12 +221,11 @@ fn coal_fuel(host: &dyn Host, stack: &ItemStack) -> Option<u32> {
         "minecraft:blaze_rod" => Some(12),
         "minecraft:dried_kelp_block" => Some(20),
         "minecraft:coal" | "minecraft:charcoal" => Some(8),
-        id => tagged_fuel(
+        _ if item_in_tag(host, stack, "minecraft:boats") => Some(5),
+        id => block_tag_fuel(
             host,
-            stack,
             id,
             &[
-                ("minecraft:boats", 5),
                 ("minecraft:logs", 4),
                 ("minecraft:planks", 1),
                 ("minecraft:wooden_slabs", 1),
@@ -284,9 +283,8 @@ fn bio_fuel(host: &dyn Host, stack: &ItemStack) -> Option<u32> {
         "minecraft:dried_kelp_block" | "minecraft:spore_blossom" => Some(20),
         "minecraft:melon" => Some(27),
         "minecraft:honeycomb_block" => Some(40),
-        id => tagged_fuel(
+        id => block_tag_fuel(
             host,
-            stack,
             id,
             &[
                 ("minecraft:small_flowers", 1),
@@ -299,26 +297,20 @@ fn bio_fuel(host: &dyn Host, stack: &ItemStack) -> Option<u32> {
     }
 }
 
-fn tagged_fuel(host: &dyn Host, stack: &ItemStack, id: &str, tags: &[(&str, u32)]) -> Option<u32> {
-    for &(tag, seconds) in tags {
-        let block_tag = matches!(
-            tag,
-            "minecraft:standing_signs" | "minecraft:corals" | "minecraft:coral_blocks"
-        );
-        let member = if block_tag {
-            host.block_key(id)
-                .and_then(|block| host.block_in_tag(block, tag))
-        } else {
-            Identifier::parse(tag)
-                .ok()
-                .and_then(|tag| host.tags().key(&tag))
-                .and_then(|tag| host.tags().is_in_tag(stack.item(), tag))
-        };
-        if member == Some(true) {
-            return Some(seconds);
-        }
-    }
-    None
+fn item_in_tag(host: &dyn Host, stack: &ItemStack, id: &str) -> bool {
+    Identifier::parse(id)
+        .ok()
+        .and_then(|tag| host.tags().key(&tag))
+        .and_then(|tag| host.tags().is_in_tag(stack.item(), tag))
+        == Some(true)
+}
+
+fn block_tag_fuel(host: &dyn Host, id: &str, tags: &[(&str, u32)]) -> Option<u32> {
+    // Bukkit's generator tags are block tags except for ITEMS_BOATS above.
+    let block = host.block_key(id)?;
+    tags.iter().find_map(|&(tag, seconds)| {
+        (host.block_in_tag(block, tag) == Some(true)).then_some(seconds)
+    })
 }
 
 const COAL: Research = Research {
