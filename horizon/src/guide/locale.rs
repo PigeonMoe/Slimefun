@@ -15,6 +15,17 @@ pub(in crate::guide) fn item_name(id: &str) -> Option<&'static str> {
     ZH_CN["items"][id]["name"].as_str()
 }
 
+pub(super) fn recipe_badge(id: &str) -> Option<(&'static str, Vec<&'static str>)> {
+    let recipe = &ZH_CN["recipes"][id];
+    let name = recipe["name"].as_str()?;
+    let lore = recipe["lore"]
+        .as_array()?
+        .iter()
+        .map(Value::as_str)
+        .collect::<Option<_>>()?;
+    Some((name, lore))
+}
+
 pub(crate) fn research_name(id: &str) -> &'static str {
     ZH_CN["researches"][id].as_str().unwrap_or("未知研究")
 }

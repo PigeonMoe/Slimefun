@@ -30,6 +30,14 @@ pub(crate) fn name(id: &str) -> Option<Tag> {
 // the stock items and are independent of the server's current ticker settings.
 pub(crate) fn lore(id: &str) -> Option<Tag> {
     match id {
+        "OUTPUT_CHEST" => {
+            return Some(lines(&[
+                "",
+                "&c&oA basic machine will try to put",
+                "&c&oitems in this chest if it's placed",
+                "&c&oadjacent to the dispenser.",
+            ]));
+        }
         "CHARGING_BENCH" => {
             return Some(lines(&[
                 "",

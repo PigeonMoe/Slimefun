@@ -3051,6 +3051,20 @@
       "name": "&7内含 &9小麦"
     },
     "OUTPUT_CHEST": {
+      "lore": [
+        {
+          "source": "&c&oA basic machine will try to put",
+          "target": "&c&o如果此箱子紧邻发射器，"
+        },
+        {
+          "source": "&c&oitems in this chest if it's placed",
+          "target": "&c&o基础机器会尝试将产物"
+        },
+        {
+          "source": "&c&oadjacent to the dispenser.",
+          "target": "&c&o放入此箱子。"
+        }
+      ],
       "name": "&4物品输出箱"
     },
     "PARACHUTE": {
@@ -4364,6 +4378,15 @@
     },
     "ZINC_INGOT": {
       "name": "&b锌锭"
+    }
+  },
+  "recipes": {
+    "barter_drop": {
+      "lore": [
+        "&7使用金锭与猪灵交易",
+        "&7可以获得此物品"
+      ],
+      "name": "猪灵交易掉落"
     }
   },
   "researches": {

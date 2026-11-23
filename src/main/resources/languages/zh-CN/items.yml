@@ -1327,6 +1327,13 @@ CRUCIBLE:
     target: '&a&o用来把物品变为液体'
 OUTPUT_CHEST:
   name: '&4物品输出箱'
+  lore:
+  - source: '&c&oA basic machine will try to put'
+    target: '&c&o如果此箱子紧邻发射器，'
+  - source: "&c&oitems in this chest if it's placed"
+    target: '&c&o基础机器会尝试将产物'
+  - source: '&c&oadjacent to the dispenser.'
+    target: '&c&o放入此箱子。'
 IGNITION_CHAMBER:
   name: '&4自动点火机'
 HOLOGRAM_PROJECTOR:

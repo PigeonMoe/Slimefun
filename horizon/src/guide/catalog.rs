@@ -17,6 +17,7 @@ pub(super) struct RecipeType {
     pub icon: Kind,
     pub name: &'static str,
     pub lore: &'static [&'static str],
+    pub locale_key: Option<&'static str>,
 }
 
 impl RecipeType {
@@ -29,6 +30,7 @@ impl RecipeType {
             icon,
             name,
             lore: &[],
+            locale_key: None,
         }
     }
 }
@@ -46,32 +48,25 @@ const WASHER: RecipeType = RecipeType {
     ..RecipeType::plain("minecraft:cauldron", "洗矿机")
 };
 const GOLD_PAN: RecipeType = RecipeType {
-    icon: items::GOLD_PAN,
-    name: "淘金盘",
     lore: &["", "&a&o对砂砾使用淘金盘即可获得"],
+    ..RecipeType::device(items::GOLD_PAN, "淘金盘")
 };
 const MOB_DROP: RecipeType = RecipeType {
     lore: &["", "&r击杀指定生物即可获得"],
     ..RecipeType::plain("minecraft:iron_sword", "生物掉落")
 };
 const BARTER_DROP: RecipeType = RecipeType {
+    locale_key: Some("barter_drop"),
     lore: &[
-        "",
-        "&a与猪灵交易",
-        "&a有概率获得此物品",
+        "&7Barter with Piglins using",
+        "&7Gold Ingots to obtain this Item",
     ],
-    ..RecipeType::plain("minecraft:gold_ingot", "Barter Drop")
+    ..RecipeType::plain("minecraft:gold_ingot", "Piglin Bartering Drop")
 };
-const FOOD_FABRICATOR: RecipeType = RecipeType {
-    icon: food_machines::FOOD_FABRICATOR,
-    name: "食物加工机",
-    lore: &[],
-};
-const FOOD_COMPOSTER: RecipeType = RecipeType {
-    icon: food_machines::FOOD_COMPOSTER,
-    name: "食物堆肥机",
-    lore: &[],
-};
+const FOOD_FABRICATOR: RecipeType =
+    RecipeType::device(food_machines::FOOD_FABRICATOR, "食物加工机");
+const FOOD_COMPOSTER: RecipeType =
+    RecipeType::device(food_machines::FOOD_COMPOSTER, "食物堆肥机");
 
 const HEATED_PRESSURE: RecipeType =
     RecipeType::device(heated_pressure::HEATED_PRESSURE_CHAMBER, "加热压力舱");

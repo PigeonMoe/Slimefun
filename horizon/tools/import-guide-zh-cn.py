@@ -27,7 +27,14 @@ def main():
         key: value.replace("Slimefun", "远古工艺")
         for key, value in read("researches")["slimefun"].items()
     }
-    data = {"items": items, "researches": researches}
+    barter = read("recipes")["slimefun"]["barter_drop"]
+    recipes = {
+        "barter_drop": {
+            "name": barter["name"],
+            "lore": [f"&7{line}" for line in barter["lore"]],
+        },
+    }
+    data = {"items": items, "recipes": recipes, "researches": researches}
     OUTPUT.write_text(
         json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",

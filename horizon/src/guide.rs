@@ -1155,15 +1155,19 @@ fn group_icon(host: &dyn Host, group: &Group, name: &str) -> Option<ItemStack> {
 fn method_icon(host: &dyn Host, entry: &Entry) -> Option<ItemStack> {
     let method = entry.recipe_type;
     if matches!(method.icon, Kind::Vanilla(_)) {
+        let translated = method.locale_key.and_then(locale::recipe_badge);
+        let name = translated.as_ref().map_or(method.name, |(name, _)| *name);
         let lore = if entry.label.is_some() {
             &["", "&a&o请在世界中搭建"][..]
         } else {
-            method.lore
+            translated
+                .as_ref()
+                .map_or(method.lore, |(_, lore)| lore.as_slice())
         };
         return icon(
             host,
             method.icon.material(),
-            &format!("&b{}", method.name),
+            &format!("&b{name}"),
             lore,
         );
     }
@@ -1258,6 +1262,82 @@ mod tests {
     use super::*;
     use mod_api::prelude::ItemsHost;
     use mod_api::{Identifier, prelude::PlayersHost, testing::FakeHost};
+
+    #[test]
+    fn output_chest_keeps_paper_lore_style_on_items_and_in_the_guide() {
+        mod_api::__private::initialize().unwrap();
+        let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
+        let mut host = FakeHost::new();
+        host.registries
+            .resolve_items([Identifier::parse("minecraft:chest").unwrap()])
+            .unwrap();
+
+        let lore = |lines: &[&str]| Tag::List(lines.iter().map(|line| colored_lore(line)).collect());
+        assert_eq!(
+            crate::machine_lore::lore("OUTPUT_CHEST"),
+            Some(lore(&[
+                "",
+                "&c&oA basic machine will try to put",
+                "&c&oitems in this chest if it's placed",
+                "&c&oadjacent to the dispenser.",
+            ])),
+        );
+        let expected = lore(&[
+            "",
+            "&c&o如果此箱子紧邻发射器，",
+            "&c&o基础机器会尝试将产物",
+            "&c&o放入此箱子。",
+        ]);
+        let entry = lookup("OUTPUT_CHEST").unwrap();
+        let page = render(&host, None, &Page::Recipe(entry), 1, false, available(), false);
+        let item = crate::items::OUTPUT_CHEST.stack(&host, 1).unwrap();
+        for stack in [&item, page.slots[RECIPE_OUTPUT_SLOT].as_ref().unwrap()] {
+            let components = stack.components().unwrap().as_nbt();
+            assert_eq!(crate::items::item_id(stack).as_deref(), Some("OUTPUT_CHEST"));
+            assert_eq!(
+                components.get(&"minecraft:custom_name".into()),
+                Some(&colored_lore("&4物品输出箱")),
+            );
+            assert_eq!(components.get(&"minecraft:lore".into()), Some(&expected));
+        }
+    }
+
+    #[test]
+    fn strange_nether_goo_recipe_badge_keeps_papers_chinese_text_and_english_fallback() {
+        mod_api::__private::initialize().unwrap();
+        let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
+        let mut host = FakeHost::new();
+        host.registries
+            .resolve_items([Identifier::parse("minecraft:gold_ingot").unwrap()])
+            .unwrap();
+        let entry = lookup("STRANGE_NETHER_GOO").unwrap();
+        let page = render(&host, None, &Page::Recipe(entry), 1, false, available(), false);
+        let shown = page.slots[RECIPE_METHOD_SLOT].as_ref().unwrap();
+        let mut fallback_entry = *entry;
+        fallback_entry.recipe_type.locale_key = Some("missing_translation");
+        let fallback = method_icon(&host, &fallback_entry).unwrap();
+        for (badge, name, lines) in [
+            (
+                shown,
+                "&b猪灵交易掉落",
+                ["&7使用金锭与猪灵交易", "&7可以获得此物品"],
+            ),
+            (
+                &fallback,
+                "&bPiglin Bartering Drop",
+                ["&7Barter with Piglins using", "&7Gold Ingots to obtain this Item"],
+            ),
+        ] {
+            assert_eq!(badge.item().id(&host), "minecraft:gold_ingot");
+            let components = badge.components().unwrap().as_nbt();
+            assert_eq!(
+                components.get(&"minecraft:custom_name".into()),
+                Some(&colored_lore(name)),
+            );
+            let expected = Tag::List(lines.iter().map(|line| colored_lore(line)).collect());
+            assert_eq!(components.get(&"minecraft:lore".into()), Some(&expected));
+        }
+    }
 
     #[test]
     fn plain_command_names_keep_the_translation_of_each_formatted_run() {
