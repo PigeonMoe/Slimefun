@@ -320,9 +320,8 @@ fn paper_geo_name(name: &str) -> bool {
         })
 }
 
-fn paper_geo_marker(data: &Compound, [x, y, z]: Position) -> bool {
-    // Paper's entity PDC is BukkitValues. Dough packs the signed X/Z in
-    // 26 bits each and the signed Y in the remaining 12 bits.
+pub(crate) fn paper_hologram_id(values: &Compound, [x, y, z]: Position) -> bool {
+    // Dough packs the signed X/Z in 26 bits each and the signed Y in 12 bits.
     const XZ: i32 = 1 << 25;
     if !(-XZ..XZ).contains(&x) || !(-XZ..XZ).contains(&z) || !(-2048..2048).contains(&y) {
         return false;
@@ -330,11 +329,15 @@ fn paper_geo_marker(data: &Compound, [x, y, z]: Position) -> bool {
     let packed = ((i64::from(x) & 0x3ff_ffff) << 38)
         | ((i64::from(z) & 0x3ff_ffff) << 12)
         | (i64::from(y) & 0xfff);
+    values.get(&"slimefun:hologram_id".into()) == Some(&Tag::Long(packed))
+}
+
+fn paper_geo_marker(data: &Compound, pos: Position) -> bool {
     let Some(Tag::Compound(values)) = data.get(&"BukkitValues".into()) else {
         return false;
     };
     values.len() == 1
-        && values.get(&"slimefun:hologram_id".into()) == Some(&Tag::Long(packed))
+        && paper_hologram_id(values, pos)
         && [
             "Invisible",
             "Invulnerable",

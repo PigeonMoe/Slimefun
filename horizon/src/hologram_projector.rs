@@ -9,9 +9,10 @@ use std::{
 };
 
 use mod_api::{
-    AttachmentCodec, AttachmentType, BlockChangedEvent, BlockDropsEvent, Compound, EntityRef,
-    Holder, Host, ItemPart, ItemStack, LevelHost, LevelRef, MenuClickedEvent, MenuClosedEvent,
-    MenuReplace, OnBlockPlacedByEvent, PlayerRef, Registrar, RemovalReason, ServerHost, Tag, Text,
+    AttachmentCodec, AttachmentType, BlockChangedEvent, BlockDropsEvent, Compound,
+    EntityJoinLevelEvent, EntityRef, Holder, Host, ItemPart, ItemStack, LevelHost, LevelRef,
+    MenuClickedEvent, MenuClosedEvent, MenuReplace, OnBlockPlacedByEvent, PlayerRef, Registrar,
+    RemovalReason, ServerHost, Tag, Text,
 };
 
 use crate::{
@@ -24,6 +25,7 @@ type Pos = [i32; 3];
 pub(crate) const CARRIER: &str = "minecraft:quartz_slab";
 const DEFAULT_LABEL: &str = "Edit me via the Projector";
 const DEFAULT_OFFSET: i64 = 50;
+const PROJECTOR_TAG: &str = "slimefun.projector.";
 static NEXT_GENERATION: AtomicU64 = AtomicU64::new(1);
 static STATES: AttachmentType<Compound> = AttachmentType {
     namespace: "slimefun",
@@ -113,8 +115,62 @@ fn key([x, y, z]: Pos) -> String {
     format!("{x},{y},{z}")
 }
 fn tag([x, y, z]: Pos) -> String {
-    format!("slimefun.projector.{x}.{y}.{z}")
+    format!("{PROJECTOR_TAG}{x}.{y}.{z}")
 }
+
+fn tagged_anchor(tags: &[String]) -> Option<Pos> {
+    let mut owned = tags.iter().filter(|tag| tag.starts_with(PROJECTOR_TAG));
+    let value = owned.next()?;
+    if owned.next().is_some() {
+        return None;
+    }
+    let (x, yz) = value.strip_prefix(PROJECTOR_TAG)?.split_once('.')?;
+    let (y, z) = yz.split_once('.')?;
+    let pos = [x.parse().ok()?, y.parse().ok()?, z.parse().ok()?];
+    (tag(pos) == *value).then_some(pos)
+}
+
+fn projection_stand(host: &dyn Host, entity: EntityRef) -> bool {
+    entity
+        .kind(host)
+        .is_some_and(|kind| kind.id(host) == "minecraft:armor_stand")
+        && entity.is_invisible(host) == Some(true)
+        && entity.is_silent(host) == Some(true)
+        && entity.no_gravity(host) == Some(true)
+}
+
+fn near_projection(here: [f64; 3], desired: [f64; 3]) -> bool {
+    here.into_iter()
+        .zip(desired)
+        .map(|(a, b)| (a - b).powi(2))
+        .sum::<f64>()
+        < 0.4
+}
+
+fn protect_projection(host: &mut dyn ServerHost, entity: EntityRef) {
+    if entity.permanently_invulnerable(host) == Some(false) {
+        let _ = entity.set_invulnerable(host, true);
+    }
+}
+
+pub(crate) fn protect_loaded_projection(
+    host: &mut dyn ServerHost,
+    event: &EntityJoinLevelEvent<'_>,
+) {
+    if !event.loaded_from_disk || event.kind != "minecraft:armor_stand" {
+        return;
+    }
+    if let Some(entity) = host.entity(event.entity)
+        && let Some(pos) = entity.tags(host).and_then(|tags| tagged_anchor(&tags))
+        && projection_stand(host, entity)
+        && let Some(level) = entity.level(host)
+        && let Some(record) = state(host, level, pos)
+        && near_projection(event.pos, record.location(pos))
+    {
+        protect_projection(host, entity);
+    }
+}
+
 fn chunk([x, _, z]: Pos) -> [i32; 2] {
     [x.div_euclid(16), z.div_euclid(16)]
 }
@@ -264,43 +320,55 @@ pub(crate) fn tick(host: &mut dyn ServerHost, level: LevelRef) {
 }
 
 pub(crate) fn remove_projection(host: &mut dyn ServerHost, level: LevelRef, pos: Pos) {
-    if let Some(entity) = projection(host, level, &tag(pos)) {
+    if let Some(entity) = projection(host, level, pos) {
         entity.remove(host, RemovalReason::Discarded);
     }
 }
 
-fn projection(host: &dyn Host, level: LevelRef, key: &str) -> Option<EntityRef> {
+fn projection(host: &dyn Host, level: LevelRef, pos: Pos) -> Option<EntityRef> {
     level.all_entities(host)?.into_iter().find(|&entity| {
         entity
             .tags(host)
-            .is_some_and(|tags| tags.iter().any(|tag| tag == key))
+            .and_then(|tags| tagged_anchor(&tags))
+            == Some(pos)
+            && projection_stand(host, entity)
     })
 }
 
+fn projection_properties(pos: Pos) -> Compound {
+    let mut properties = Compound::from([(
+        "Tags".into(),
+        Tag::List(vec![Tag::String(tag(pos).as_str().into())]),
+    )]);
+    for key in [
+        "Invisible",
+        "Invulnerable",
+        "Silent",
+        "Marker",
+        "NoGravity",
+        "NoBasePlate",
+        "PersistenceRequired",
+    ] {
+        properties.insert(key.into(), Tag::Byte(1));
+    }
+    properties
+}
+
 fn sync_projection(host: &mut dyn ServerHost, level: LevelRef, pos: Pos, state: &Projector) {
-    let key = tag(pos);
     let desired = state.location(pos);
     let name = colored_label(&state.label);
-    let entity = projection(host, level, &key).or_else(|| {
+    let entity = projection(host, level, pos).or_else(|| {
         let dimension = level.dimension().id(host)?;
-        let mut properties = Compound::from([(
-            "Tags".into(),
-            Tag::List(vec![Tag::String(key.as_str().into())]),
-        )]);
-        for key in [
-            "Invisible",
-            "Silent",
-            "Marker",
-            "NoGravity",
-            "NoBasePlate",
-            "PersistenceRequired",
-        ] {
-            properties.insert(key.into(), Tag::Byte(1));
-        }
-        host.summon(&dimension, "minecraft:armor_stand", desired, properties)
-            .and_then(|uuid| host.entity(uuid))
+        host.summon(
+            &dimension,
+            "minecraft:armor_stand",
+            desired,
+            projection_properties(pos),
+        )
+        .and_then(|uuid| host.entity(uuid))
     });
     if let Some(entity) = entity {
+        protect_projection(host, entity);
         if entity.position(host) != Some(desired) {
             let _ = entity.teleport_to(host, desired, None);
         }
@@ -677,20 +745,15 @@ pub(crate) fn restore_paper(
         .into_iter()
         .flatten()
         .find(|&entity| {
-            entity
-                .kind(host)
-                .is_some_and(|kind| kind.id(host) == "minecraft:armor_stand")
-                && entity.is_invisible(host) == Some(true)
-                && entity.is_silent(host) == Some(true)
-                && entity.no_gravity(host) == Some(true)
+            projection_stand(host, entity)
                 && entity.custom_name_visible(host) == Some(true)
                 && entity.name(host).as_deref() == Some(plain.as_str())
-                && entity.position(host).is_some_and(|here| {
-                    here.into_iter()
-                        .zip(desired)
-                        .map(|(a, b)| (a - b).powi(2))
-                        .sum::<f64>()
-                        < 0.4
+                && entity
+                    .position(host)
+                    .is_some_and(|here| near_projection(here, desired))
+                && entity.nbt(host).is_some_and(|data| {
+                    matches!(data.get(&"BukkitValues".into()), Some(Tag::Compound(values))
+                        if network_runtime::paper_hologram_id(values, pos))
                 })
         })
     {
@@ -728,5 +791,21 @@ mod tests {
         assert_eq!(display_offset(record.offset), "1.37");
         assert_eq!(display_offset(DEFAULT_OFFSET), "1.5");
         assert_eq!(display_offset(0), "1");
+    }
+
+    #[test]
+    fn spawned_projection_is_invulnerable_and_uses_one_canonical_anchor() {
+        let pos = [-1, 64, 5];
+        let properties = projection_properties(pos);
+        assert_eq!(properties.get(&"Invulnerable".into()), Some(&Tag::Byte(1)));
+        assert_eq!(
+            properties.get(&"Tags".into()),
+            Some(&Tag::List(vec![Tag::String("slimefun.projector.-1.64.5".into())]))
+        );
+        assert_eq!(tagged_anchor(&[tag(pos), "paper".into()]), Some(pos));
+        assert_eq!(tagged_anchor(&[tag(pos), tag([1, 64, 5])]), None);
+        assert_eq!(tagged_anchor(&["slimefun.projector.-01.64.5".into()]), None);
+        assert_eq!(tagged_anchor(&["slimefun.projector.-1.64.5.copy".into()]), None);
+        assert_eq!(tagged_anchor(&["vanilla_marker".into()]), None);
     }
 }

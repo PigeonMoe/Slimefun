@@ -666,6 +666,7 @@ impl Hooks for Slimefun {
         if grappling_hook::expired_saved_entity(host, event) {
             Flow::Cancel
         } else {
+            hologram_projector::protect_loaded_projection(host, event);
             Flow::Continue
         }
     }
