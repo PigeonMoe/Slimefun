@@ -2,7 +2,7 @@
 
 use mod_api::{
     AttachmentCodec, AttachmentError, AttachmentType, BlockDropsEvent, BlockEntityRef, Compound,
-    Holder, Host, HostSide, InteractionResult, ItemPart, ItemStack, LevelHost,
+    Holder, Host, HostSide, InteractionResult, ItemPart, ItemStack, LevelHost, LevelRef,
     OnBlockPlacedByEvent, ServerHost, Tag, Text, UseOnEvent,
 };
 
@@ -236,6 +236,98 @@ fn saved_product(data: &Compound) -> Option<Kind> {
         return None;
     };
     product(&id.to_string().ok()?).map(|(kind, _)| kind)
+}
+
+pub(crate) fn is_placed_product(id: &str) -> bool {
+    product(id).is_some()
+}
+
+fn paper_marker_needed(
+    id: &str,
+    skull: &Compound,
+    native: Option<&Compound>,
+) -> Result<bool, &'static str> {
+    let paper = match skull.get(&"PublicBukkitValues".into()) {
+        Some(Tag::Compound(data)) => data.get(&"slimefun:slimefun_block".into()),
+        None => None,
+        Some(_) => return Err("The Paper skull's persistent block data is malformed."),
+    };
+    if let Some(value) = paper {
+        let Tag::String(value) = value else {
+            return Err("The Paper skull's Slimefun block ID is malformed.");
+        };
+        if value.to_string().ok().as_deref() != Some(id) {
+            return Err("The Paper skull's Slimefun block ID does not match the archived record.");
+        }
+    }
+    if let Some(native) = native {
+        if saved_product(native).is_some_and(|kind| kind.id() == id) {
+            return Ok(false);
+        }
+        return Err("The skull already has a different saved Slimefun product identity.");
+    }
+    if paper.is_none() {
+        return Err("The existing skull is missing its Paper Slimefun block ID.");
+    }
+    Ok(true)
+}
+
+fn validate_paper_product_archive(row: &toml::Table) -> Result<(), &'static str> {
+    if row.contains_key("paper_inventory")
+        || row.contains_key("paper_items")
+        || !matches!(
+            row.get("inventory_slots"),
+            None | Some(toml::Value::Integer(0))
+        )
+    {
+        return Err(
+            "Organic Food and Fertilizer have no menu. The Paper inventory remains archived.",
+        );
+    }
+    Ok(())
+}
+
+pub(crate) fn restore_paper(
+    host: &mut dyn ServerHost,
+    level: LevelRef,
+    pos: [i32; 3],
+    id: &str,
+    row: &toml::Table,
+) -> Result<String, String> {
+    let (kind, _) = product(id).ok_or("Unknown Organic Food or Fertilizer variant.")?;
+    validate_paper_product_archive(row)?;
+    if !level.in_place(host) || !level.is_loaded(host, pos) {
+        return Err("Load the Paper organic product skull in the active dimension first.".into());
+    }
+    if !level.block(host, pos).is_some_and(|block| {
+        matches!(
+            block.id(host).as_str(),
+            "minecraft:player_head" | "minecraft:player_wall_head"
+        )
+    }) {
+        return Err("The archived organic product needs its existing player skull.".into());
+    }
+    let entity = host
+        .block_entity(level, pos)
+        .ok_or("The existing skull data is unavailable.")?;
+    let data = entity
+        .data(host)
+        .ok_or("The existing skull data could not be read.")?;
+    let native =
+        host.block_entity_saved_attachment(entity, PLACED_PRODUCE.namespace, PLACED_PRODUCE.name);
+    let needs_marker = paper_marker_needed(kind.id(), &data, native.as_ref())?;
+    if crate::network_runtime::has_block_marker(host, level, pos) {
+        return Err("The skull already carries another Slimefun block identity.".into());
+    }
+    if !needs_marker {
+        return Ok(format!("{id} was already restored."));
+    }
+    PLACED_PRODUCE
+        .set(host, Holder::BlockEntity(pos), kind.id().to_owned())
+        .map_err(|error| format!("Could not save the Paper organic product identity: {error:?}"))?;
+    Ok(format!(
+        "Restored {id} without replacing the existing skull."
+    ))
 }
 
 pub(crate) struct Placement;
@@ -614,5 +706,79 @@ mod tests {
         let data = (codec.encode)(&"FERTILIZER_CARROT".into()).unwrap();
         assert_eq!((codec.decode)(&data), Ok("FERTILIZER_CARROT".into()));
         assert!((codec.decode)(&(codec.encode)(&"CAN".into()).unwrap()).is_err());
+    }
+
+    #[test]
+    fn paper_product_restore_requires_the_exact_skull_block_id() {
+        fn skull(marker: Tag) -> Compound {
+            Compound::from([
+                (
+                    "PublicBukkitValues".into(),
+                    Tag::compound([("slimefun:slimefun_block", marker)]),
+                ),
+                (
+                    "profile".into(),
+                    Tag::compound([("name", Tag::String("shared_skin".into()))]),
+                ),
+            ])
+        }
+
+        let codec = PLACED_PRODUCE.codec.as_ref().unwrap();
+        let unmarked = Compound::from([(
+            "PublicBukkitValues".into(),
+            Tag::compound([(
+                "slimefun:slimefun_item",
+                Tag::String(WHEAT.food.id().into()),
+            )]),
+        )]);
+        for kind in PRODUCE
+            .iter()
+            .flat_map(|produce| [produce.food, produce.fertilizer])
+        {
+            let id = kind.id();
+            let data = skull(Tag::String(id.into()));
+            let native = (codec.encode)(&id.to_owned()).unwrap();
+            assert_eq!(paper_marker_needed(id, &data, None), Ok(true));
+            assert_eq!(paper_marker_needed(id, &data, Some(&native)), Ok(false));
+            assert_eq!(paper_marker_needed(id, &unmarked, Some(&native)), Ok(false));
+            assert!(paper_marker_needed(id, &unmarked, None).is_err());
+            let other = if kind == WHEAT.food {
+                WHEAT.fertilizer
+            } else {
+                WHEAT.food
+            };
+            let wrong = skull(Tag::String(other.id().into()));
+            assert!(paper_marker_needed(id, &wrong, Some(&native)).is_err());
+            let wrong_native = (codec.encode)(&other.id().to_owned()).unwrap();
+            assert!(paper_marker_needed(id, &data, Some(&wrong_native)).is_err());
+            assert!(paper_marker_needed(id, &data, Some(&Compound::new())).is_err());
+            assert!(paper_marker_needed(id, &skull(Tag::Int(1)), None).is_err());
+        }
+        assert!(!is_placed_product(CAN.id()));
+        assert!(!is_placed_product(CHEESE.id()));
+        assert!(!is_placed_product("ORGANIC_FOOD_UNKNOWN"));
+    }
+
+    #[test]
+    fn paper_product_restore_refuses_unexpected_menu_data() {
+        for fields in [
+            "paper_inventory = 'world;4;64;6.sfi'\n",
+            "paper_items = [{ slot = 0, id = 'minecraft:diamond', count = 1 }]\n",
+            "paper_items = []\n",
+            "inventory_slots = 1\n",
+            "inventory_slots = -1\n",
+            "inventory_slots = '0'\n",
+        ] {
+            let row = format!("{fields}[metadata]\nid = 'ORGANIC_FOOD_WHEAT'")
+                .parse()
+                .unwrap();
+            assert!(validate_paper_product_archive(&row).is_err(), "{fields}");
+        }
+        for fields in ["", "inventory_slots = 0\n"] {
+            let row = format!("{fields}[metadata]\nid = 'FERTILIZER_WHEAT'")
+                .parse()
+                .unwrap();
+            assert_eq!(validate_paper_product_archive(&row), Ok(()));
+        }
     }
 }

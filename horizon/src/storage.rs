@@ -9,7 +9,7 @@ use mod_api::{
 use sha2::{Digest, Sha256};
 
 use crate::{
-    ancient_altar, block_placer,
+    ancient_altar, block_placer, food_machines,
     geo_deposits::{self, Resource},
     network_runtime::Networks,
     networks::Component,
@@ -414,6 +414,10 @@ fn at(
             return crate::hologram_projector::restore_paper(host, level, pos, row)
                 .map(|restored| vec![restored]);
         }
+        if food_machines::is_placed_product(id) {
+            return food_machines::restore_paper(host, level, pos, id, row)
+                .map(|restored| vec![restored]);
+        }
         if action == "restore-network" && crate::rainbow::block(id).is_some() {
             return crate::rainbow::placed::restore_paper(host, level, pos, id)
                 .map(|restored| vec![restored]);
@@ -731,6 +735,7 @@ fn restore_chunk(
                 || id == crate::spawner_repair::REINFORCED_SPAWNER.id()
                 || id == crate::network_recipes::HOLOGRAM_PROJECTOR.id()
                 || Component::for_item(id).is_some()
+                || food_machines::is_placed_product(id)
                 || crate::rainbow::block(id).is_some()
                 || ancient_altar::paper_device(id).is_some())
             .then_some((pos, row, id))
@@ -767,6 +772,8 @@ fn restore_chunk(
             block_placer::restore_paper(host, level, pos, row)
         } else if id == crate::network_recipes::HOLOGRAM_PROJECTOR.id() {
             crate::hologram_projector::restore_paper(host, level, pos, row)
+        } else if food_machines::is_placed_product(id) {
+            food_machines::restore_paper(host, level, pos, id, row)
         } else if unsupported_menu {
             Err("This block has archived items without a supported menu.".into())
         } else if id == crate::spawner_repair::REINFORCED_SPAWNER.id() {
