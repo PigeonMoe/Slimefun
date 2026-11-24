@@ -478,7 +478,7 @@ fn has_restorable_menu(component: Option<Component>) -> bool {
                 | Component::Android
                 | Component::ReactorPort
                 | Component::CargoInput
-                | Component::CargoOutput { advanced: true }
+                | Component::CargoOutput { .. }
                 | Component::TrashCan
         )
     )
@@ -888,6 +888,7 @@ mod tests {
             "ELECTRIC_FURNACE",
             "CARGO_NODE_INPUT",
             "CARGO_NODE_OUTPUT_ADVANCED",
+            "CARGO_NODE_OUTPUT",
         ] {
             assert!(
                 validate_block_inventory_preset(&archived(id), id).is_ok(),
@@ -905,11 +906,7 @@ mod tests {
         row.remove("inventory_preset");
         row.remove("metadata");
         assert!(validate_block_inventory_preset(&row, "ELECTRIC_FURNACE").is_err());
-        for id in [
-            "EXTENSION_MENU",
-            "CARGO_NODE_OUTPUT",
-            "ENHANCED_AUTO_CRAFTER",
-        ] {
+        for id in ["EXTENSION_MENU", "CARGO_MANAGER", "ENHANCED_AUTO_CRAFTER"] {
             assert!(
                 validate_block_inventory_preset(&archived(id), id).is_err(),
                 "{id}"
@@ -978,6 +975,7 @@ mod tests {
             "CROP_GROWTH_ACCELERATOR_2",
             "CARGO_NODE_INPUT",
             "CARGO_NODE_OUTPUT_ADVANCED",
+            "CARGO_NODE_OUTPUT",
             "TRASH_CAN_BLOCK",
         ] {
             assert!(
@@ -985,7 +983,7 @@ mod tests {
                 "{machine}"
             );
         }
-        for role in ["OUTPUT_CHEST", "ENERGY_REGULATOR", "CARGO_NODE_OUTPUT"] {
+        for role in ["OUTPUT_CHEST", "ENERGY_REGULATOR", "CARGO_MANAGER"] {
             assert!(!has_restorable_menu(Component::for_item(role)), "{role}");
         }
     }

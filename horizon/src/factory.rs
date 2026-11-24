@@ -2312,9 +2312,25 @@ pub(crate) fn prepare_paper_inventory(
             }
         }
     }
+    let restored = prepare_paper_slots(host, machine, items)?;
+    check_import(
+        &data_at(host, storage).ok_or("Could not read the electric machine inventory.")?,
+        &restored,
+    )?;
+    Ok(restored)
+}
+
+fn prepare_paper_slots(
+    host: &dyn Host,
+    machine: ElectricMachine,
+    items: BTreeMap<u32, ItemStack>,
+) -> Result<Compound, String> {
     let mut restored = Compound::new();
     for (paper_slot, stack) in items {
-        if machine.reactor_menu() && reactors::paper_control(host, machine, paper_slot, &stack) {
+        if (machine.reactor_menu() && reactors::paper_control(host, machine, paper_slot, &stack))
+            || (matches!(machine.family, RecipeFamily::Assembler(_))
+                && assemblers::paper_control(host, paper_slot, &stack))
+        {
             continue;
         }
         let Some(index) = machine
@@ -2332,10 +2348,6 @@ pub(crate) fn prepare_paper_inventory(
             return Err(format!("Cannot restore the stack in slot {paper_slot}."));
         }
     }
-    check_import(
-        &data_at(host, storage).ok_or("Could not read the electric machine inventory.")?,
-        &restored,
-    )?;
     Ok(restored)
 }
 
@@ -2945,6 +2957,87 @@ mod tests {
             .unwrap();
         assert_eq!(produced, 10);
         assert_eq!(remaining(&data_at(&mut host, storage).unwrap()), Some(1));
+    }
+
+    #[test]
+    fn paper_assembler_buttons_do_not_become_inventory_or_change_the_import_identity() {
+        use crate::hologram_projector::colored_lore;
+
+        let host = recipe_host([
+            "minecraft:gunpowder",
+            "minecraft:redstone",
+            "minecraft:piston",
+            "minecraft:carved_pumpkin",
+            "minecraft:iron_block",
+            "minecraft:wither_skeleton_skull",
+            "minecraft:soul_sand",
+        ]);
+        let button = |material, title, lore: &[&str]| {
+            let mut item = Kind::Vanilla(material).stack(&host, 1).unwrap();
+            item.apply_components(&Compound::from([
+                ("minecraft:custom_name".into(), colored_lore(title)),
+                ("minecraft:lore".into(), Tag::List(lore.iter().copied().map(colored_lore).collect())),
+            ]))
+            .unwrap();
+            item
+        };
+        let toggle = button("minecraft:redstone", "&7Enabled: &2✔", &["", "&e> Click to disable this Machine"]);
+        let disabled = button("minecraft:gunpowder", "&7Enabled: &4✘", &["", "&e> Click to enable this Machine"]);
+        let offset_lore = ["", "&fLeft Click: &7+0.1", "&fRight Click: &7-0.1"];
+        let offset = button("minecraft:piston", "&7Offset: &3-4.1 Block(s)", &offset_lore);
+        let nonfinite = button("minecraft:piston", "&7Offset: &3NaN Block(s)", &offset_lore);
+        let mut foreign = toggle.clone();
+        foreign.apply_components(&Compound::from([(
+            "minecraft:custom_data".into(),
+            Tag::compound([("addon", Tag::Int(1))]),
+        )])).unwrap();
+        for (id, heads, bodies) in [
+            ("IRON_GOLEM_ASSEMBLER", "minecraft:carved_pumpkin", "minecraft:iron_block"),
+            ("WITHER_ASSEMBLER", "minecraft:wither_skeleton_skull", "minecraft:soul_sand"),
+        ] {
+            let machine = ElectricMachine::for_item(id).unwrap();
+            let slots = [heads, heads, bodies, bodies].map(Kind::Vanilla);
+            let material: BTreeMap<_, _> = assemblers::MENU_SLOTS.iter().zip(slots).enumerate().map(|(index, (&slot, kind))| {
+                (slot as u32, kind.stack(&host, index as u32 + 1).unwrap())
+            }).collect();
+            let mut archive = material.clone();
+            archive.extend([(22, toggle.clone()), (31, offset.clone())]);
+            let prepared = prepare_paper_slots(&host, machine, archive.clone()).unwrap();
+            assert_eq!(prepared, prepare_paper_slots(&host, machine, material.clone()).unwrap());
+            for (index, &slot) in assemblers::MENU_SLOTS.iter().enumerate() {
+                assert_eq!(stack_in(&host, &prepared, index), material.get(&(slot as u32)).cloned());
+            }
+
+            let mut rejected = archive.clone();
+            rejected.insert(22, foreign.clone());
+            assert!(prepare_paper_slots(&host, machine, rejected).is_err());
+            let mut rejected = archive.clone();
+            rejected.insert(31, nonfinite.clone());
+            assert!(prepare_paper_slots(&host, machine, rejected).is_err());
+            let mut rejected = archive.clone();
+            rejected.insert(23, toggle.clone());
+            assert!(prepare_paper_slots(&host, machine, rejected).is_err());
+
+            // The archive's display may be stale. Its controls do not contribute
+            // to the receipt or override locally changed settings or consumed items.
+            let metadata = "enabled = 'false'\noffset = '3.2'".parse().unwrap();
+            let controls = assemblers::Controls::from_paper(&metadata).unwrap();
+            let mut local = Compound::new();
+            assert!(controls.restore(&mut local));
+            assert_eq!(check_import(&local, &prepared), Ok(false));
+            local.extend(prepared.clone());
+            local.insert(IMPORT.into(), Tag::Compound(prepared.clone()));
+            assert!(local.remove(&machine.slot_keys()[0].into()).is_some());
+            let edited = controls.click(22, 0).unwrap();
+            edited.write(&mut local);
+
+            archive.insert(22, disabled.clone());
+            let retry = prepare_paper_slots(&host, machine, archive).unwrap();
+            assert_eq!(check_import(&local, &retry), Ok(true));
+            assert!(!controls.restore(&mut local));
+            assert!(assemblers::Controls::read(&local) == edited);
+            assert!(stack_in(&host, &local, 0).is_none());
+        }
     }
 
     #[test]

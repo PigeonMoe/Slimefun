@@ -226,6 +226,91 @@ impl Controls {
     }
 }
 
+/// BlockMenu saves these two instance-specific buttons because neither is a
+/// preset slot. Recreate them from BlockStorage metadata, not from the archive.
+pub(super) fn paper_control(host: &dyn Host, slot: u32, item: &ItemStack) -> bool {
+    if item.count() != 1 || !matches!(slot, 22 | 31) {
+        return false;
+    }
+    let Some(parts) = item.components().map(|components| components.as_nbt()) else {
+        return false;
+    };
+    let Some(Tag::List(lore)) = parts.get(&"minecraft:lore".into()) else {
+        return false;
+    };
+    let Some(title) = parts.get(&"minecraft:custom_name".into()).and_then(paper_text) else {
+        return false;
+    };
+    let expected: &[&str] = match (slot, item.item().id(host).as_str()) {
+        (22, "minecraft:gunpowder") if title == "§7Enabled: §4✘" => {
+            &["", "§e> Click to enable this Machine"]
+        }
+        (22, "minecraft:redstone") if title == "§7Enabled: §2✔" => {
+            &["", "§e> Click to disable this Machine"]
+        }
+        (31, "minecraft:piston") if paper_offset(&title) => {
+            &["", "§fLeft Click: §7+0.1", "§fRight Click: §7-0.1"]
+        }
+        _ => return false,
+    };
+    parts.len() == 2
+        && lore.len() == expected.len()
+        && lore
+            .iter()
+            .zip(expected)
+            .all(|(line, &text)| paper_text(line).as_deref() == Some(text))
+}
+
+fn paper_text(tag: &Tag) -> Option<String> {
+    fn literal(tag: &Tag, depth: usize) -> bool {
+        if depth >= 8 {
+            return false;
+        }
+        match tag {
+            Tag::String(_) => true,
+            Tag::List(children) => children.iter().all(|child| literal(child, depth + 1)),
+            Tag::Compound(parts) => {
+                parts.iter().all(|(name, value)| match name.to_string().as_deref() {
+                    Ok("text" | "color") => matches!(value, Tag::String(_)),
+                    Ok("bold" | "italic" | "underlined" | "strikethrough" | "obfuscated") => {
+                        matches!(value, Tag::Byte(0))
+                    }
+                    Ok("extra") => literal(value, depth + 1),
+                    _ => false,
+                })
+            }
+            _ => false,
+        }
+    }
+
+    literal(tag, 0)
+        .then(|| crate::network_runtime::paper_text(tag))
+        .flatten()
+}
+
+fn paper_offset(title: &str) -> bool {
+    let Some(value) = title
+        .strip_prefix("§7Offset: §3")
+        .and_then(|title| title.strip_suffix(" Block(s)"))
+    else {
+        return false;
+    };
+    let (mantissa, exponent) = value.split_once('E').unwrap_or((value, "1"));
+    let exponent = exponent.strip_prefix('-').unwrap_or(exponent);
+    let mantissa = mantissa.strip_prefix('-').unwrap_or(mantissa);
+    let Some((whole, fraction)) = mantissa.split_once('.') else {
+        return false;
+    };
+    let digits = |text: &str| !text.is_empty() && text.bytes().all(|ch| ch.is_ascii_digit());
+    digits(whole)
+        && (whole == "0" || !whole.starts_with('0'))
+        && digits(fraction)
+        && (fraction.len() == 1 || !fraction.ends_with('0'))
+        && digits(exponent)
+        && !exponent.starts_with('0')
+        && value.parse::<f64>().is_ok_and(f64::is_finite)
+}
+
 pub(super) fn menu(host: &dyn Host, data: &Compound, spec: &Assembler) -> Vec<Option<ItemStack>> {
     let mut items = vec![super::display_item(host, "minecraft:gray_stained_glass_pane", " "); 45];
     let controls = Controls::read(data);

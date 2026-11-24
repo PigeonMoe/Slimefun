@@ -759,12 +759,11 @@ impl Networks {
             return Err("The Paper GPS device is missing a valid owner UUID.".into());
         }
         let cargo_receipt = if let Some(cargo) = &mut data.cargo
-            && node.filters_items()
             && row.contains_key("paper_inventory")
         {
             crate::storage::validate_block_inventory_preset(row, id)?;
             let items = crate::storage::decode_archived_slots(host, row, 54)?;
-            cargo.filters = paper_cargo_filters(host, items)?;
+            cargo.filters = paper_cargo_filters(host, node.component, items)?;
             cargo.imported_paper = true;
             if !level.in_place(host) {
                 return Err(
@@ -875,20 +874,25 @@ impl Networks {
 
 fn paper_cargo_filters(
     host: &dyn ServerHost,
+    component: Component,
     items: BTreeMap<u32, ItemStack>,
 ) -> Result<BTreeMap<usize, Compound>, String> {
-    items
-        .into_iter()
-        .map(|(slot, item)| {
-            if !FILTER_SLOTS.contains(&(slot as usize)) {
-                return Err(format!("Unexpected Paper cargo inventory slot {slot}."));
-            }
+    let filtered = matches!(
+        component,
+        Component::CargoInput | Component::CargoOutput { advanced: true }
+    );
+    let mut filters = BTreeMap::new();
+    for (slot, item) in items {
+        if filtered && FILTER_SLOTS.contains(&(slot as usize)) {
             let saved = item
                 .to_nbt(host)
                 .ok_or("Paper cargo filter item has no item registry id.")?;
-            Ok((slot as usize, saved))
-        })
-        .collect()
+            filters.insert(slot as usize, saved);
+        } else if !cargo_menu::paper_control(host, component, slot, &item) {
+            return Err(format!("Unexpected Paper cargo inventory slot {slot}."));
+        }
+    }
+    Ok(filters)
 }
 
 pub(crate) fn restore_installed_menu(
@@ -910,8 +914,8 @@ pub(crate) fn restore_installed_menu(
             crate::android_machine::restore_installed_inventory(host, level, pos, items)
         }
         Component::TrashCan => trash::restore_items(host, pos, items),
-        Component::CargoInput | Component::CargoOutput { advanced: true } => {
-            let filters = paper_cargo_filters(host, items)?;
+        Component::CargoInput | Component::CargoOutput { .. } => {
+            let filters = paper_cargo_filters(host, component, items)?;
             let mut data =
                 block_data(host, level, pos).ok_or("Could not read the existing cargo node.")?;
             let cargo = data
