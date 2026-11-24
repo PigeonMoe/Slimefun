@@ -310,7 +310,11 @@ pub(crate) fn is_recolor(event: &BlockChangedEvent) -> bool {
         .is_some_and(|current| current.matches(event))
 }
 
-pub(crate) fn drop_item(level: &dyn LevelHost, event: &mut BlockDropsEvent<'_>) {
+pub(crate) fn drop_item(
+    level: &dyn LevelHost,
+    event: &mut BlockDropsEvent<'_>,
+    shell: crate::block_drops::Shell,
+) {
     let Some(carrier) = level.state_block(event.state).filter(|id| is_carrier(id)) else {
         return;
     };
@@ -329,7 +333,7 @@ pub(crate) fn drop_item(level: &dyn LevelHost, event: &mut BlockDropsEvent<'_>) 
     }
     runtime.retired.insert(address, Retired::Dropped);
     drop(runtime);
-    drop_colored_block(level, event, record.kind, carrier);
+    drop_colored_block(level, event, record.kind, carrier, shell);
 }
 
 pub(crate) fn drop_colored_block(
@@ -337,9 +341,16 @@ pub(crate) fn drop_colored_block(
     event: &mut BlockDropsEvent<'_>,
     kind: Kind,
     carrier: &str,
+    shell: crate::block_drops::Shell,
 ) {
     if event.breaker.is_none() {
         event.drops.clear();
+        return;
+    }
+    if shell == crate::block_drops::Shell::Remove {
+        if let Some(key) = level.item_key_by_name(carrier) {
+            event.drops.retain(|drop| drop.stack.item() != key);
+        }
         return;
     }
     let Some(mut stack) = level
@@ -695,7 +706,7 @@ mod tests {
                 experience: 0,
                 cancelled: false,
             };
-            network_runtime::restore_drop(&level, &mut event);
+            network_runtime::restore_drop(&level, &mut event, crate::block_drops::Shell::Existing);
             if breaker.is_none() {
                 assert!(drops.is_empty());
             } else {

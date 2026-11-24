@@ -282,6 +282,7 @@ impl SmeltersPickaxes {
         host: &mut dyn ServerHost,
         event: &PlayerDestroyedBlockEvent,
         rolls: &Rolls,
+        drop_block_creative: bool,
     ) {
         if self.pending.lock().unwrap().prepared.is_empty() {
             return;
@@ -307,7 +308,7 @@ impl SmeltersPickaxes {
         for _ in 0..plan.flares {
             let _ = level.level_event(host, 2004, event.pos, 1);
         }
-        if !creative && !plan.drops.is_empty() {
+        if (!creative || drop_block_creative) && !plan.drops.is_empty() {
             self.pending.lock().unwrap().ready.insert(
                 address,
                 Ready {

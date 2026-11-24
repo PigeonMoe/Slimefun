@@ -823,12 +823,99 @@ fn set_lore(components: &mut Compound, lines: &[(&str, &str, bool)]) {
     components.insert("minecraft:lore".into(), Tag::List(lore));
 }
 
-const EFFECT_INTERVAL: i64 = 10 * 20;
-const RAINBOW_INTERVAL: i64 = 5 * 20;
+const TICKS_PER_SECOND: u64 = 20;
 // Paper uses DyeColor.getColor(), not chat colors or dye firework colors.
 const RAINBOW: [i32; 7] = [
     0xb02e26, 0xf9801d, 0xfed83d, 0x80c71f, 0x3ab3da, 0x8932b8, 0xc74ebd,
 ];
+
+#[derive(Clone, Copy)]
+pub(crate) struct ArmorOptions {
+    pub enabled: bool,
+    pub armor_interval: Option<u64>,
+    rainbow_interval: Option<u64>,
+}
+
+impl Default for ArmorOptions {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            armor_interval: Some(10),
+            rainbow_interval: Some(3),
+        }
+    }
+}
+
+impl ArmorOptions {
+    pub(crate) fn read(options: Option<&toml::Value>) -> Self {
+        let defaults = Self::default();
+        let interval = |key, default| {
+            options
+                .and_then(|options| options.get(key))
+                .and_then(toml::Value::as_integer)
+                .map_or(default, |value| {
+                    i32::try_from(value)
+                        .ok()
+                        .filter(|value| *value > 0)
+                        .map(|value| value as u64)
+                })
+        };
+        Self {
+            enabled: options
+                .and_then(|options| options.get("enable-armor-effects"))
+                .and_then(toml::Value::as_bool)
+                .unwrap_or(defaults.enabled),
+            armor_interval: interval("armor-update-interval", defaults.armor_interval),
+            rainbow_interval: interval("rainbow-armor-update-interval", defaults.rainbow_interval),
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct EquipmentSample {
+    pub tick: u64,
+    effects: bool,
+    color: Option<i32>,
+}
+
+#[derive(Default)]
+pub(crate) struct EquipmentSchedule {
+    pub options: ArmorOptions,
+    tick: Option<u64>,
+}
+
+impl EquipmentSchedule {
+    pub(crate) fn begin_tick(&mut self) {
+        self.tick = Some(self.tick.map_or(0, |tick| tick + 1));
+    }
+
+    pub(crate) fn clear(&mut self) {
+        self.tick = None;
+    }
+
+    pub(crate) fn sample(&self) -> Option<EquipmentSample> {
+        let tick = self.tick.filter(|_| self.options.enabled)?;
+        let effects = self
+            .options
+            .armor_interval
+            .is_some_and(|seconds| tick.is_multiple_of(seconds * TICKS_PER_SECOND));
+        let color = self
+            .options
+            .rainbow_interval
+            .map(|seconds| seconds * TICKS_PER_SECOND)
+            .filter(|interval| tick.is_multiple_of(*interval))
+            .map(|interval| {
+                // Paper advances the shared color index before visiting online players.
+                let index = (tick / interval + 1) % RAINBOW.len() as u64;
+                RAINBOW[index as usize]
+            });
+        Some(EquipmentSample {
+            tick,
+            effects,
+            color,
+        })
+    }
+}
 
 fn worn_effect(id: &str) -> Option<(&'static str, i32, i32, &'static Research)> {
     let effect = match id {
@@ -912,16 +999,8 @@ pub(crate) fn gliding_impact(event: &mut mod_api::PlayerGlidingImpactEvent<'_>) 
     mod_api::Flow::Cancel
 }
 
-pub(crate) fn tick_equipment(host: &mut dyn ServerHost, level: LevelRef) {
-    let Some(tick) = level.game_time(host) else {
-        return;
-    };
-    let use_effects = tick.rem_euclid(EFFECT_INTERVAL) == 0;
-    let color = (tick.rem_euclid(RAINBOW_INTERVAL) == 0).then(|| {
-        let index = (tick.div_euclid(RAINBOW_INTERVAL)).rem_euclid(RAINBOW.len() as i64);
-        RAINBOW[index as usize]
-    });
-    if !use_effects && color.is_none() {
+pub(crate) fn tick_equipment(host: &mut dyn ServerHost, level: LevelRef, sample: EquipmentSample) {
+    if !sample.effects && sample.color.is_none() {
         return;
     }
     for player in level.online_players(host).unwrap_or_default() {
@@ -936,7 +1015,7 @@ pub(crate) fn tick_equipment(host: &mut dyn ServerHost, level: LevelRef) {
             let Some(id) = crate::items::item_id(&item) else {
                 continue;
             };
-            if use_effects
+            if sample.effects
                 && let Some((effect, duration, amplifier, unlock)) = worn_effect(&id)
                 && research::can_use(host, player, unlock)
                 && let Some(key) = host.effect_key(effect)
@@ -947,7 +1026,7 @@ pub(crate) fn tick_equipment(host: &mut dyn ServerHost, level: LevelRef) {
                     &ActiveEffect::new(key, duration, amplifier, false, true, true),
                 );
             }
-            if let Some(color) = color
+            if let Some(color) = sample.color
                 && matches!(
                     id.as_str(),
                     "RAINBOW_HELMET" | "RAINBOW_CHESTPLATE" | "RAINBOW_LEGGINGS" | "RAINBOW_BOOTS"
@@ -1152,5 +1231,56 @@ mod tests {
             ("minecraft:water_breathing", 300, 1, "hazmat_suit")
         );
         assert!(worn_effect("ENDER_BOOTS").is_none());
+    }
+
+    #[test]
+    fn equipment_uses_paper_intervals_and_restarts_its_shared_color_cycle() {
+        let mut schedule = EquipmentSchedule::default();
+        let mut runs = Vec::new();
+        for tick in 0..=240 {
+            schedule.begin_tick();
+            let sample = schedule.sample().unwrap();
+            if sample.effects || sample.color.is_some() {
+                runs.push((tick, sample.effects, sample.color));
+            }
+        }
+        assert_eq!(
+            runs,
+            [
+                (0, true, Some(0xf9801d)),
+                (60, false, Some(0xfed83d)),
+                (120, false, Some(0x80c71f)),
+                (180, false, Some(0x3ab3da)),
+                (200, true, None),
+                (240, false, Some(0x8932b8)),
+            ]
+        );
+        schedule.clear();
+        assert!(schedule.sample().is_none());
+        schedule.begin_tick();
+        assert_eq!(schedule.sample().unwrap().color, Some(0xf9801d));
+    }
+
+    #[test]
+    fn equipment_uses_the_configured_paper_intervals_and_master_switch() {
+        let options =
+            toml::from_str("armor-update-interval = 2\nrainbow-armor-update-interval = 0").unwrap();
+        let mut schedule = EquipmentSchedule {
+            options: ArmorOptions::read(Some(&options)),
+            ..Default::default()
+        };
+        let mut effect_ticks = Vec::new();
+        for tick in 0..=82 {
+            schedule.begin_tick();
+            let sample = schedule.sample().unwrap();
+            assert_eq!(sample.color, None);
+            if sample.effects {
+                effect_ticks.push(tick);
+            }
+        }
+        assert_eq!(effect_ticks, [0, 40, 80]);
+        let disabled = toml::from_str("enable-armor-effects = false").unwrap();
+        schedule.options = ArmorOptions::read(Some(&disabled));
+        assert!(schedule.sample().is_none());
     }
 }

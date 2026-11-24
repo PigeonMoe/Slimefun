@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use mod_api::{
     BlockDropsEvent, Command, CommandArgumentValue, CommandSource, Config, ConfigFile, ConfigKind,
     ConfigLoadingEvent, ConfigReloadingEvent, Flow, GameMode, Hand, Hooks, HostSide,
-    InteractionResult, ItemKey, LevelHost, LevelTickPostEvent, LevelTickPreEvent,
+    InteractionResult, LevelHost, LevelTickPostEvent, LevelTickPreEvent,
     PlayerLoggedInEvent, RegisterCommandsEvent, RegisterConfigsEvent, RightClickBlockEvent,
     RightClickItemEvent, RunModCommandEvent, ScheduledTaskEvent, ServerHost, ServerStoppingEvent,
     Text, TriState,
@@ -32,11 +32,13 @@ mod backpacks;
 mod bee_wings;
 mod beheading;
 mod block_placer;
+mod block_drops;
 mod book_binder;
 mod circuits;
 mod climbing_pick;
 mod composter;
 mod compressor;
+mod creative_pick;
 mod crucible;
 mod debug_fish;
 mod developer_commands;
@@ -126,6 +128,7 @@ use recipes::{
 
 struct Slimefun {
     delayed_crafts: DelayedCrafts,
+    armor_schedule: Mutex<armor_forge::EquipmentSchedule>,
     radiation: radiation::Radiation,
     soulbound_rituals: soulbound_rune::Rituals,
     block_placers: block_placer::Placers,
@@ -153,7 +156,6 @@ struct Slimefun {
     teleposition_scroll: teleposition_scroll::Scroll,
     explosive_tools: explosive_tools::ExplosiveTools,
     rolls: Rolls,
-    chest: Mutex<Option<ItemKey>>,
     networks: Arc<Mutex<network_runtime::Networks>>,
     gps: gps_controls::Controls,
     guide: guide::Guide,
@@ -176,6 +178,7 @@ impl Default for Slimefun {
     fn default() -> Self {
         Self {
             delayed_crafts: DelayedCrafts::default(),
+            armor_schedule: Mutex::default(),
             radiation: radiation::Radiation::default(),
             soulbound_rituals: soulbound_rune::Rituals::default(),
             block_placers: block_placer::Placers::default(),
@@ -203,7 +206,6 @@ impl Default for Slimefun {
             teleposition_scroll: teleposition_scroll::Scroll::default(),
             explosive_tools: explosive_tools::ExplosiveTools::default(),
             rolls: Rolls::default(),
-            chest: Mutex::new(None),
             networks: Arc::default(),
             gps: gps_controls::Controls::default(),
             guide: guide::Guide::default(),
@@ -265,6 +267,19 @@ impl Slimefun {
         true
     }
 
+    fn configure_armor(&self, table: Option<&toml::Table>) {
+        let options = table.and_then(|table| table.get("options"));
+        let armor = armor_forge::ArmorOptions::read(options);
+        self.armor_schedule.lock().unwrap().options = armor;
+        self.radiation.configure(
+            armor.enabled,
+            options,
+            table.and_then(|table| table.get("radiation")),
+        );
+        self.solar_helmet
+            .configure(armor, table.and_then(|table| table.get("solar-helmet")));
+    }
+
     fn read_config(&self, config: &ConfigFile, fresh: bool) {
         if config.mod_id != "slimefun" || config.file != "slimefun-server.toml" {
             return;
@@ -278,7 +293,7 @@ impl Slimefun {
             self.guide.configure_machine_display(*settings);
             enchantment_machines::configure(&toml::Table::new());
             self.talismans.configure(&toml::Table::new());
-            self.radiation.configure(None);
+            self.configure_armor(None);
             self.climbing.configure(None);
             self.grapple.configure(None);
             self.multi_tools.configure(None);
@@ -287,7 +302,6 @@ impl Slimefun {
             output_chest::configure(&toml::Table::new());
             self.crucibles.configure(false);
             self.industrial_miners.configure(None);
-            self.solar_helmet.configure(None);
             self.beheading.configure(None);
             ancient_altar::configure(None);
             self.soulbound_rituals.configure(None);
@@ -312,7 +326,7 @@ impl Slimefun {
             .configure(table.get("scroll-of-dimensional-teleposition"));
         self.explosive_tools.configure(&table);
         self.beheading.configure(table.get("sword-of-beheading"));
-        self.radiation.configure(table.get("radiation"));
+        self.configure_armor(Some(&table));
         self.block_placers.configure(
             table
                 .get("block-placer")
@@ -327,7 +341,6 @@ impl Slimefun {
         );
         self.transport.configure(&table);
         self.industrial_miners.configure(Some(&table));
-        self.solar_helmet.configure(table.get("solar-helmet"));
         settings.book_binder = book_binder::Rules::read_config(&table);
         settings.wind_power = elemental_staves::wind_power(table.get("wind-staff"));
         settings.jerky_saturation.read_config(table.get("items"));
@@ -439,6 +452,7 @@ impl Slimefun {
             .and_then(|section| section.get("drop-excess-sf-give-items"))
             .and_then(toml::Value::as_bool)
             .unwrap_or(false);
+        settings.drop_block_creative = block_drops::drop_block_creative(table.get("options"));
         if let Some(value) = table
             .get("golem-drop-chance")
             .and_then(toml::Value::as_integer)
@@ -474,6 +488,35 @@ impl Slimefun {
 
 #[mod_api::horizon_mod]
 impl Hooks for Slimefun {
+    fn creative_block_pick(
+        &self,
+        host: &mut dyn ServerHost,
+        event: &mut mod_api::CreativeBlockPickEvent,
+    ) -> Option<mod_api::ItemStack> {
+        creative_pick::pick(host, event)
+    }
+
+    fn merchant_slot_click_pre(
+        &self,
+        host: &mut dyn ServerHost,
+        event: &mut mod_api::MerchantSlotClickPreEvent<'_>,
+    ) -> Flow {
+        if event.hotbar_swap {
+            return Flow::Cancel;
+        }
+        if !event.item.is_some_and(guide::blocks_villager_trade) {
+            return Flow::Continue;
+        }
+        if let Some(player) = host.players().acting_player() {
+            let language = self.guide.player_language(host, player);
+            let message = self
+                .guide
+                .prefixed_message(language.command_message("villagers.no-trading"));
+            let _ = player.tell(host, message);
+        }
+        Flow::Cancel
+    }
+
     fn register(&self, registrar: &mut dyn mod_api::Registrar, context: &mod_api::RegistrationContext) {
         lifeskills::register(context);
         self.versions.register(context);
@@ -483,7 +526,6 @@ impl Hooks for Slimefun {
         let chest = registrar.item_key("minecraft:chest");
         registrar.item_part(chest, output_chest::ChestPlacement);
         inventory_destruction::register(registrar);
-        *self.chest.lock().unwrap() = Some(chest);
         for id in [
             "minecraft:player_head",
             "minecraft:daylight_detector",
@@ -529,7 +571,7 @@ impl Hooks for Slimefun {
             "slimefun",
             ConfigKind::Server,
             &format!("{}{}{}{}{}{}{}{}{}{}",
-            "double-ores = true\ncrucible-allow-water-in-nether = false\nlegacy-ore-washer = false\nlegacy-dust-washer = false\nlegacy-ore-grinder = true\nelectric-gold-pan-override-output-limit = [false, false, false]\nfreezer-use-vanilla-ratios = [false, false, false]\nfire-breaking-chance = 34\noutput-chest-enabled = true\ndrop-from-golems = true\ngolem-drop-chance = 75\n\n[options]\nlanguage = \"en\"\nchat-prefix = \"&a&lSlimefun 5&7> \"\nenable-translations = true\nauto-detect-language = true\ndrop-excess-sf-give-items = false\n\n[guide]\nshow-vanilla-recipes = true\nreceive-on-first-join = true\nshow-hidden-item-groups-in-search = false\n\n[researches]\nfree-in-creative-mode = true\nenable-fireworks = true\ndisable-learning-animation = false\n\n[URID]\nenable-tickers = true\ncustom-ticker-delay = 10\n\n[networks]\nmax-size = 200\nenable-visualizer = true\ncargo-ticker-delay = 0\ndelete-excess-items = false\n\n[wind-staff]\npower = 4\n\n[book-binder]\nbypass-vanilla-max-level = false\nhas-custom-max-level = false\ncustom-max-level = 15\n\n[solar-generator-4]\nother-dimensions-use-night-energy = false\n\n[portable-teleporter]\nteleportation-cost = 10\n\n[produce-collector]\nrange = 2\n\n[pickaxe-of-vein-mining]\nmax-blocks = 16\n\n[pickaxe-of-the-seeker]\nmax-range = 5\n\n[blade-of-vampires]\nchance = 45\n\n[reinforced-spawner]\nallow-spawn-eggs = true\n\n[ancient-altar]\nstep-delay = 8\n\n[miner-android]\nreduced-block-updates = true\n\n[industrial-miner]\ncan-mine-ancient-debris = false\ncan-mine-deepslate-ores = true\n\n[advanced-industrial-miner]\ncan-mine-ancient-debris = false\ncan-mine-deepslate-ores = true\n",
+            "double-ores = true\ncrucible-allow-water-in-nether = false\nlegacy-ore-washer = false\nlegacy-dust-washer = false\nlegacy-ore-grinder = true\nelectric-gold-pan-override-output-limit = [false, false, false]\nfreezer-use-vanilla-ratios = [false, false, false]\nfire-breaking-chance = 34\noutput-chest-enabled = true\ndrop-from-golems = true\ngolem-drop-chance = 75\n\n[options]\nenable-armor-effects = true\narmor-update-interval = 10\nrainbow-armor-update-interval = 3\nenable-radiation = true\nradiation-update-interval = 1\nradiation-grace-period = 15\nlanguage = \"en\"\nchat-prefix = \"&a&lSlimefun 5&7> \"\nenable-translations = true\nauto-detect-language = true\ndrop-excess-sf-give-items = false\ndrop-block-creative = true\n\n[guide]\nshow-vanilla-recipes = true\nreceive-on-first-join = true\nshow-hidden-item-groups-in-search = false\n\n[researches]\nfree-in-creative-mode = true\nenable-fireworks = true\ndisable-learning-animation = false\n\n[URID]\nenable-tickers = true\ncustom-ticker-delay = 10\n\n[networks]\nmax-size = 200\nenable-visualizer = true\ncargo-ticker-delay = 0\ndelete-excess-items = false\n\n[wind-staff]\npower = 4\n\n[book-binder]\nbypass-vanilla-max-level = false\nhas-custom-max-level = false\ncustom-max-level = 15\n\n[solar-generator-4]\nother-dimensions-use-night-energy = false\n\n[portable-teleporter]\nteleportation-cost = 10\n\n[produce-collector]\nrange = 2\n\n[pickaxe-of-vein-mining]\nmax-blocks = 16\n\n[pickaxe-of-the-seeker]\nmax-range = 5\n\n[blade-of-vampires]\nchance = 45\n\n[reinforced-spawner]\nallow-spawn-eggs = true\n\n[ancient-altar]\nstep-delay = 8\n\n[miner-android]\nreduced-block-updates = true\n\n[industrial-miner]\ncan-mine-ancient-debris = false\ncan-mine-deepslate-ores = true\n\n[advanced-industrial-miner]\ncan-mine-ancient-debris = false\ncan-mine-deepslate-ores = true\n",
                 enchantment_machines::default_config(),
                 beheading::DEFAULT_CONFIG,
                 explosive_tools::DEFAULT_CONFIG,
@@ -597,7 +639,9 @@ impl Hooks for Slimefun {
         event: &mut mod_api::PlayerDestroyedBlockEvent,
     ) {
         self.spawners.destroyed(host, event);
-        self.smelters_pickaxes.destroyed(host, event, &self.rolls);
+        let drop_block_creative = self.settings.lock().unwrap().drop_block_creative;
+        self.smelters_pickaxes
+            .destroyed(host, event, &self.rolls, drop_block_creative);
         lumber_axe::destroyed(host, event);
     }
 
@@ -693,19 +737,48 @@ impl Hooks for Slimefun {
     }
 
     fn block_drops(&self, level: &dyn LevelHost, event: &mut BlockDropsEvent<'_>) -> Flow {
-        block_placer::restore_drop(level, event);
-        if let Some(chest) = *self.chest.lock().unwrap() {
-            output_chest::restore_drop(level, event, chest);
-        }
-        network_runtime::restore_drop(level, event);
-        factory::restore_drops(level, event);
-        android_machine::drop_items(level, event);
-        food_machines::restore_drop(level, event);
-        ancient_altar::restore_drops(level, event);
-        rainbow::placed::drop_item(level, event);
-        hologram_projector::restore_drop(level, event);
+        let shell = if self.explosive_tools.creative_sweep(event.breaker) {
+            if self.settings.lock().unwrap().drop_block_creative {
+                block_drops::Shell::Create
+            } else {
+                block_drops::Shell::Remove
+            }
+        } else {
+            block_drops::Shell::Existing
+        };
+        block_drops::restore_drops(level, event, shell);
         self.smelters_pickaxes.drop_items(event);
         self.spawners.suppress_base_drops(level, event);
+        Flow::Continue
+    }
+
+    fn creative_block_drops(
+        &self,
+        level: &dyn LevelHost,
+        event: &mut mod_api::CreativeBlockDropsEvent<'_>,
+    ) -> Flow {
+        let drop_block_creative = self.settings.lock().unwrap().drop_block_creative;
+        let shell = if drop_block_creative {
+            block_drops::Shell::Create
+        } else {
+            block_drops::Shell::Omit
+        };
+        let mut drops = BlockDropsEvent {
+            dimension: event.dimension.clone(),
+            pos: event.pos,
+            state: event.state,
+            breaker: event.breaker,
+            breaker_entity: event.breaker_entity,
+            block_entity: event.block_entity,
+            tool: event.tool,
+            drops: event.drops,
+            experience: event.experience,
+            cancelled: event.cancelled,
+        };
+        block_drops::restore_drops(level, &mut drops, shell);
+        if drop_block_creative {
+            self.smelters_pickaxes.drop_items(&mut drops);
+        }
         Flow::Continue
     }
 
@@ -2219,6 +2292,7 @@ impl Hooks for Slimefun {
                 .then(|| host.level(host.dimension())?.game_time(host))
                 .flatten();
             self.profiler.begin_tick(time);
+            self.armor_schedule.lock().unwrap().begin_tick();
             self.radiation.begin_tick(|| host.server_monotonic_millis());
             self.smelters_pickaxes.begin_tick();
         }
@@ -2285,8 +2359,11 @@ impl Hooks for Slimefun {
             }
             hologram_projector::tick(host, event.level);
             auto_crafter::refresh(host, event.level);
-            armor_forge::tick_equipment(host, event.level);
-            self.solar_helmet.tick(host, event.level);
+            let equipment = self.armor_schedule.lock().unwrap().sample();
+            if let Some(equipment) = equipment {
+                armor_forge::tick_equipment(host, event.level, equipment);
+                self.solar_helmet.tick(host, event.level, equipment.tick);
+            }
             self.magnets.tick(host, event.level);
             self.bee_wings.tick(host, event.level);
             self.transport.tick(&self.networks, host, event.level);
@@ -2385,6 +2462,7 @@ impl Hooks for Slimefun {
         self.anvil_repairs.clear();
         self.elevators.clear();
         self.block_placers.clear();
+        self.armor_schedule.lock().unwrap().clear();
         self.radiation.clear();
         rainbow::placed::clear();
         auto_crafter::clear();

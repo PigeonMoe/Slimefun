@@ -208,6 +208,15 @@ pub(crate) fn blocks_vanilla_station(item: &ItemStack) -> bool {
     })
 }
 
+pub(crate) fn blocks_villager_trade(item: &ItemStack) -> bool {
+    let tickers = Tickers::current();
+    crate::items::item_id(item).is_some_and(|id| {
+        id != "SYNTHETIC_EMERALD"
+            && availability::visible(tickers, None, &id)
+            && catalog::blocks_vanilla_station(&id)
+    })
+}
+
 pub(crate) fn research_available(id: &str, tickers: Tickers, dimension: Option<&str>) -> bool {
     if dimension.is_some_and(|dimension| !availability::world_enabled(dimension)) {
         return false;
@@ -1921,6 +1930,38 @@ mod tests {
                 .unwrap();
             assert_eq!(blocks_vanilla_station(&marked), blocks, "{id}");
         }
+    }
+
+    #[test]
+    fn villager_trading_keeps_vanilla_items_and_synthetic_emeralds() {
+        let mut host = FakeHost::new();
+        host.registries
+            .resolve_items([Identifier::parse("minecraft:emerald").unwrap()])
+            .unwrap();
+        let emerald = Kind::Vanilla("minecraft:emerald").stack(&host, 1).unwrap();
+        assert!(!blocks_villager_trade(&emerald));
+        for (id, denied) in [
+            ("SYNTHETIC_EMERALD", false),
+            ("FLASK_OF_KNOWLEDGE", true),
+            ("CHAIN_HELMET", false),
+            ("UNREGISTERED_QA_ITEM", false),
+        ] {
+            let mut marked = emerald.clone();
+            marked
+                .set_components(Compound::from([(
+                    "minecraft:custom_data".into(),
+                    Tag::compound([(
+                        "PublicBukkitValues",
+                        Tag::compound([(crate::items::ID_KEY, Tag::String(id.into()))]),
+                    )]),
+                )]))
+                .unwrap();
+            assert_eq!(blocks_villager_trade(&marked), denied, "{id}");
+        }
+        assert_eq!(
+            Language::CHINESE.command_message("villagers.no-trading"),
+            "&4你不能用 Slimefun 的物品和村民交易!"
+        );
     }
 
     #[test]

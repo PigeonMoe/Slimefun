@@ -171,7 +171,7 @@ pub(crate) fn measure(
 #[derive(Clone, Copy)]
 struct SolarSettings {
     enabled: bool,
-    interval: i64,
+    interval: Option<u64>,
     amount: f32,
 }
 
@@ -179,7 +179,7 @@ impl Default for SolarSettings {
     fn default() -> Self {
         Self {
             enabled: true,
-            interval: 10,
+            interval: Some(10),
             amount: 0.1,
         }
     }
@@ -189,8 +189,16 @@ impl Default for SolarSettings {
 pub(crate) struct SolarHelmet(Mutex<SolarSettings>);
 
 impl SolarHelmet {
-    pub(crate) fn configure(&self, table: Option<&toml::Value>) {
-        let mut config = SolarSettings::default();
+    pub(crate) fn configure(
+        &self,
+        armor: crate::armor_forge::ArmorOptions,
+        table: Option<&toml::Value>,
+    ) {
+        let mut config = SolarSettings {
+            // Paper feeds the global armor interval directly to this tick scheduler.
+            interval: armor.armor_interval,
+            ..SolarSettings::default()
+        };
         if let Some(table) = table {
             if let Some(enabled) = table
                 .get("enable-armor-effects")
@@ -202,7 +210,7 @@ impl SolarHelmet {
                 .get("armor-update-interval")
                 .and_then(toml::Value::as_integer)
             {
-                config.interval = interval.max(1);
+                config.interval = Some(interval.max(1) as u64);
             }
             let amount = table
                 .get("charge-amount")
@@ -214,15 +222,16 @@ impl SolarHelmet {
                 config.amount = amount.min(f32::MAX);
             }
         }
+        config.enabled &= armor.enabled;
         *self.0.lock().unwrap() = config;
     }
 
-    pub(crate) fn tick(&self, host: &mut dyn ServerHost, level: LevelRef) {
+    pub(crate) fn tick(&self, host: &mut dyn ServerHost, level: LevelRef, tick: u64) {
         let config = *self.0.lock().unwrap();
         if !config.enabled
-            || !level
-                .game_time(host)
-                .is_some_and(|tick| tick.rem_euclid(config.interval) == 0)
+            || !config
+                .interval
+                .is_some_and(|interval| tick.is_multiple_of(interval))
             || !level
                 .dimension_type(host)
                 .is_some_and(|kind| kind.has_skylight && kind.skybox == "overworld")
@@ -269,6 +278,28 @@ fn sunlight_hours(day: i64) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn solar_helmet_uses_paper_tick_interval_and_retains_horizon_overrides() {
+        let options = toml::from_str("armor-update-interval = 7").unwrap();
+        let mut armor = crate::armor_forge::ArmorOptions::read(Some(&options));
+        let helmet = SolarHelmet::default();
+        helmet.configure(armor, None);
+        assert_eq!(helmet.0.lock().unwrap().interval, Some(7));
+
+        let legacy = toml::from_str(
+            "armor-update-interval = 4\ncharge-amount = 2\nenable-armor-effects = true",
+        )
+        .unwrap();
+        helmet.configure(armor, Some(&legacy));
+        let config = *helmet.0.lock().unwrap();
+        assert!(config.enabled);
+        assert_eq!((config.interval, config.amount), (Some(4), 2.0));
+
+        armor.enabled = false;
+        helmet.configure(armor, Some(&legacy));
+        assert!(!helmet.0.lock().unwrap().enabled);
+    }
 
     #[test]
     fn solar_helmet_matches_papers_sunrise_and_sunset_boundaries() {

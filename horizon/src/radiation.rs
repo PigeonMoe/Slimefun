@@ -60,29 +60,55 @@ impl Default for Rules {
 }
 
 impl Rules {
-    fn read(section: Option<&toml::Value>) -> Self {
-        let mut rules = Self::default();
-        let Some(section) = section else {
-            return rules;
+    fn read(
+        armor_enabled: bool,
+        options: Option<&toml::Value>,
+        section: Option<&toml::Value>,
+    ) -> Self {
+        let defaults = Self::default();
+        let enabled = section
+            .and_then(|section| section.get("enabled"))
+            .and_then(toml::Value::as_bool)
+            .or_else(|| {
+                options
+                    .and_then(|options| options.get("enable-radiation"))
+                    .and_then(toml::Value::as_bool)
+            })
+            .unwrap_or(defaults.enabled);
+        let interval = |value: i64| {
+            u32::try_from(value)
+                .ok()
+                .filter(|value| (1..=MAX_INTERVAL_SECONDS).contains(value))
+                .map(|seconds| seconds * TICKS_PER_SECOND)
         };
-        if let Some(value) = section.get("enabled").and_then(toml::Value::as_bool) {
-            rules.enabled = value;
-        }
-        if let Some(value) = section
-            .get("interval-seconds")
+        let interval = section
+            .and_then(|section| section.get("interval-seconds"))
             .and_then(toml::Value::as_integer)
-            && let Ok(seconds @ 1..=MAX_INTERVAL_SECONDS) = u32::try_from(value)
-        {
-            rules.interval = seconds * TICKS_PER_SECOND;
+            .and_then(interval)
+            .or_else(|| {
+                options
+                    .and_then(|options| options.get("radiation-update-interval"))
+                    .and_then(toml::Value::as_integer)
+                    .map_or(Some(defaults.interval), interval)
+            });
+        let grace_seconds = |table: &toml::Value, key| {
+            table
+                .get(key)
+                .and_then(toml::Value::as_integer)
+                .and_then(|seconds| u32::try_from(seconds).ok())
+                .map(|seconds| u64::from(seconds) * 1000)
+        };
+        let grace_ms = section
+            .and_then(|section| grace_seconds(section, "grace-seconds"))
+            .or_else(|| {
+                options.and_then(|options| grace_seconds(options, "radiation-grace-period"))
+            })
+            .unwrap_or(defaults.grace_ms);
+        Self {
+            enabled: armor_enabled && enabled && interval.is_some(),
+            interval: interval.unwrap_or(defaults.interval),
+            grace_ms,
         }
-        if let Some(value) = section
-            .get("grace-seconds")
-            .and_then(toml::Value::as_integer)
-            && let Ok(seconds) = u32::try_from(value)
-        {
-            rules.grace_ms = u64::from(seconds) * 1000;
-        }
-        rules
     }
 
     fn duration(self) -> i32 {
@@ -102,10 +128,16 @@ struct State {
 pub(crate) struct Radiation(Mutex<State>);
 
 impl Radiation {
-    pub(crate) fn configure(&self, config: Option<&toml::Value>) {
+    pub(crate) fn configure(
+        &self,
+        armor_enabled: bool,
+        options: Option<&toml::Value>,
+        config: Option<&toml::Value>,
+    ) {
         let mut state = self.0.lock().unwrap();
-        state.rules = Rules::read(config);
+        state.rules = Rules::read(armor_enabled, options, config);
         state.ticks_until_sample = 0;
+        state.due = false;
     }
 
     pub(crate) fn begin_tick(&self, now: impl FnOnce() -> u64) {
@@ -476,6 +508,35 @@ mod tests {
         radiation.clear();
         assert!(radiation.0.lock().unwrap().grace.is_empty());
         assert_eq!(Rules::default().duration(), 40);
+    }
+
+    #[test]
+    fn sampling_respects_paper_settings_and_legacy_horizon_overrides() {
+        let options = toml::from_str(
+            "enable-radiation = false\nradiation-update-interval = 2\nradiation-grace-period = 8",
+        )
+        .unwrap();
+        let legacy = toml::from_str("enabled = true\ngrace-seconds = 3").unwrap();
+        let radiation = Radiation::default();
+        radiation.configure(true, Some(&options), None);
+        radiation.begin_tick(|| 0);
+        assert!(!radiation.0.lock().unwrap().due);
+        assert_eq!(radiation.0.lock().unwrap().rules.grace_ms, 8_000);
+
+        radiation.configure(true, Some(&options), Some(&legacy));
+        let mut sample_ticks = Vec::new();
+        for tick in 0..=82 {
+            radiation.begin_tick(|| 0);
+            if radiation.0.lock().unwrap().due {
+                sample_ticks.push(tick);
+            }
+        }
+        assert_eq!(sample_ticks, [0, 40, 80]);
+        assert_eq!(radiation.0.lock().unwrap().rules.grace_ms, 3_000);
+
+        radiation.configure(false, Some(&options), Some(&legacy));
+        radiation.begin_tick(|| 0);
+        assert!(!radiation.0.lock().unwrap().due);
     }
 
     #[test]

@@ -376,7 +376,13 @@ pub(crate) fn marked(level: &dyn LevelHost, entity: BlockEntityRef) -> bool {
 }
 
 pub(crate) fn live_marker(host: &dyn Host, entity: BlockEntityRef) -> bool {
-    has_saved_marker(|namespace, name| host.block_entity_saved_attachment(entity, namespace, name))
+    live_kind(host, entity).is_some()
+}
+
+pub(crate) fn live_kind(host: &dyn Host, entity: BlockEntityRef) -> Option<Kind> {
+    host.block_entity_saved_attachment(entity, PLACED_PRODUCE.namespace, PLACED_PRODUCE.name)
+        .as_ref()
+        .and_then(saved_product)
 }
 
 pub(crate) fn has_saved_marker(read: impl FnOnce(&str, &str) -> Option<Compound>) -> bool {
@@ -386,12 +392,13 @@ pub(crate) fn has_saved_marker(read: impl FnOnce(&str, &str) -> Option<Compound>
         .is_some()
 }
 
-pub(crate) fn restore_drop(level: &dyn LevelHost, event: &mut BlockDropsEvent<'_>) {
-    if let Some(kind) = event.block_entity.and_then(|entity| placed(level, entity))
-        && let Some(key) = level.item_key_by_name(kind.material())
-        && let Some(drop) = event.drops.iter_mut().find(|drop| drop.stack.item() == key)
-    {
-        kind.decorate(&mut drop.stack);
+pub(crate) fn restore_drop(
+    level: &dyn LevelHost,
+    event: &mut BlockDropsEvent<'_>,
+    shell: crate::block_drops::Shell,
+) {
+    if let Some(kind) = event.block_entity.and_then(|entity| placed(level, entity)) {
+        shell.restore(level, event, kind);
     }
 }
 

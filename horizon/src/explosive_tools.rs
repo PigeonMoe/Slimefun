@@ -4,7 +4,7 @@ use std::{collections::BTreeSet, sync::Mutex};
 
 use mod_api::{
     BreakBlockEvent, Compound, ExplosionCalculator, ExplosionInteraction, ExplosionSettings, Flow,
-    Hand, LevelRef, PlayerRef, ServerHost, SoundSource, Tag,
+    GameMode, Hand, LevelRef, PlayerRef, ServerHost, SoundSource, Tag,
 };
 
 use crate::{
@@ -136,9 +136,14 @@ pub(crate) const DEFAULT_CONFIG: &str = "\n[explosive-pickaxe]\ndamage-on-use = 
 pub(crate) struct ExplosiveTools {
     rules: Mutex<[Rules; 2]>,
     active: Mutex<BTreeSet<u128>>,
+    creative_sweeps: Mutex<BTreeSet<u128>>,
 }
 
 impl ExplosiveTools {
+    pub(crate) fn creative_sweep(&self, player: Option<u128>) -> bool {
+        player.is_some_and(|player| self.creative_sweeps.lock().unwrap().contains(&player))
+    }
+
     pub(crate) fn configure(&self, table: &toml::Table) {
         *self.rules.lock().unwrap() = [Tool::Pickaxe, Tool::Shovel].map(|tool| {
             let values = table.get(tool.section());
@@ -232,6 +237,11 @@ impl ExplosiveTools {
             positions
         } else {
             positions
+        };
+        let _creative_sweep = if player.game_mode(host) == Some(GameMode::Creative) {
+            Mining::enter(&self.creative_sweeps, player.uuid())
+        } else {
+            None
         };
         let mut held = Some(stack);
         for pos in positions {

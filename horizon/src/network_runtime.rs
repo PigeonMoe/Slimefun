@@ -21,7 +21,7 @@ use crate::{
     },
     geo_deposits, geology,
     gps_transport::{GPS_TELEPORTER_PYLON, PYLON_CARRIERS},
-    items::{decorative_head, item_id, network_item},
+    items::{Kind, decorative_head, item_id, network_item},
     machine::Settings,
     networks::Component,
     random::Rolls,
@@ -443,29 +443,29 @@ impl ItemPart for NetworkPlacement {
     }
 }
 
-pub(crate) fn restore_drop(level: &dyn LevelHost, event: &mut BlockDropsEvent<'_>) {
+pub(crate) fn restore_drop(
+    level: &dyn LevelHost,
+    event: &mut BlockDropsEvent<'_>,
+    shell: crate::block_drops::Shell,
+) {
     if let Some(id) = plain_network::take_drop(level, event) {
         if id == GPS_TELEPORTER_PYLON.id() {
-            if let Some(carrier) = level.state_block(event.state) {
+            if shell != crate::block_drops::Shell::Omit
+                && let Some(carrier) = level.state_block(event.state)
+            {
                 crate::rainbow::placed::drop_colored_block(
-                    level, event, GPS_TELEPORTER_PYLON, carrier,
+                    level, event, GPS_TELEPORTER_PYLON, carrier, shell,
                 );
             }
             return;
         }
-        if let Some(item) = network_item(&id)
-            && let Some(key) = level.item_key_by_name(item.material())
-        {
-            if let Some(drop) = event.drops.iter_mut().find(|drop| drop.stack.item() == key) {
-                item.decorate(&mut drop.stack);
-            } else if let Some(mut stack) = ItemStack::new(key, 1) {
-                item.decorate(&mut stack);
-                let pos =
-                    [event.pos.x, event.pos.y, event.pos.z].map(|value| f64::from(value) + 0.5);
-                event
-                    .drops
-                    .push(mod_api::ItemDrop::new(stack, pos, [0.0, 0.2, 0.0], 10));
-            }
+        if let Some(item) = network_item(&id) {
+            let shell = if shell == crate::block_drops::Shell::Existing {
+                crate::block_drops::Shell::Create
+            } else {
+                shell
+            };
+            shell.restore(level, event, item);
         }
         crate::factory::restore_plain_drops(level, event);
         return;
@@ -484,11 +484,7 @@ pub(crate) fn restore_drop(level: &dyn LevelHost, event: &mut BlockDropsEvent<'_
     let Some(item) = network_item(&id) else {
         return;
     };
-    if let Some(key) = level.item_key_by_name(item.material())
-        && let Some(drop) = event.drops.iter_mut().find(|drop| drop.stack.item() == key)
-    {
-        item.decorate(&mut drop.stack);
-    }
+    shell.restore(level, event, item);
     if Component::for_item(&id).is_some_and(has_filter_slots) {
         let pos = [
             f64::from(event.pos.x) + 0.5,
@@ -1530,6 +1526,17 @@ pub(crate) fn placed_id(
     pos: Position,
 ) -> Option<String> {
     block_data(host, level, pos).map(|data| data.id)
+}
+
+pub(crate) fn placed_kind(
+    host: &mut dyn ServerHost,
+    level: LevelRef,
+    pos: Position,
+    carrier: &str,
+) -> Option<Kind> {
+    let id = placed_id(host, level, pos)?;
+    accepts_carrier(Component::for_item(&id)?, carrier).then_some(())?;
+    network_item(&id)
 }
 
 fn block_data(host: &mut dyn ServerHost, level: LevelRef, pos: Position) -> Option<BlockData> {

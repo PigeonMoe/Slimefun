@@ -273,15 +273,16 @@ pub(crate) fn saved_marker(level: &dyn LevelHost, dimension: &str, pos: Pos) -> 
     saved_at(level, pos) && !RETIRED.lock().unwrap().contains_key(&(dimension.into(), pos))
 }
 
-pub(crate) fn restore_drop(level: &dyn LevelHost, event: &mut BlockDropsEvent<'_>) {
+pub(crate) fn restore_drop(
+    level: &dyn LevelHost,
+    event: &mut BlockDropsEvent<'_>,
+    shell: crate::block_drops::Shell,
+) {
     let pos = [event.pos.x, event.pos.y, event.pos.z];
     if level.state_block(event.state) == Some(CARRIER)
         && saved_at(level, pos)
         && let Some(item) = level.item_key_by_name(CARRIER)
-        && let Some(drop) = event
-            .drops
-            .iter_mut()
-            .find(|drop| drop.stack.item() == item)
+        && let Some(mut stack) = ItemStack::new(item, 1)
     {
         let dim = network_runtime::dimension_name(&event.dimension);
         let address = (dim.to_owned(), pos);
@@ -293,11 +294,19 @@ pub(crate) fn restore_drop(level: &dyn LevelHost, event: &mut BlockDropsEvent<'_
             return;
         }
         // Paper's SimpleBlockBreakHandler drops one projector even for a merged slab.
-        if let Some(mut stack) = ItemStack::new(item, 1) {
-            HOLOGRAM_PROJECTOR.decorate(&mut stack);
-            drop.stack = stack;
-            retired.insert(address, Retirement::Dropped);
+        if shell == crate::block_drops::Shell::Remove {
+            event.drops.retain(|drop| drop.stack.item() != item);
+            return;
         }
+        HOLOGRAM_PROJECTOR.decorate(&mut stack);
+        if let Some(drop) = event.drops.iter_mut().find(|drop| drop.stack.item() == item) {
+            drop.stack = stack;
+        } else if shell == crate::block_drops::Shell::Create {
+            crate::block_drops::add_stack(event, stack);
+        } else {
+            return;
+        }
+        retired.insert(address, Retirement::Dropped);
     }
 }
 

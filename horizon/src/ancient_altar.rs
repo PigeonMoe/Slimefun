@@ -569,6 +569,10 @@ pub(crate) fn marked(host: &dyn Host, entity: mod_api::BlockEntityRef) -> bool {
         .is_some()
 }
 
+pub(crate) fn live_kind(host: &mut dyn ServerHost, level: LevelRef, pos: Pos) -> Option<Kind> {
+    device(host, level, pos).map(|(kind, _)| kind)
+}
+
 pub(crate) fn is_pedestal(host: &dyn Host, level: LevelRef, pos: Pos) -> bool {
     if !level
         .block_state(host, pos)
@@ -710,18 +714,18 @@ impl ItemPart for Placement {
     }
 }
 
-pub(crate) fn restore_drops(level: &dyn LevelHost, event: &mut BlockDropsEvent<'_>) {
+pub(crate) fn restore_drops(
+    level: &dyn LevelHost,
+    event: &mut BlockDropsEvent<'_>,
+    shell: crate::block_drops::Shell,
+) {
     let Some(marker) = event.block_entity.and_then(|entity| {
         level.block_entity_saved_attachment(entity, DEVICE.namespace, DEVICE.name)
     }) else {
         return;
     };
     let Some(kind) = id(&marker) else { return };
-    if let Some(key) = level.item_key_by_name(kind.material())
-        && let Some(drop) = event.drops.iter_mut().find(|drop| drop.stack.item() == key)
-    {
-        kind.decorate(&mut drop.stack);
-    }
+    shell.restore(level, event, kind);
     if let Some(Tag::Compound(item)) = marker.get(&"item".into())
         && let Some(stack) =
             crate::network_runtime::read_stack(item, |id| level.item_key_by_name(id))

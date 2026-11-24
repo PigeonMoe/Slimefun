@@ -5,7 +5,7 @@ use std::sync::RwLock;
 
 use mod_api::{
     AttachmentCodec, AttachmentError, AttachmentType, BlockDropsEvent, Compound, Holder, Host,
-    HostSide, HostTransaction, ITEMS, InteractionResult, ItemKey, ItemPart, ItemStack, LevelHost,
+    HostSide, HostTransaction, ITEMS, InteractionResult, ItemPart, ItemStack, LevelHost,
     LevelRef, OnBlockPlacedByEvent, ServerHost, Tag, Text, UseOnEvent,
 };
 
@@ -287,19 +287,13 @@ fn try_store(
     .is_ok()
 }
 
-pub(crate) fn restore_drop(level: &dyn LevelHost, event: &mut BlockDropsEvent<'_>, chest: ItemKey) {
-    let Some(entity) = event.block_entity else {
-        return;
-    };
-    if !marked(level, entity) {
-        return;
-    }
-    if let Some(drop) = event
-        .drops
-        .iter_mut()
-        .find(|drop| drop.stack.item() == chest)
-    {
-        OUTPUT_CHEST.decorate(&mut drop.stack);
+pub(crate) fn restore_drop(
+    level: &dyn LevelHost,
+    event: &mut BlockDropsEvent<'_>,
+    shell: crate::block_drops::Shell,
+) {
+    if event.block_entity.is_some_and(|entity| marked(level, entity)) {
+        shell.restore(level, event, OUTPUT_CHEST);
     }
 }
 

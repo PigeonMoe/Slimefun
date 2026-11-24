@@ -631,7 +631,11 @@ mod tests {
     }
 }
 
-pub(crate) fn restore_drop(level: &dyn LevelHost, event: &mut BlockDropsEvent<'_>) {
+pub(crate) fn restore_drop(
+    level: &dyn LevelHost,
+    event: &mut BlockDropsEvent<'_>,
+    shell: crate::block_drops::Shell,
+) {
     let Some(entity) = event.block_entity else {
         return;
     };
@@ -640,11 +644,7 @@ pub(crate) fn restore_drop(level: &dyn LevelHost, event: &mut BlockDropsEvent<'_
     }) {
         return;
     }
-    if let Some(key) = level.item_key_by_name(BLOCK_PLACER.material())
-        && let Some(drop) = event.drops.iter_mut().find(|drop| drop.stack.item() == key)
-    {
-        BLOCK_PLACER.decorate(&mut drop.stack);
-    }
+    shell.restore(level, event, BLOCK_PLACER);
 }
 
 pub(crate) fn restore_paper(
