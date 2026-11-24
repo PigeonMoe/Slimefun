@@ -9,7 +9,8 @@ use mod_api::{
 };
 
 use super::{
-    Component, Networks, Node, Position, factory_identity, item_id, parse_uuid, read_stack,
+    Component, Networks, Node, Position, factory_identity, item_id,
+    network_paper_order::PaperLocations, parse_uuid, read_stack,
 };
 
 pub(super) const FILTER_SLOTS: [usize; 9] = [19, 20, 21, 28, 29, 30, 37, 38, 39];
@@ -862,54 +863,73 @@ fn attached_inventory(
     Some((pos, InventoryKind::from_block(&state.block().id(host))?))
 }
 
+fn terminal(
+    host: &mut dyn ServerHost,
+    level: LevelRef,
+    pos: Position,
+    node: &Node,
+    options: CargoSettings,
+) -> Option<Terminal> {
+    let (inventory, kind) = attached_inventory(host, level, pos)?;
+    let filter = Filter::new(host, node, &options)?;
+    Some(Terminal {
+        pos,
+        inventory,
+        kind,
+        options,
+        filter,
+    })
+}
+
 pub(super) fn tick(
     networks: &Mutex<Networks>,
     host: &mut dyn ServerHost,
     level: LevelRef,
     network: (&str, Position),
     active: &BTreeMap<Position, (&Node, u32)>,
-    group: &[Position],
+    (inputs, outputs): (&[Position], &[Position]),
+    world_uuid: u128,
     delete_excess_items: bool,
     profile: &mut crate::timings::Cycle,
 ) -> u64 {
-    let mut inputs = Vec::new();
-    let mut outputs = BTreeMap::<u8, Vec<_>>::new();
+    let mut input_map = PaperLocations::default();
+    let mut input_terminals = BTreeMap::new();
     let mut input_elapsed: u64 = 0;
-    for &pos in group {
+    for &pos in inputs {
         let node = active[&pos].0;
-        if !matches!(
-            node.component,
-            Component::CargoInput | Component::CargoOutput { .. }
-        ) {
+        if node.component != Component::CargoInput {
             continue;
         }
-        let started =
-            (node.component == Component::CargoInput).then(|| host.server_monotonic_nanos());
+        let started = host.server_monotonic_nanos();
         let options = node.cargo_settings(host, level, pos);
-        let channel = options.channel;
-        let terminal = attached_inventory(host, level, pos).and_then(|(inventory, kind)| {
-            let filter = Filter::new(host, node, &options)?;
-            Some(Terminal {
-                pos,
-                inventory,
-                kind,
-                options,
-                filter,
-            })
-        });
-        if let Some(started) = started.filter(|_| channel < 16) {
-            let elapsed = host.server_monotonic_nanos().saturating_sub(started);
-            input_elapsed = input_elapsed.saturating_add(elapsed);
-            profile.record(&node.id, pos, elapsed);
-            inputs.extend(terminal.map(|terminal| (&node.id, terminal)));
-        } else if matches!(node.component, Component::CargoOutput { .. }) {
-            // Paper counts even temporarily unusable output nodes in this channel.
-            outputs.entry(channel).or_default().push(terminal);
+        if options.channel >= 16 {
+            continue;
         }
+        // Paper builds a fresh location map from its persistent input set.
+        // An unattached input still affects the fresh map's bucket order.
+        input_map.insert(world_uuid, pos);
+        let target = terminal(host, level, pos, node, options);
+        let elapsed = host.server_monotonic_nanos().saturating_sub(started);
+        input_elapsed = input_elapsed.saturating_add(elapsed);
+        profile.record(&node.id, pos, elapsed);
+        input_terminals.extend(target.map(|terminal| (pos, (&node.id, terminal))));
     }
-    for (id, input) in &inputs {
+    let mut output_channels = BTreeMap::<u8, Vec<_>>::new();
+    for &pos in outputs {
+        let node = active[&pos].0;
+        if !matches!(node.component, Component::CargoOutput { .. }) {
+            continue;
+        }
+        let options = node.cargo_settings(host, level, pos);
+        // Paper counts even temporarily unusable output nodes in this channel.
+        output_channels
+            .entry(options.channel)
+            .or_default()
+            .push(terminal(host, level, pos, node, options));
+    }
+    for (id, input) in input_map.iter().filter_map(|pos| input_terminals.get(&pos)) {
         let (_, elapsed) = profile.measure(host, id, input.pos, |host| {
-            let Some(outputs) = outputs.get(&input.options.channel) else {
+            let Some(outputs) = output_channels.get(&input.options.channel) else {
                 return;
             };
             let cursor = if input.options.round_robin {
@@ -1583,6 +1603,65 @@ mod tests {
             .slots[0]
             .as_ref()
             .map_or(0, ItemStack::count)
+    }
+
+    #[test]
+    fn paper_world_uuid_orders_two_cargo_destinations_before_round_robin() {
+        use super::super::{Discovery, Order};
+
+        let uuid = 0x752d5d2e_80e8_4d64_bc4d_4c60790f6bd4;
+        let manager = [9044, 245, 9121];
+        let input = [9044, 245, 9122];
+        let a = [9043, 245, 9121];
+        let b = [9045, 245, 9121];
+        let node = |id: &str| Node {
+            id: id.to_owned(),
+            component: Component::for_item(id).unwrap(),
+            channel: 0,
+            passes_unfiltered: true,
+        };
+        let manager_node = node("CARGO_MANAGER");
+        let input_node = node("CARGO_NODE_INPUT");
+        let output_node = node("CARGO_NODE_OUTPUT");
+        let active = BTreeMap::from([
+            (manager, (&manager_node, 0)),
+            (input, (&input_node, 0)),
+            (a, (&output_node, 0)),
+            (b, (&output_node, 0)),
+        ]);
+        let mut discovery = Discovery::default();
+        discovery.set_world_uuid(Some(uuid));
+        let groups = discovery.discover(&active, 200, |_| true);
+        let ordered = discovery.ordered_members(manager, Order::CargoOutput, &groups[0].2);
+        assert_eq!(ordered, [b, a]);
+
+        let (mut host, item, mut source, mut outputs) = round_robin_fixture();
+        let level = host.level.level();
+        let mut attach = |terminal: &mut Terminal, [x, y, z]| {
+            terminal.pos = [x, y, z];
+            terminal.inventory = [x, y, z + 1];
+            host.level.block_entity(terminal.inventory).with_items(1);
+        };
+        attach(&mut source, input);
+        for (&pos, terminal) in ordered.iter().zip(&mut outputs) {
+            attach(terminal.as_mut().unwrap(), pos);
+        }
+        let outputs = &outputs[..2];
+        let restock = |host: &mut FakeHost| {
+            host.level
+                .block_entity(source.inventory)
+                .items
+                .as_mut()
+                .unwrap()
+                .slots[0] = ItemStack::new(item, 1);
+        };
+        restock(&mut host);
+        let cursor = route(&mut host, level, &source, outputs, 0, |_, _, _, _| true).unwrap();
+        let [a, b] = [a, b].map(|[x, y, z]| [x, y, z + 1]);
+        assert_eq!((cargo_test_count(&host, a), cargo_test_count(&host, b)), (0, 1));
+        restock(&mut host);
+        route(&mut host, level, &source, outputs, cursor, |_, _, _, _| true).unwrap();
+        assert_eq!((cargo_test_count(&host, a), cargo_test_count(&host, b)), (1, 1));
     }
 
     #[test]

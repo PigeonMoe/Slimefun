@@ -35,6 +35,8 @@ mod cargo_topology;
 pub(crate) use cargo_topology::paper_text;
 #[path = "network_discovery.rs"]
 mod network_discovery;
+#[path = "network_paper_order.rs"]
+mod network_paper_order;
 #[path = "network_visuals.rs"]
 mod network_visuals;
 #[path = "plain_network.rs"]
@@ -44,12 +46,12 @@ pub(crate) mod trash;
 
 pub(crate) use cargo_menu::{menu_click, menu_closed, register as register_cargo, use_node};
 use cargo_topology::{CargoSettings, FILTER_SLOTS};
-use network_discovery::Discovery;
+use network_discovery::{Discovery, Order};
 use network_visuals::Status;
 pub(crate) use network_visuals::paper_hologram_id;
 pub(crate) use plain_network::{
-    CARRIERS as PLAIN_CARRIERS, dimension as dimension_name, is_carrier as is_plain_carrier,
-    NODES as PLAIN_NODES, observe_plain_change,
+    CARRIERS as PLAIN_CARRIERS, NODES as PLAIN_NODES, dimension as dimension_name,
+    is_carrier as is_plain_carrier, observe_plain_change,
 };
 
 type Position = [i32; 3];
@@ -63,13 +65,13 @@ struct BlockData {
     cargo_visualizer_disabled: bool,
     reactor_production: bool,
     stored_experience: i32,
-    gps_owner: Option<u128>,
+    owner: Option<u128>,
     elevator_floor: Option<String>,
 }
 
 impl BlockData {
     fn rename_floor(&mut self, owner: u128, name: &str) -> bool {
-        if self.gps_owner != Some(owner) {
+        if self.owner != Some(owner) {
             return false;
         }
         self.elevator_floor = Some(name.to_owned());
@@ -102,7 +104,7 @@ static NETWORK_STATE: AttachmentType<BlockData> = AttachmentType {
             if value.stored_experience != 0 {
                 data.insert("stored_exp".into(), Tag::Int(value.stored_experience));
             }
-            if let Some(owner) = value.gps_owner {
+            if let Some(owner) = value.owner {
                 data.insert(
                     "owner".into(),
                     Tag::String(format!("{owner:032x}").as_str().into()),
@@ -139,7 +141,7 @@ static NETWORK_STATE: AttachmentType<BlockData> = AttachmentType {
                     Some(Tag::Int(points)) => *points,
                     _ => return Err(AttachmentError::Decode),
                 },
-                gps_owner: match data.get(&"owner".into()) {
+                owner: match data.get(&"owner".into()) {
                     None => None,
                     Some(Tag::String(owner)) => Some(
                         parse_uuid(&owner.to_string().map_err(|_| AttachmentError::Decode)?)
@@ -409,8 +411,9 @@ impl ItemPart for NetworkPlacement {
         };
         if matches!(node.component, Component::GpsTransmitter { .. })
             || crate::gps_transport::needs_owner(&id)
+            || id == experience_collector::XP_COLLECTOR.id()
         {
-            data.gps_owner = Some(player.uuid());
+            data.owner = Some(player.uuid());
         }
         if let Some(cargo) = &mut data.cargo {
             cargo.owner = Some(player.uuid());
@@ -754,7 +757,7 @@ impl Networks {
         let (node, mut data) = imported(id, metadata)?;
         if (matches!(node.component, Component::GpsTransmitter { .. })
             || crate::gps_transport::needs_owner(id))
-            && data.gps_owner.is_none()
+            && data.owner.is_none()
         {
             return Err("The Paper GPS device is missing a valid owner UUID.".into());
         }
@@ -822,6 +825,7 @@ impl Networks {
             return Err("Load the matching Paper network block in the active dimension.".into());
         }
         let component = node.component;
+        let network_part = node.family() != Network::Independent;
         if is_plain_node(component) {
             plain_network::prepare_placement(host, level, pos)
                 .map_err(|_| "The block's previous machine state could not be cleared.")?;
@@ -860,10 +864,13 @@ impl Networks {
             }
             Ok::<_, String>(())
         })?;
-        if fresh_regulator
-            && let Some(discovery) = self.discoveries.get_mut(&dimension)
-        {
-            discovery.retire_regulator(pos);
+        if let Some(discovery) = self.discoveries.get_mut(&dimension) {
+            if fresh_regulator {
+                discovery.retire_regulator(pos);
+            }
+            if next.is_some() && network_part {
+                discovery.placed(pos);
+            }
         }
         if let Some(next) = next {
             self.levels.insert(dimension, Arc::new(next));
@@ -957,9 +964,9 @@ fn merge_import(
     if !import {
         return Ok(None);
     }
-    let restore_owner = old.gps_owner.is_none() && paper.gps_owner.is_some();
+    let restore_owner = old.owner.is_none() && paper.owner.is_some();
     if restore_owner {
-        old.gps_owner = paper.gps_owner;
+        old.owner = paper.owner;
         if old.elevator_floor.is_none() {
             old.elevator_floor = paper.elevator_floor;
         }
@@ -1011,6 +1018,9 @@ fn imported(id: &str, metadata: &toml::Table) -> Result<(Node, BlockData), &'sta
                     .unwrap_or("0")
                     .parse()
                     .map_err(|_| "Invalid Paper stored experience.")?;
+                // Legacy archives may omit the placer. Paper records this UUID
+                // as metadata and does not use it to control the collector.
+                data.owner = field("owner").and_then(parse_uuid);
             }
         }
         Component::CargoInput | Component::CargoOutput { .. } => {
@@ -1024,7 +1034,7 @@ fn imported(id: &str, metadata: &toml::Table) -> Result<(Node, BlockData), &'sta
     if matches!(component, Component::GpsTransmitter { .. })
         || crate::gps_transport::needs_owner(id)
     {
-        data.gps_owner = field("owner")
+        data.owner = field("owner")
             .map(|owner| parse_uuid(owner).ok_or("Invalid Paper GPS device owner UUID."))
             .transpose()?;
     }
@@ -1280,7 +1290,7 @@ pub(crate) fn elevator_floor(
 ) -> Option<(u128, String)> {
     let data = elevator_data(host, level, pos)?;
     Some((
-        data.gps_owner?,
+        data.owner?,
         data.elevator_floor
             .unwrap_or_else(|| crate::elevator::DEFAULT_FLOOR.to_owned()),
     ))
@@ -1307,7 +1317,7 @@ pub(crate) fn gps_device_at(
     let data = block_data(host, level, pos)?;
     let kind = crate::gps_transport::fixed(&data.id)?;
     let carrier = level.block(host, pos)?.id(host);
-    accepts_carrier(Component::GpsDevice(kind), &carrier).then_some((kind, data.gps_owner))
+    accepts_carrier(Component::GpsDevice(kind), &carrier).then_some((kind, data.owner))
 }
 
 pub(crate) fn gps_panel_at(host: &mut dyn ServerHost, level: LevelRef, pos: Position) -> bool {
@@ -1710,18 +1720,19 @@ pub(crate) fn tick(
         }
     }
     let mut loaded_chunks = BTreeMap::new();
-    let groups = networks
-        .lock()
-        .unwrap()
-        .discoveries
-        .entry(dimension.clone())
-        .or_default()
-        .discover(&active, settings.network_discovery_budget, |pos| {
+    let world_uuid = level.world_uuid(host);
+    let (groups, world_uuid) = {
+        let mut networks = networks.lock().unwrap();
+        let discovery = networks.discoveries.entry(dimension.clone()).or_default();
+        let world_uuid = discovery.set_world_uuid(world_uuid);
+        let groups = discovery.discover(&active, settings.network_discovery_budget, |pos| {
             let column = [pos[0].div_euclid(16), pos[2].div_euclid(16)];
             *loaded_chunks
                 .entry(column)
                 .or_insert_with(|| level.is_loaded(host, pos))
         });
+        (groups, world_uuid)
+    };
     for (start, family, group) in groups {
         if !active.contains_key(&start) {
             let conflict = match family {
@@ -1739,12 +1750,20 @@ pub(crate) fn tick(
                 let status = if group.iter().all(|pos| active[pos].0.regulator()) {
                     Some(Status::EnergyEmpty)
                 } else {
+                    let ordered = {
+                        let networks = networks.lock().unwrap();
+                        let discovery = &networks.discoveries[&dimension];
+                        [Order::Generator, Order::Capacitor, Order::Consumer]
+                            .into_iter()
+                            .flat_map(|order| discovery.ordered_members(start, order, &group))
+                            .collect::<Vec<_>>()
+                    };
                     tick_energy(
                         host,
                         level,
                         &dimension,
                         &active,
-                        &group,
+                        &ordered,
                         rolls,
                         settings.solar_night_in_other_dimensions,
                         &machine_recipes.fuels,
@@ -1777,13 +1796,22 @@ pub(crate) fn tick(
                             network_visuals::cargo_particles(host, level, terminals);
                         }
                         let started = host.server_monotonic_nanos();
+                        let ordered = {
+                            let networks = networks.lock().unwrap();
+                            let discovery = &networks.discoveries[&dimension];
+                            (
+                                discovery.ordered_members(start, Order::CargoInput, &group),
+                                discovery.ordered_members(start, Order::CargoOutput, &group),
+                            )
+                        };
                         let inputs = cargo_topology::tick(
                             networks,
                             host,
                             level,
                             (&dimension, start),
                             &active,
-                            &group,
+                            (&ordered.0, &ordered.1),
+                            world_uuid,
                             settings.cargo_delete_excess_items,
                             profile,
                         );
@@ -1822,7 +1850,7 @@ pub(crate) fn tick(
             && let Ok(signal) = profile.measure(host, &node.id, pos, |host| {
                 host.transaction(|host, _| {
                     let mut data = block_data(host, level, pos).ok_or(())?;
-                    let owner = data.gps_owner.ok_or(())?;
+                    let owner = data.owner.ok_or(())?;
                     data.charge = data.charge.checked_sub(transmitter.cost).ok_or(())?;
                     write_data(host, pos, data).map_err(|_| ())?;
                     Ok::<_, ()>((owner, transmitter.strength(pos[1])))
@@ -2498,6 +2526,56 @@ mod tests {
     }
 
     #[test]
+    fn paper_experience_collector_owner_survives_reload_and_legacy_backfill() {
+        let id = experience_collector::XP_COLLECTOR.id();
+        let owner = 0x2728cc32_8191_44e7_86c9_2120aa3896c4;
+        let paper_metadata: toml::Table = "
+            owner = '2728cc32-8191-44e7-86c9-2120aa3896c4'
+            energy-charge = '12'
+            stored-exp = '231'
+        "
+        .parse()
+        .unwrap();
+        let (node, archived) = imported(id, &paper_metadata).unwrap();
+        assert_eq!(
+            (archived.owner, archived.charge, archived.stored_experience),
+            (Some(owner), 12, 231)
+        );
+        let codec = NETWORK_STATE.codec.as_ref().unwrap();
+        let tag = (codec.encode)(&archived).unwrap();
+        assert_eq!(
+            tag.get(&"owner".into()),
+            Some(&Tag::String("2728cc32819144e786c92120aa3896c4".into()))
+        );
+        let reloaded = (codec.decode)(&tag).unwrap();
+        assert_eq!(
+            (reloaded.owner, reloaded.charge, reloaded.stored_experience),
+            (Some(owner), 12, 231)
+        );
+
+        for legacy_metadata in [toml::Table::new(), "owner = 'broken'".parse().unwrap()] {
+            let (_, mut legacy) = imported(id, &legacy_metadata).unwrap();
+            assert_eq!(legacy.owner, None);
+            legacy.charge = 8;
+            legacy.stored_experience = 173;
+            let backfilled = merge_import(Some(legacy), archived.clone(), &node, true)
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                (backfilled.owner, backfilled.charge, backfilled.stored_experience),
+                (Some(owner), 8, 173)
+            );
+            let mut placed = backfilled;
+            placed.owner = Some(1);
+            assert!(
+                merge_import(Some(placed), archived.clone(), &node, true)
+                    .unwrap()
+                    .is_none()
+            );
+        }
+    }
+
+    #[test]
     fn restore_reports_a_damaged_network_attachment_before_touching_the_registration() {
         let mut host = FakeHost::new();
         let pos = [12, 66, -7];
@@ -2553,7 +2631,7 @@ mod tests {
         assert!(is_plain_node(node.component));
         assert!(accepts_carrier(node.component, "minecraft:stone_pressure_plate"));
         assert!(crate::gps_transport::needs_owner(id));
-        assert_eq!(data.gps_owner, Some(owner));
+        assert_eq!(data.owner, Some(owner));
         assert_eq!(data.elevator_floor.as_deref(), Some("§b旧大厅"));
         assert_eq!(
             imported(id, &toml::Table::new()).unwrap().1.elevator_floor.as_deref(),
@@ -2566,7 +2644,7 @@ mod tests {
         write_data(&mut host, pos, data).unwrap();
         host.attachments = mod_api::Attachments::from_nbt(host.attachments.to_nbt());
         let mut loaded = plain_network::read_persisted(&mut host, pos).unwrap();
-        assert_eq!(loaded.gps_owner, Some(owner));
+        assert_eq!(loaded.owner, Some(owner));
         assert_eq!(loaded.elevator_floor.as_deref(), Some("§b旧大厅"));
         assert!(!loaded.rename_floor(owner + 1, "Foreign name"));
         assert!(loaded.rename_floor(owner, "&6大厅"));
@@ -2695,14 +2773,14 @@ mod tests {
             assert!(matches!(node.family(), Network::Independent));
             assert!(is_plain_node(node.component));
             assert!(accepts_carrier(node.component, material));
-            assert_eq!(data.gps_owner, parse_uuid(id));
+            assert_eq!(data.owner, parse_uuid(id));
             write_data(&mut host, position, data).unwrap();
         }
         let mut reopened = FakeHost::new();
         reopened.attachments = mod_api::Attachments::from_nbt(host.attachments.to_nbt());
         for position in [[-1, 65, 15], [0, 65, 16]] {
             let data = plain_network::read_persisted(&mut reopened, position).unwrap();
-            assert_eq!(data.gps_owner, parse_uuid(id));
+            assert_eq!(data.owner, parse_uuid(id));
         }
         let (shared, data) = imported("GPS_ACTIVATION_DEVICE_SHARED", &toml::Table::new()).unwrap();
         assert!(is_plain_node(shared.component));
@@ -2710,7 +2788,7 @@ mod tests {
             shared.component,
             "minecraft:stone_pressure_plate"
         ));
-        assert_eq!(data.gps_owner, None);
+        assert_eq!(data.owner, None);
 
         let (pylon, data) = imported(GPS_TELEPORTER_PYLON.id(), &toml::Table::new()).unwrap();
         assert!(matches!(pylon.family(), Network::Independent));
@@ -2720,7 +2798,7 @@ mod tests {
         }
         assert!(!accepts_carrier(pylon.component, "minecraft:blue_stained_glass"));
         assert_eq!(data.id, GPS_TELEPORTER_PYLON.id());
-        assert_eq!(data.gps_owner, None);
+        assert_eq!(data.owner, None);
     }
 
     #[test]
@@ -2730,10 +2808,10 @@ mod tests {
                 .parse()
                 .unwrap();
         let (_, transmitter) = imported("GPS_TRANSMITTER_2", &metadata).unwrap();
-        assert_eq!((transmitter.gps_owner, transmitter.charge), (Some(2), 3));
+        assert_eq!((transmitter.owner, transmitter.charge), (Some(2), 3));
         let codec = NETWORK_STATE.codec.as_ref().unwrap();
         let round_trip = (codec.decode)(&(codec.encode)(&transmitter).unwrap()).unwrap();
-        assert_eq!(round_trip.gps_owner, Some(2));
+        assert_eq!(round_trip.owner, Some(2));
 
         let mut networks = Networks::default();
         networks.gps_signals.insert(
@@ -2764,6 +2842,34 @@ mod tests {
             capacity_updates(220, &active, &group),
             vec![([2, 70, 0], 64), ([1, 70, 0], 128), ([0, 70, 0], 28)]
         );
+    }
+
+    #[test]
+    fn paper_world_uuid_breaks_the_tie_between_two_unpowered_consumers() {
+        // Paper 26.2 world metadata and Location order from an OpenJDK 25 oracle.
+        let uuid = 0x752d5d2e_80e8_4d64_bc4d_4c60790f6bd4;
+        let regulator = node("ENERGY_REGULATOR");
+        let generator = node("SOLAR_GENERATOR");
+        let machine = node("ELECTRIC_FURNACE");
+        let root = [9044, 245, 9121];
+        let consumer_a = [9043, 245, 9121];
+        let consumer_b = [9045, 245, 9121];
+        let active = BTreeMap::from([
+            (root, (&regulator, 0)),
+            ([9044, 246, 9121], (&generator, 0)),
+            (consumer_a, (&machine, 0)),
+            (consumer_b, (&machine, 0)),
+        ]);
+        let mut discovery = Discovery::default();
+        discovery.set_world_uuid(Some(uuid));
+        let groups = discovery.discover(&active, 200, |_| true);
+        let consumers = discovery.ordered_members(root, Order::Consumer, &groups[0].2);
+        assert_eq!(consumers, [consumer_b, consumer_a]);
+        let Component::SolarGenerator { day, .. } = generator.component else {
+            panic!("fixture must use the stock solar generator");
+        };
+        assert_eq!(day, 2);
+        assert_eq!(capacity_updates(day, &active, &consumers), [(consumer_b, 2)]);
     }
 
     #[test]

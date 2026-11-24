@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
-use super::{Network, Node, Position};
+use super::{Component, Network, Node, Position, network_paper_order::PaperLocations};
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum Role {
@@ -11,7 +11,23 @@ enum Role {
     Terminal,
 }
 
-type Topology = BTreeMap<Position, (Network, Role)>;
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub(super) enum Order {
+    Consumer,
+    Capacitor,
+    Generator,
+    CargoInput,
+    CargoOutput,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+struct Classification {
+    family: Network,
+    role: Role,
+    order: Option<Order>,
+}
+
+type Topology = BTreeMap<Position, Classification>;
 type Group = (Position, Network, Vec<Position>);
 
 #[derive(Default)]
@@ -20,9 +36,39 @@ pub(super) struct Discovery {
     graphs: BTreeMap<Position, Graph>,
     energy_order: Vec<Position>,
     cargo_order: Vec<Position>,
+    world_uuid: u128,
+    placements: Vec<Position>,
 }
 
 impl Discovery {
+    pub(super) fn set_world_uuid(&mut self, uuid: Option<u128>) -> u128 {
+        if let Some(uuid) = uuid.filter(|&uuid| self.world_uuid != uuid) {
+            self.world_uuid = uuid;
+            self.graphs.clear();
+            self.energy_order.clear();
+            self.cargo_order.clear();
+        }
+        self.world_uuid
+    }
+
+    pub(super) fn placed(&mut self, pos: Position) {
+        self.placements.push(pos);
+    }
+
+    pub(super) fn ordered_members(
+        &self,
+        root: Position,
+        order: Order,
+        group: &[Position],
+    ) -> Vec<Position> {
+        self.graphs.get(&root).map_or_else(Vec::new, |graph| {
+            graph.order[order as usize]
+                .iter()
+                .filter(|pos| group.binary_search(pos).is_ok())
+                .collect()
+        })
+    }
+
     pub(super) fn discover(
         &mut self,
         active: &BTreeMap<Position, (&Node, u32)>,
@@ -43,7 +89,26 @@ impl Discovery {
                 } else {
                     Role::Terminal
                 };
-                Some((pos, (family, role)))
+                let order = match node.component {
+                    Component::ElectricMachine { .. } | Component::GpsTransmitter { .. } => {
+                        Some(Order::Consumer)
+                    }
+                    Component::Capacitor(_) => Some(Order::Capacitor),
+                    Component::FuelGenerator { .. } | Component::SolarGenerator { .. } => {
+                        Some(Order::Generator)
+                    }
+                    Component::CargoInput => Some(Order::CargoInput),
+                    Component::CargoOutput { .. } => Some(Order::CargoOutput),
+                    _ => None,
+                };
+                Some((
+                    pos,
+                    Classification {
+                        family,
+                        role,
+                        order,
+                    },
+                ))
             })
             .collect();
         // Unloading a chunk does not unregister Paper's networks. Keep
@@ -84,7 +149,10 @@ impl Discovery {
         let mut unclaimed: BTreeSet<_> = active
             .keys()
             .filter_map(|&pos| {
-                (self.topology.get(&pos) == Some(&(family, Role::Regulator))).then_some(pos)
+                self.topology
+                    .get(&pos)
+                    .is_some_and(|entry| entry.family == family && entry.role == Role::Regulator)
+                    .then_some(pos)
             })
             .collect();
         if unclaimed.is_empty() {
@@ -107,7 +175,7 @@ impl Discovery {
             } else {
                 let mut members = Vec::new();
                 if unclaimed.remove(&root) {
-                    graph.advance(&self.topology, root, family, budget);
+                    graph.advance(&self.topology, root, family, budget, self.world_uuid);
                     members.extend(graph.members.iter().copied().filter(|pos| {
                         active.get(pos).is_some_and(|(node, _)| {
                             *pos == root || (!node.regulator() && claimed_members.insert(*pos))
@@ -154,33 +222,44 @@ impl Discovery {
         true
     }
 
-    pub(super) fn cargo_cursors(&mut self, root: Position) -> Option<&mut BTreeMap<Position, usize>> {
+    pub(super) fn cargo_cursors(
+        &mut self,
+        root: Position,
+    ) -> Option<&mut BTreeMap<Position, usize>> {
         self.graphs
             .get_mut(&root)
             .map(|graph| &mut graph.cargo_cursors)
     }
 
     fn update(&mut self, topology: Topology) {
+        let placements = std::mem::take(&mut self.placements);
         if self.topology == topology {
             return;
         }
-        let changes: BTreeSet<_> = self
+        let role = |entry: Option<&Classification>| entry.map(|entry| (entry.family, entry.role));
+        let mut changed: BTreeSet<_> = self
             .topology
             .keys()
             .chain(topology.keys())
             .copied()
-            .filter(|pos| self.topology.get(pos) != topology.get(pos))
+            // Paper calls its network hooks only when the classification changes.
+            .filter(|pos| role(self.topology.get(pos)) != role(topology.get(pos)))
             .collect();
+        let mut changes: Vec<_> = placements
+            .into_iter()
+            .filter(|pos| changed.remove(pos))
+            .collect();
+        changes.extend(changed);
         self.graphs.retain(|start, graph| {
-            let Some(&(family, Role::Regulator)) = topology.get(start) else {
+            let Some((family, Role::Regulator)) = role(topology.get(start)) else {
                 return false;
             };
-            if self.topology.get(start) != topology.get(start)
+            if role(self.topology.get(start)) != role(topology.get(start))
                 || changes.iter().any(|pos| {
                     graph.members.contains(pos)
                         && matches!(
-                            self.topology.get(pos),
-                            Some((old, Role::Regulator | Role::Relay)) if *old == family
+                            role(self.topology.get(pos)),
+                            Some((old, Role::Regulator | Role::Relay)) if old == family
                         )
                 })
             {
@@ -188,12 +267,13 @@ impl Discovery {
             }
             for &pos in &changes {
                 if graph.seen.contains(&pos)
-                    && [self.topology.get(&pos), topology.get(&pos)]
+                    && [role(self.topology.get(&pos)), role(topology.get(&pos))]
                         .into_iter()
                         .flatten()
-                        .any(|&(changed, _)| changed == family)
+                        .any(|(changed, _)| changed == family)
                 {
                     graph.members.remove(&pos);
+                    graph.remove_from_order(self.world_uuid, pos);
                     graph.queue(pos);
                 }
             }
@@ -211,6 +291,7 @@ struct Graph {
     queued: BTreeSet<Position>,
     pending: VecDeque<Position>,
     members: BTreeSet<Position>,
+    order: [PaperLocations; 5],
     cargo_elapsed: u32,
     // A rebuilt CargoNet starts again at the first output for each input.
     cargo_cursors: BTreeMap<Position, usize>,
@@ -223,6 +304,7 @@ impl Graph {
             queued: BTreeSet::from([start]),
             pending: VecDeque::from([start]),
             members: BTreeSet::from([start]),
+            order: Default::default(),
             cargo_elapsed: 0,
             cargo_cursors: BTreeMap::new(),
         }
@@ -234,7 +316,20 @@ impl Graph {
         }
     }
 
-    fn advance(&mut self, topology: &Topology, root: Position, family: Network, budget: u32) {
+    fn remove_from_order(&mut self, uuid: u128, pos: Position) {
+        for members in &mut self.order {
+            members.remove(uuid, pos);
+        }
+    }
+
+    fn advance(
+        &mut self,
+        topology: &Topology,
+        root: Position,
+        family: Network,
+        budget: u32,
+        world_uuid: u128,
+    ) {
         let range = match family {
             Network::Energy => 7,
             Network::Cargo => 6,
@@ -245,7 +340,12 @@ impl Graph {
                 break;
             };
             self.queued.remove(&pos);
-            let Some(&(kind, role)) = topology.get(&pos) else {
+            let Some(&Classification {
+                family: kind,
+                role,
+                order,
+            }) = topology.get(&pos)
+            else {
                 continue;
             };
             // Only CargoNet classifies another regulator as a relay.
@@ -254,7 +354,11 @@ impl Graph {
             {
                 continue;
             }
-            self.members.insert(pos);
+            if self.members.insert(pos)
+                && let Some(order) = order
+            {
+                self.order[order as usize].insert(world_uuid, pos);
+            }
             if role == Role::Terminal {
                 continue;
             }

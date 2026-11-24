@@ -165,6 +165,8 @@ python3 horizon/tools/import-research.py probe-horizon-catalog.json \
 
 使用 PyYAML 将 Paper 的 Slimefun 方块元数据和容器档案转换到已迁移的 Horizon 世界。先停止 Paper 服务器，或对同一时间点的快照执行导入。
 
+随世界保留各维度的 `data/paper/metadata.dat`，可以沿用原维度 UUID。能源不足时的设备供电顺序和同频道货运的起始目的地随该 UUID 计算。货运仍按每个节点配置的轮询和智能填充规则运行。旧世界只有 Slimefun 方块档案时，由 Horizon 世界自己的 UUID 决定顺序。如有坐标在 Java 集合中产生完全相同的哈希并进入树桶，Horizon 按插入先后打破平局。Java 在此使用每次运行分配的对象标识。
+
 ```sh
 python3 horizon/tools/import-block-storage.py \
   /path/to/paper/data-storage/Slimefun \
