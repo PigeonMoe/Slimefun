@@ -62,6 +62,7 @@ mod hand_machine;
 mod heated_pressure;
 mod hologram_projector;
 mod ignition_chamber;
+mod inventory_destruction;
 mod industrial_miner;
 mod item_clicks;
 mod infernal_bonemeal;
@@ -476,8 +477,7 @@ impl Hooks for Slimefun {
         registrar.item_part(dispenser, block_placer::Placement);
         let chest = registrar.item_key("minecraft:chest");
         registrar.item_part(chest, output_chest::ChestPlacement);
-        let chest_block = registrar.block_key("minecraft:chest");
-        registrar.block_part(chest_block, output_chest::ChestDestruction);
+        inventory_destruction::register(registrar);
         *self.chest.lock().unwrap() = Some(chest);
         for id in [
             "minecraft:player_head",

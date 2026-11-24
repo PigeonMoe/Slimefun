@@ -101,7 +101,13 @@ fn decode_owner(data: &Compound) -> Option<Option<u128>> {
 }
 
 pub(crate) fn marked(host: &dyn Host, entity: BlockEntityRef) -> bool {
-    marker(host, entity).is_some()
+    has_saved_marker(|namespace, name| host.block_entity_saved_attachment(entity, namespace, name))
+}
+
+pub(crate) fn has_saved_marker(read: impl FnOnce(&str, &str) -> Option<Compound>) -> bool {
+    read(OWNER.namespace, OWNER.name)
+        .and_then(|data| decode_owner(&data))
+        .is_some()
 }
 
 fn marker(host: &dyn Host, entity: BlockEntityRef) -> Option<Option<u128>> {
@@ -629,11 +635,9 @@ pub(crate) fn restore_drop(level: &dyn LevelHost, event: &mut BlockDropsEvent<'_
     let Some(entity) = event.block_entity else {
         return;
     };
-    if level
-        .block_entity_saved_attachment(entity, OWNER.namespace, OWNER.name)
-        .and_then(|data| decode_owner(&data))
-        .is_none()
-    {
+    if !has_saved_marker(|namespace, name| {
+        level.block_entity_saved_attachment(entity, namespace, name)
+    }) {
         return;
     }
     if let Some(key) = level.item_key_by_name(BLOCK_PLACER.material())

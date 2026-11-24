@@ -4,10 +4,9 @@ use std::collections::BTreeSet;
 use std::sync::RwLock;
 
 use mod_api::{
-    AttachmentCodec, AttachmentError, AttachmentType, BlockDropsEvent, BlockPart, BlockUpdateFlags,
-    CanDropFromExplosionEvent, Compound, Holder, Host, HostSide, HostTransaction, ITEMS,
-    InteractionResult, ItemKey, ItemPart, ItemStack, LevelHost, LevelRef, OnBlockExplodedEvent,
-    OnBlockPlacedByEvent, OnMobBlockBreakEvent, ServerHost, Tag, Text, UseOnEvent,
+    AttachmentCodec, AttachmentError, AttachmentType, BlockDropsEvent, Compound, Holder, Host,
+    HostSide, HostTransaction, ITEMS, InteractionResult, ItemKey, ItemPart, ItemStack, LevelHost,
+    LevelRef, OnBlockPlacedByEvent, ServerHost, Tag, Text, UseOnEvent,
 };
 
 use crate::items::OUTPUT_CHEST;
@@ -112,60 +111,6 @@ impl ItemPart for ChestPlacement {
             let _ = MARKER.set(host, Holder::BlockEntity(event.pos), true);
         }
     }
-}
-
-pub(crate) struct ChestDestruction;
-
-#[mod_api::horizon_part]
-impl BlockPart for ChestDestruction {
-    fn can_drop_from_explosion(
-        &self,
-        level: &dyn LevelHost,
-        event: &mut CanDropFromExplosionEvent<'_>,
-    ) -> Option<bool> {
-        let pos = [event.pos.x, event.pos.y, event.pos.z];
-        level
-            .block_entity_at(pos)
-            .is_some_and(|entity| marked(level, entity))
-            .then_some(false)
-    }
-
-    fn on_block_exploded(&self, host: &mut dyn ServerHost, event: &mut OnBlockExplodedEvent<'_>) {
-        if let Some(level) = host.level(event.explosion.dimension) {
-            discard_without_drops(host, level, [event.pos.x, event.pos.y, event.pos.z]);
-        }
-    }
-
-    fn on_mob_block_break(&self, host: &mut dyn ServerHost, event: &mut OnMobBlockBreakEvent<'_>) {
-        if event.kind == "minecraft:wither"
-            && let Some(level) = host.level(host.dimension())
-        {
-            discard_without_drops(host, level, [event.pos.x, event.pos.y, event.pos.z]);
-        }
-    }
-}
-
-/// Paper removes an Output Chest hit by an explosion or a direct Wither
-/// break. Replacing it before vanilla removal suppresses the inventory spill
-/// and still updates neighboring blocks.
-pub(crate) fn discard_without_drops(
-    host: &mut dyn ServerHost,
-    level: LevelRef,
-    pos: [i32; 3],
-) -> bool {
-    if !host
-        .block_entity(level, pos)
-        .is_some_and(|entity| live_marker(host, entity))
-    {
-        return false;
-    }
-    let Some(air) = host.block_state_id("minecraft:air") else {
-        return false;
-    };
-    let flags = BlockUpdateFlags::NEIGHBORS
-        | BlockUpdateFlags::CLIENTS
-        | BlockUpdateFlags::SKIP_BLOCK_ENTITY_SIDE_EFFECTS;
-    level.set_block(host, pos, air, flags) == Ok(true)
 }
 
 pub(crate) fn restore_paper_marker(
@@ -359,15 +304,16 @@ pub(crate) fn restore_drop(level: &dyn LevelHost, event: &mut BlockDropsEvent<'_
 }
 
 pub(crate) fn live_marker(host: &dyn Host, entity: mod_api::BlockEntityRef) -> bool {
-    placed(host.block_entity_saved_attachment(entity, MARKER.namespace, MARKER.name))
+    has_saved_marker(|namespace, name| host.block_entity_saved_attachment(entity, namespace, name))
 }
 
-fn placed(data: Option<Compound>) -> bool {
-    data.is_some_and(|marker| marker.get(&"placed".into()) == Some(&Tag::Byte(1)))
+pub(crate) fn has_saved_marker(read: impl FnOnce(&str, &str) -> Option<Compound>) -> bool {
+    read(MARKER.namespace, MARKER.name)
+        .is_some_and(|marker| marker.get(&"placed".into()) == Some(&Tag::Byte(1)))
 }
 
 pub(crate) fn marked(level: &dyn LevelHost, entity: mod_api::BlockEntityRef) -> bool {
-    placed(level.block_entity_saved_attachment(entity, MARKER.namespace, MARKER.name))
+    has_saved_marker(|namespace, name| level.block_entity_saved_attachment(entity, namespace, name))
 }
 
 fn adjacent([x, y, z]: [i32; 3]) -> impl Iterator<Item = [i32; 3]> {

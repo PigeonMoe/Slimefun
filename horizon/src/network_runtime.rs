@@ -161,12 +161,36 @@ static NETWORK_STATE: AttachmentType<BlockData> = AttachmentType {
 };
 
 fn saved_id(data: &Compound) -> Option<String> {
+    let id = read_id(data)?;
+    Component::for_item(&id)?;
+    Some(id)
+}
+
+fn read_id(data: &Compound) -> Option<String> {
     let Tag::String(value) = data.get(&"id".into())? else {
         return None;
     };
-    let id = value.to_string().ok()?;
-    Component::for_item(&id)?;
-    Some(id)
+    value.to_string().ok()
+}
+
+pub(crate) fn stock_inventory_marker(
+    material: &str,
+    read: impl FnOnce(&str, &str) -> Option<Compound>,
+) -> bool {
+    read(NETWORK_STATE.namespace, NETWORK_STATE.name)
+        .as_ref()
+        .and_then(read_id)
+        .as_deref()
+        .and_then(Component::for_item)
+        .is_some_and(|component| {
+            matches!(
+                component,
+                Component::AndroidInterface
+                    | Component::IgnitionChamber
+                    | Component::EnhancedFurnace
+                    | Component::InfusedHopper
+            ) && accepts_carrier(component, material)
+        })
 }
 
 pub(crate) fn enhanced_furnace(

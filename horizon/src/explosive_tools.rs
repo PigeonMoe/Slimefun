@@ -224,7 +224,7 @@ impl ExplosiveTools {
             let mut positions = level
                 .filter_block_explosion(host, event.pos, &positions)
                 .unwrap_or_default();
-            positions.retain(|&pos| !crate::output_chest::discard_without_drops(host, level, pos));
+            positions.retain(|&pos| !crate::inventory_destruction::break_without_shell(host, level, pos));
             positions
         } else {
             positions
