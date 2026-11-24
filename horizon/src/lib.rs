@@ -879,6 +879,37 @@ impl Hooks for Slimefun {
         }
     }
 
+    fn block_spread(
+        &self,
+        level: &dyn LevelHost,
+        event: &mut mod_api::BlockSpreadEvent<'_>,
+    ) -> Flow {
+        let pos = [event.to.x, event.to.y, event.to.z];
+        if network_runtime::protect_fluid_flow(level, event.kind, &event.dimension, pos) {
+            Flow::Cancel
+        } else {
+            Flow::Continue
+        }
+    }
+
+    fn bucket_empty(
+        &self,
+        host: &mut dyn ServerHost,
+        event: &mut mod_api::BucketEmptyEvent<'_>,
+    ) -> Flow {
+        let Some(level) = host
+            .player(event.player)
+            .and_then(|player| player.level(host))
+        else {
+            return Flow::Continue;
+        };
+        if network_runtime::protect_bucket(host, level, event.pos) {
+            Flow::Cancel
+        } else {
+            Flow::Continue
+        }
+    }
+
     fn piston_pre(&self, level: &dyn LevelHost, event: &mut mod_api::PistonPreEvent<'_>) -> Flow {
         if network_runtime::protect_piston(level, event) || hologram_projector::piston_protected(level, event) {
             Flow::Cancel

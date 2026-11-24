@@ -291,6 +291,14 @@ fn marker_is_repaired(data: Option<Compound>) -> bool {
     data.as_ref().and_then(|data| data.get(&"repaired".into())) == Some(&Tag::Byte(1))
 }
 
+pub(crate) fn live_marker(host: &dyn Host, entity: mod_api::BlockEntityRef) -> bool {
+    marker_is_repaired(host.block_entity_saved_attachment(
+        entity,
+        REPAIRED.namespace,
+        REPAIRED.name,
+    ))
+}
+
 pub(crate) fn place_repaired(
     host: &mut dyn ServerHost,
     level: LevelRef,

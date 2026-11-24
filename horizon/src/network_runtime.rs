@@ -1090,6 +1090,38 @@ fn save(host: &dyn ServerHost, dimension: &str, nodes: &Nodes) -> Result<(), Str
         .map_err(|error| format!("Slimefun could not save its network registrations: {error}"))
 }
 
+pub(crate) fn protect_fluid_flow(
+    level: &dyn LevelHost,
+    kind: &str,
+    dimension: &mod_api::LevelDimension,
+    pos: Position,
+) -> bool {
+    if kind != "fluid" {
+        return false;
+    }
+    let Some(state) = level.block_state(pos) else {
+        return false;
+    };
+    let Some(material) = level.state_block(state) else {
+        return false;
+    };
+    // Paper's Slimefun tag includes both player heads and Minecraft's saplings.
+    let sensitive = match material {
+        "minecraft:air" | "minecraft:cave_air" | "minecraft:void_air" => false,
+        "minecraft:player_head" | "minecraft:player_wall_head" => true,
+        _ => level.block_in_tag(state.block(), "minecraft:saplings") == Some(true),
+    };
+    sensitive && protected_block(level, dimension, pos)
+}
+
+pub(crate) fn protect_bucket(host: &mut dyn ServerHost, level: LevelRef, pos: Position) -> bool {
+    has_block_marker(host, level, pos)
+        || host.block_entity(level, pos).is_some_and(|entity| {
+            crate::food_machines::live_marker(host, entity)
+                || crate::spawner_repair::live_marker(host, entity)
+        })
+}
+
 pub(crate) fn protect_piston(level: &dyn LevelHost, event: &mod_api::PistonPreEvent<'_>) -> bool {
     let point = |pos: mod_api::BlockPos| [pos.x, pos.y, pos.z];
     let piston = point(event.piston);
@@ -2187,6 +2219,92 @@ fn capacity_updates(
 mod tests {
     use super::*;
     use mod_api::{Identifier, testing::FakeHost};
+
+    #[test]
+    fn fluid_flow_protects_paper_stock_markers_and_leaves_ordinary_blocks_to_vanilla() {
+        use mod_api::{BlockEntityRef, BlockKey, BlockState, BlockStateRecord, LevelDimension};
+
+        const TARGET: Position = [4, 64, 3];
+
+        struct TargetBlock {
+            material: &'static str,
+            entity: BlockEntityRef,
+            attachment: Option<(&'static str, &'static str)>,
+        }
+
+        impl LevelHost for TargetBlock {
+            fn block_state(&self, pos: Position) -> Option<BlockState> {
+                let key = mod_api::__private::parts_installation::block_key(0);
+                (pos == TARGET).then(|| BlockStateRecord::new(key, 0).into())
+            }
+
+            fn state_block(&self, _: BlockState) -> Option<&str> {
+                Some(self.material)
+            }
+
+            fn block_in_tag(&self, _: BlockKey, tag: &str) -> Option<bool> {
+                assert_eq!(tag, "minecraft:saplings");
+                Some(self.material == "minecraft:oak_sapling")
+            }
+
+            fn block_entity_at(&self, pos: Position) -> Option<BlockEntityRef> {
+                (pos == TARGET).then_some(self.entity)
+            }
+
+            fn block_entity_saved_attachment(
+                &self,
+                entity: BlockEntityRef,
+                namespace: &str,
+                key: &str,
+            ) -> Option<Compound> {
+                let (name, id) = self.attachment?;
+                (entity == self.entity && namespace == "slimefun" && key == name)
+                    .then(|| Compound::from([("id".into(), Tag::String(id.into()))]))
+            }
+        }
+
+        let level = FakeHost::new().level.level();
+        let entity = mod_api::__private::game::block_entity_ref(level, TARGET, 1);
+        let network = |id| Some((NETWORK_STATE.name, id));
+        for (material, attachment, protected) in [
+            (
+                "minecraft:player_wall_head",
+                network("CARGO_NODE_INPUT"),
+                true,
+            ),
+            ("minecraft:player_head", network("SMALL_CAPACITOR"), true),
+            (
+                "minecraft:player_head",
+                Some(("placed_produce", "FERTILIZER_CARROT")),
+                true,
+            ),
+            ("minecraft:player_wall_head", None, false),
+            ("minecraft:player_head", None, false),
+            ("minecraft:oak_sapling", None, false),
+            (
+                "minecraft:daylight_detector",
+                network("SOLAR_GENERATOR"),
+                false,
+            ),
+            ("minecraft:player_head", network("CARGO_NODE_INPUT"), false),
+            ("minecraft:player_head", network("not-a-stock-id"), false),
+        ] {
+            let world = TargetBlock {
+                material,
+                entity,
+                attachment,
+            };
+            let dimension = LevelDimension::Overworld;
+            assert_eq!(
+                protect_fluid_flow(&world, "fluid", &dimension, TARGET),
+                protected,
+                "{material}: {attachment:?}"
+            );
+            assert!(!protect_fluid_flow(&world, "fire", &dimension, TARGET));
+            assert!(!protect_fluid_flow(&world, "growth", &dimension, TARGET));
+            assert!(!protect_fluid_flow(&world, "fluid", &dimension, [5, 64, 3]));
+        }
+    }
 
     fn node(id: &str) -> Node {
         imported(id, &toml::Table::new()).unwrap().0

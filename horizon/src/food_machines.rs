@@ -283,6 +283,13 @@ pub(crate) fn marked(level: &dyn LevelHost, entity: BlockEntityRef) -> bool {
     placed(level, entity).is_some()
 }
 
+pub(crate) fn live_marker(host: &dyn Host, entity: BlockEntityRef) -> bool {
+    host.block_entity_saved_attachment(entity, PLACED_PRODUCE.namespace, PLACED_PRODUCE.name)
+        .as_ref()
+        .and_then(saved_product)
+        .is_some()
+}
+
 pub(crate) fn restore_drop(level: &dyn LevelHost, event: &mut BlockDropsEvent<'_>) {
     if let Some(kind) = event.block_entity.and_then(|entity| placed(level, entity))
         && let Some(key) = level.item_key_by_name(kind.material())
