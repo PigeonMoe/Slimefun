@@ -1274,6 +1274,25 @@ pub(crate) fn factory_identity(
     .then_some(data.id)
 }
 
+pub(crate) fn saved_factory_identity(
+    level: &dyn LevelHost,
+    dimension: &str,
+    pos: Position,
+    material: &str,
+) -> Option<String> {
+    if is_plain_carrier(material) {
+        return plain_network::saved_at_in_dimension(level, dimension, pos);
+    }
+    level
+        .block_entity_saved_attachment(
+            level.block_entity_at(pos)?,
+            NETWORK_STATE.namespace,
+            NETWORK_STATE.name,
+        )
+        .as_ref()
+        .and_then(saved_id)
+}
+
 pub(crate) fn manual_crucible_at(
     host: &mut dyn ServerHost,
     level: LevelRef,
@@ -1306,22 +1325,46 @@ pub(crate) fn blast_resistant_at(
     let Some(material) = level.block(host, pos).map(|block| block.id(host)) else {
         return false;
     };
+    let device_head = !direct_wither
+        && matches!(
+            material.as_str(),
+            "minecraft:player_head" | "minecraft:player_wall_head"
+        );
     if !matches!(
         material.as_str(),
-        "minecraft:obsidian" | "minecraft:purple_stained_glass" | "minecraft:light_gray_stained_glass"
-    ) {
+        "minecraft:obsidian"
+            | "minecraft:purple_stained_glass"
+            | "minecraft:light_gray_stained_glass"
+    ) && (direct_wither || material != assemblers::IRON_GOLEM_ASSEMBLER.material())
+        && !device_head
+    {
         return false;
     }
-    blast_resistant_marker(
-        plain_network::read(host, level, pos),
-        &material,
-        direct_wither,
-    )
+    let data = if device_head {
+        block_data(host, level, pos)
+    } else {
+        plain_network::read(host, level, pos)
+    };
+    blast_resistant_marker(data, &material, direct_wither)
 }
 
 fn blast_resistant_marker(data: Option<BlockData>, material: &str, direct_wither: bool) -> bool {
-    let Some(Component::BlastResistant(kind)) = data.and_then(|data| Component::for_item(&data.id))
-    else {
+    let Some(data) = data else {
+        return false;
+    };
+    let Some(component) = Component::for_item(&data.id) else {
+        return false;
+    };
+    // Paper's explosion flag leaves the Wither's direct block change to the game.
+    if !direct_wither {
+        if matches!(component, Component::Android | Component::GpsTransmitter { .. }) {
+            return accepts_carrier(component, material);
+        }
+        if assemblers::by_id(&data.id).is_some_and(|kind| kind.item.material() == material) {
+            return true;
+        }
+    }
+    let Component::BlastResistant(kind) = component else {
         return false;
     };
     material == kind.material()
@@ -2328,6 +2371,8 @@ mod tests {
             (HARDENED_GLASS, false),
             (WITHER_PROOF_GLASS, true),
             (WITHER_PROOF_OBSIDIAN, true),
+            (assemblers::IRON_GOLEM_ASSEMBLER, false),
+            (assemblers::WITHER_ASSEMBLER, false),
         ]
         .into_iter()
         .enumerate()
@@ -2345,6 +2390,38 @@ mod tests {
                 wither_proof
             );
             assert!(!blast_resistant_marker(marker(), "minecraft:stone", false));
+        }
+    }
+
+    #[test]
+    fn paper_gps_transmitters_and_androids_survive_explosions_but_not_direct_wither_breaks() {
+        let devices = [
+            ("GPS_TRANSMITTER", true),
+            ("GPS_TRANSMITTER_4", true),
+            ("PROGRAMMABLE_ANDROID", false),
+            ("PROGRAMMABLE_ANDROID_MINER", false),
+        ];
+        let mut host = FakeHost::new();
+        for (x, (id, wall_head)) in devices.into_iter().enumerate() {
+            let pos = [x as i32, 70, 0];
+            let material = "minecraft:player_head";
+            assert!(!blast_resistant_marker(None, material, false));
+            let (node, data) = imported(id, &toml::Table::new()).unwrap();
+            assert!(!is_plain_node(node.component));
+            host.level.block_entity(pos);
+            write_data(&mut host, pos, data).unwrap();
+            let mut marker = || {
+                NETWORK_STATE
+                    .get_existing(&mut host as &mut dyn ServerHost, Holder::BlockEntity(pos))
+                    .unwrap()
+            };
+            assert!(blast_resistant_marker(marker(), material, false));
+            assert!(!blast_resistant_marker(marker(), material, true));
+            assert!(!blast_resistant_marker(marker(), "minecraft:stone", false));
+            assert_eq!(
+                blast_resistant_marker(marker(), "minecraft:player_wall_head", false),
+                wall_head,
+            );
         }
     }
 

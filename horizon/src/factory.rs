@@ -6,10 +6,11 @@ use std::{
 };
 
 use mod_api::{
-    AttachmentCodec, AttachmentType, BlockDropsEvent, BlockEntityRef, ComponentId, Compound,
-    Holder, Host, HostTransaction, ITEMS, Identifier, ItemDrop, ItemKey, ItemPlace, ItemResource,
-    ItemStack, LevelHost, LevelRef, MenuClosedEvent, MenuReplace, MenuSlotPlace, PlayerRef,
-    ResourceHandler, ServerHost, Tag, Text, Transaction,
+    AttachmentCodec, AttachmentType, BlockDropsEvent, BlockEntityRef, BlockPart, BlockUpdateFlags,
+    CanDropFromExplosionEvent, ComponentId, Compound, Holder, Host, HostTransaction, ITEMS,
+    Identifier, ItemDrop, ItemKey, ItemPlace, ItemResource, ItemStack, LevelHost, LevelRef,
+    MenuClosedEvent, MenuReplace, MenuSlotPlace, OnBlockExplodedEvent, OnMobBlockBreakEvent,
+    PlayerRef, ResourceHandler, ServerHost, Tag, Text, Transaction,
 };
 
 use crate::recipes::{
@@ -649,6 +650,11 @@ impl ElectricMachine {
             || (self.carrier == "minecraft:player_head" && block == "minecraft:player_wall_head")
     }
 
+    fn withstands_explosions(self) -> bool {
+        // Paper's AbstractEntityAssembler registers a non-explodable block break handler.
+        matches!(self.family, RecipeFamily::Assembler(_))
+    }
+
     pub(crate) fn is_smeltery(self) -> bool {
         matches!(self.family, RecipeFamily::Advanced(spec) if spec.family == advanced_processing::Family::Smeltery)
     }
@@ -742,6 +748,7 @@ pub(crate) fn register(registrar: &mut dyn mod_api::Registrar) {
     .chain(network_runtime::PLAIN_CARRIERS.iter().copied())
     {
         let block = registrar.block_key(material);
+        registrar.block_part(block, MachineDestruction);
         registrar.block_capability_before_game(&ITEMS, &block, move |host, at, _, entity| {
             let id = network_runtime::factory_identity(host, at.level, at.pos)?;
             let machine = ElectricMachine::for_item(&id)
@@ -1089,6 +1096,103 @@ fn display_item(host: &dyn Host, material: &str, name: &str) -> Option<ItemStack
     )]))
     .ok()?;
     Some(item)
+}
+
+struct MachineDestruction;
+
+#[mod_api::horizon_part]
+impl BlockPart for MachineDestruction {
+    fn can_drop_from_explosion(
+        &self,
+        level: &dyn LevelHost,
+        event: &mut CanDropFromExplosionEvent<'_>,
+    ) -> Option<bool> {
+        let pos = [event.pos.x, event.pos.y, event.pos.z];
+        let material = level.state_block(event.state)?;
+        let id = network_runtime::saved_factory_identity(
+            level,
+            event.explosion.dimension,
+            pos,
+            material,
+        )?;
+        placed_machine(&id, material)
+            .filter(|machine| !machine.withstands_explosions())
+            .map(|_| false)
+    }
+
+    fn on_block_exploded(&self, host: &mut dyn ServerHost, event: &mut OnBlockExplodedEvent<'_>) {
+        if let Some(level) = host.level(event.explosion.dimension) {
+            break_marked_machine(host, level, [event.pos.x, event.pos.y, event.pos.z]);
+        }
+    }
+
+    fn on_mob_block_break(&self, host: &mut dyn ServerHost, event: &mut OnMobBlockBreakEvent<'_>) {
+        if event.kind == "minecraft:wither"
+            && let Some(level) = host.level(host.dimension())
+        {
+            break_marked_machine(host, level, [event.pos.x, event.pos.y, event.pos.z]);
+        }
+    }
+}
+
+fn placed_machine(id: &str, material: &str) -> Option<ElectricMachine> {
+    ElectricMachine::for_item(id).filter(|machine| machine.accepts_carrier(material))
+}
+
+fn installed_machine(
+    host: &mut dyn ServerHost,
+    level: LevelRef,
+    pos: Position,
+) -> Option<ElectricMachine> {
+    let material = level.block(host, pos)?.id(host);
+    let id = network_runtime::factory_identity(host, level, pos)?;
+    placed_machine(&id, &material)
+}
+
+/// Paper removes the machine block from the explosion's loot list, sets it to air,
+/// and drops the real slots of its virtual menu. Removing the carrier first also
+/// performs any ordinary pre-removal effects of its vanilla block entity.
+pub(crate) fn break_marked_machine(
+    host: &mut dyn ServerHost,
+    level: LevelRef,
+    pos: Position,
+) -> bool {
+    let Some(machine) =
+        installed_machine(host, level, pos).filter(|machine| !machine.withstands_explosions())
+    else {
+        return false;
+    };
+    let Some(air) = host.block_state_id("minecraft:air") else {
+        return false;
+    };
+    let items = data_at(host, machine.storage(level, pos))
+        .map(|data| machine_break_items(host, machine, &data))
+        .unwrap_or_default();
+    let flags = BlockUpdateFlags::NEIGHBORS | BlockUpdateFlags::CLIENTS;
+    if level.set_block(host, pos, air, flags) != Ok(true) {
+        return false;
+    }
+    for stack in items {
+        let [x, y, z] = crate::random::natural_drop_position(host, level, pos);
+        let _ = level.spawn_item(host, x, y, z, stack, 10);
+    }
+    true
+}
+
+fn machine_break_items(
+    host: &dyn Host,
+    machine: ElectricMachine,
+    data: &Compound,
+) -> Vec<ItemStack> {
+    let keys = machine.slot_keys();
+    let mut items = Vec::with_capacity(machine.slot_count());
+    let add = |index: usize| items.extend(read_slot(host, data, keys[index]));
+    if machine.is_smeltery() {
+        SMELTERY_INPUT.into_iter().chain(OUTPUT).for_each(add);
+    } else {
+        (0..machine.slot_count()).for_each(add);
+    }
+    items
 }
 
 pub(crate) fn restore_drops(level: &dyn LevelHost, event: &mut BlockDropsEvent<'_>) {
@@ -2304,6 +2408,85 @@ pub(crate) fn restore_paper_inventory(
 mod tests {
     use super::*;
     use mod_api::{prelude::ItemsHost, testing::FakeHost};
+
+    #[test]
+    fn paper_explosions_keep_only_actual_machine_inventory_in_slot_order() {
+        let host = recipe_host(["minecraft:stick", "minecraft:diamond"]);
+        let mut stored = Compound::new();
+        let mut expected = BTreeMap::new();
+        for &key in SLOTS.iter().chain(geology::MINER_SLOT_KEYS) {
+            let mut item = Kind::Vanilla("minecraft:stick").stack(&host, 3).unwrap();
+            item.apply_components(&Compound::from([(
+                "minecraft:custom_name".into(),
+                Tag::compound([("text", Tag::String(key.into()))]),
+            )]))
+            .unwrap();
+            assert!(write_slot(&host, &mut stored, key, Some(item.clone())));
+            expected.insert(key, item);
+        }
+        let pending = Kind::Vanilla("minecraft:diamond").stack(&host, 1).unwrap();
+        stored.insert(
+            PENDING.into(),
+            Tag::List(vec![Tag::Compound(pending.to_nbt(&host).unwrap())]),
+        );
+        stored.insert(REMAINING.into(), Tag::Int(5));
+        assert!(write_slot(&host, &mut stored, "22", Some(pending)));
+
+        let cases: &[(&str, &[&str])] = &[
+            ("AUTO_DRIER", &["19", "20", "24", "25"]),
+            (fuel_generators::BIO_REACTOR.id(), &["19", "20", "24", "25"]),
+            (
+                "ELECTRIC_SMELTERY_2",
+                &["10", "11", "19", "20", "28", "29", "24", "25"],
+            ),
+            ("GEO_MINER", geology::MINER_SLOT_KEYS),
+            ("XP_COLLECTOR", &["19", "20", "24"]),
+            (
+                "TREE_GROWTH_ACCELERATOR",
+                &["19", "20", "24", "25", "10", "11", "28"],
+            ),
+            (
+                "NUCLEAR_REACTOR",
+                &["19", "20", "24", "25", "10", "11", "28"],
+            ),
+            (
+                "REACTOR_ACCESS_PORT",
+                &["19", "20", "24", "25", "10", "11", "28"],
+            ),
+        ];
+        for &(id, keys) in cases {
+            let machine = ElectricMachine::for_item(id).expect(id);
+            let drops = machine_break_items(&host, machine, &stored);
+            assert_eq!(
+                drops,
+                keys.iter()
+                    .map(|key| expected[key].clone())
+                    .collect::<Vec<_>>(),
+                "{id}"
+            );
+            assert_eq!(
+                machine_break_items(&host, machine, &Compound::new()),
+                Vec::new(),
+                "{id}"
+            );
+        }
+        assert!(placed_machine("AUTO_DRIER", "minecraft:smoker").is_some());
+        assert!(placed_machine("AUTO_DRIER", "minecraft:furnace").is_none());
+        assert!(placed_machine("GEO_MINER", "minecraft:player_wall_head").is_some());
+        assert!(placed_machine("ENERGY_REGULATOR", "minecraft:player_head").is_none());
+        for id in ["IRON_GOLEM_ASSEMBLER", "WITHER_ASSEMBLER"] {
+            assert!(
+                ElectricMachine::for_item(id)
+                    .unwrap()
+                    .withstands_explosions()
+            );
+        }
+        assert!(
+            !ElectricMachine::for_item("AUTO_DRIER")
+                .unwrap()
+                .withstands_explosions()
+        );
+    }
 
     fn find_recipe(
         host: &dyn Host,

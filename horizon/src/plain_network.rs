@@ -112,7 +112,15 @@ pub(super) fn saved_at(
     dimension_id: &LevelDimension,
     pos: Position,
 ) -> Option<String> {
-    let address = (dimension(dimension_id).to_owned(), pos);
+    saved_at_in_dimension(level, dimension(dimension_id), pos)
+}
+
+pub(super) fn saved_at_in_dimension(
+    level: &dyn LevelHost,
+    dimension: &str,
+    pos: Position,
+) -> Option<String> {
+    let address = (dimension.to_owned(), pos);
     if RETIRED.lock().unwrap().contains_key(&address) {
         return None;
     }
