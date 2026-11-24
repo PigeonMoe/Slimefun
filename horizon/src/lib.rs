@@ -945,6 +945,20 @@ impl Hooks for Slimefun {
         }
     }
 
+    #[listener(priority = -100)]
+    fn wind_burst(&self, host: &mut dyn ServerHost, event: &mut mod_api::WindBurstEvent<'_>) {
+        let Some(level) = host.level(event.dimension) else {
+            return;
+        };
+        // Protection listeners have already filtered the burst's terrain batch.
+        // Paper's explosion listener removes marked inventory blocks from the trigger list.
+        event.blocks.retain(|&pos| {
+            !(network_runtime::blast_resistant_at(host, level, pos, false)
+                || inventory_destruction::break_without_shell(host, level, pos)
+                || factory::break_marked_machine(host, level, pos))
+        });
+    }
+
     fn register_commands(&self, _: &mut dyn ServerHost, event: &mut RegisterCommandsEvent<'_>) {
         event.commands.extend([
             Command::new("slimefun"),
