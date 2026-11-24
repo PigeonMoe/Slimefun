@@ -1637,7 +1637,7 @@ mod tests {
 
         let (mut host, item, mut source, mut outputs) = round_robin_fixture();
         let level = host.level.level();
-        let mut attach = |terminal: &mut Terminal, [x, y, z]| {
+        let mut attach = |terminal: &mut Terminal, [x, y, z]: Position| {
             terminal.pos = [x, y, z];
             terminal.inventory = [x, y, z + 1];
             host.level.block_entity(terminal.inventory).with_items(1);
