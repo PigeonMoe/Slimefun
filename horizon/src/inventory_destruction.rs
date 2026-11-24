@@ -6,7 +6,7 @@ use mod_api::{
 };
 
 use crate::{
-    block_placer,
+    block_placer, crucible,
     network_runtime::{self, NetworkBreak},
     output_chest,
 };
@@ -24,7 +24,7 @@ const CARRIERS: [&str; 8] = [
 ];
 
 pub(crate) fn register(registrar: &mut dyn Registrar) {
-    for carrier in CARRIERS {
+    for &carrier in CARRIERS.iter().chain(crucible::CARRIERS) {
         let block = registrar.block_key(carrier);
         registrar.block_part(block, Destruction(carrier));
         if matches!(carrier, HEAD | WALL_HEAD) {
@@ -45,6 +45,10 @@ fn marked(carrier: &str, read: impl Fn(&str, &str) -> Option<Compound>) -> bool 
     }
 }
 
+fn marked_cauldron(carrier: &str, id: Option<&str>) -> bool {
+    crucible::carrier(carrier) && matches!(id, Some("CRUCIBLE" | "COMPOSTER"))
+}
+
 struct Destruction(&'static str);
 
 #[mod_api::horizon_part]
@@ -55,6 +59,15 @@ impl BlockPart for Destruction {
         event: &mut CanDropFromExplosionEvent<'_>,
     ) -> Option<bool> {
         let pos = [event.pos.x, event.pos.y, event.pos.z];
+        if crucible::carrier(self.0) {
+            let id = network_runtime::saved_factory_identity(
+                level,
+                event.explosion.dimension,
+                pos,
+                self.0,
+            );
+            return marked_cauldron(self.0, id.as_deref()).then_some(false);
+        }
         // Paper removes these marks from the blast list, blocking shell drops.
         // Vanilla containers still spill their contents on replacement.
         level
@@ -98,30 +111,38 @@ pub(crate) fn break_without_shell(
     let Some(carrier) = level.block(host, pos).map(|block| block.id(host)) else {
         return false;
     };
-    if !CARRIERS.contains(&carrier.as_str()) {
-        return false;
-    }
-    let Some(entity) = host.block_entity(level, pos) else {
-        return false;
-    };
-    let read =
-        |namespace: &str, name: &str| host.block_entity_saved_attachment(entity, namespace, name);
-    let (filters, remove_status) = if matches!(carrier.as_str(), HEAD | WALL_HEAD | SOLAR) {
-        match network_runtime::network_break_marker(&carrier, read) {
-            Some(NetworkBreak::CargoFilters(data)) => (
-                network_runtime::cargo_filter_items(&data, |name| {
-                    host.item_key(&Identifier::parse(name).ok()?)
-                }),
-                false,
-            ),
-            Some(NetworkBreak::RemoveStatus) => (Vec::new(), true),
-            Some(NetworkBreak::NoItems) => (Vec::new(), false),
-            None => return false,
+    let (filters, remove_status) = if crucible::carrier(&carrier) {
+        let id = network_runtime::placed_id(host, level, pos);
+        if !marked_cauldron(&carrier, id.as_deref()) {
+            return false;
         }
-    } else if marked(&carrier, read) {
         (Vec::new(), false)
     } else {
-        return false;
+        if !CARRIERS.contains(&carrier.as_str()) {
+            return false;
+        }
+        let Some(entity) = host.block_entity(level, pos) else {
+            return false;
+        };
+        let read = |namespace: &str, name: &str| {
+            host.block_entity_saved_attachment(entity, namespace, name)
+        };
+        match carrier.as_str() {
+            HEAD | WALL_HEAD | SOLAR => match network_runtime::network_break_marker(&carrier, read)
+            {
+                Some(NetworkBreak::CargoFilters(data)) => (
+                    network_runtime::cargo_filter_items(&data, |name| {
+                        host.item_key(&Identifier::parse(name).ok()?)
+                    }),
+                    false,
+                ),
+                Some(NetworkBreak::RemoveStatus) => (Vec::new(), true),
+                Some(NetworkBreak::NoItems) => (Vec::new(), false),
+                None => return false,
+            },
+            _ if marked(&carrier, read) => (Vec::new(), false),
+            _ => return false,
+        }
     };
     let Some(air) = host.block_state_id("minecraft:air") else {
         return false;
@@ -157,6 +178,20 @@ mod tests {
         marked(carrier, |namespace, name| {
             (namespace == "slimefun" && name == marker.0).then(|| marker.1.clone())
         })
+    }
+
+    #[test]
+    fn only_marked_manual_devices_suppress_cauldron_shells() {
+        for &carrier in crucible::CARRIERS {
+            assert!(marked_cauldron(carrier, Some("CRUCIBLE")));
+            assert!(marked_cauldron(carrier, Some("COMPOSTER")));
+            assert!(!marked_cauldron(carrier, None));
+            assert!(!marked_cauldron(carrier, Some("ELECTRIC_CRUCIBLE")));
+        }
+        for carrier in CARRIERS {
+            assert!(!marked_cauldron(carrier, Some("CRUCIBLE")));
+            assert!(!marked_cauldron(carrier, Some("COMPOSTER")));
+        }
     }
 
     #[test]
