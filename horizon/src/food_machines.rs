@@ -284,7 +284,11 @@ pub(crate) fn marked(level: &dyn LevelHost, entity: BlockEntityRef) -> bool {
 }
 
 pub(crate) fn live_marker(host: &dyn Host, entity: BlockEntityRef) -> bool {
-    host.block_entity_saved_attachment(entity, PLACED_PRODUCE.namespace, PLACED_PRODUCE.name)
+    has_saved_marker(|namespace, name| host.block_entity_saved_attachment(entity, namespace, name))
+}
+
+pub(crate) fn has_saved_marker(read: impl FnOnce(&str, &str) -> Option<Compound>) -> bool {
+    read(PLACED_PRODUCE.namespace, PLACED_PRODUCE.name)
         .as_ref()
         .and_then(saved_product)
         .is_some()

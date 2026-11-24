@@ -21,7 +21,7 @@ use crate::{
 };
 
 type Pos = [i32; 3];
-const CARRIER: &str = "minecraft:quartz_slab";
+pub(crate) const CARRIER: &str = "minecraft:quartz_slab";
 const DEFAULT_LABEL: &str = "Edit me via the Projector";
 const DEFAULT_OFFSET: i64 = 50;
 static NEXT_GENERATION: AtomicU64 = AtomicU64::new(1);
@@ -213,6 +213,10 @@ fn saved_at(level: &dyn LevelHost, pos: Pos) -> bool {
         })
 }
 
+pub(crate) fn saved_marker(level: &dyn LevelHost, dimension: &str, pos: Pos) -> bool {
+    saved_at(level, pos) && !RETIRED.lock().unwrap().contains_key(&(dimension.into(), pos))
+}
+
 pub(crate) fn restore_drop(level: &dyn LevelHost, event: &mut BlockDropsEvent<'_>) {
     let pos = [event.pos.x, event.pos.y, event.pos.z];
     if level.state_block(event.state) == Some(CARRIER)
@@ -253,11 +257,15 @@ pub(crate) fn tick(host: &mut dyn ServerHost, level: LevelRef) {
         .collect::<Vec<_>>();
     for pos in retired {
         if level.is_loaded(host, pos) && save(host, pos, None) {
-            if let Some(entity) = projection(host, level, &tag(pos)) {
-                entity.remove(host, RemovalReason::Discarded);
-            }
+            remove_projection(host, level, pos);
             RETIRED.lock().unwrap().remove(&(dimension.clone(), pos));
         }
+    }
+}
+
+pub(crate) fn remove_projection(host: &mut dyn ServerHost, level: LevelRef, pos: Pos) {
+    if let Some(entity) = projection(host, level, &tag(pos)) {
+        entity.remove(host, RemovalReason::Discarded);
     }
 }
 

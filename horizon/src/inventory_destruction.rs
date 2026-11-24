@@ -6,9 +6,9 @@ use mod_api::{
 };
 
 use crate::{
-    block_placer, crucible,
+    block_placer, crucible, food_machines, hologram_projector,
     network_runtime::{self, NetworkBreak},
-    output_chest,
+    output_chest, rainbow, spawner_repair,
 };
 
 const CHEST: &str = "minecraft:chest";
@@ -19,16 +19,42 @@ const HOPPER: &str = "minecraft:hopper";
 const HEAD: &str = "minecraft:player_head";
 const WALL_HEAD: &str = "minecraft:player_wall_head";
 const SOLAR: &str = "minecraft:daylight_detector";
-const CARRIERS: [&str; 8] = [
-    CHEST, DISPENSER, DROPPER, FURNACE, HOPPER, HEAD, WALL_HEAD, SOLAR,
+const CARRIERS: [&str; 9] = [
+    CHEST,
+    DISPENSER,
+    DROPPER,
+    FURNACE,
+    HOPPER,
+    HEAD,
+    WALL_HEAD,
+    SOLAR,
+    spawner_repair::CARRIER,
+];
+const CHUNK_NETWORK_CARRIERS: [&str; 5] = [
+    "minecraft:gold_block",
+    "minecraft:iron_block",
+    "minecraft:stone_pressure_plate",
+    crate::gps_transport::PYLON_CARRIERS[0],
+    crate::gps_transport::PYLON_CARRIERS[1],
 ];
 
 pub(crate) fn register(registrar: &mut dyn Registrar) {
-    for &carrier in CARRIERS.iter().chain(crucible::CARRIERS) {
+    for &carrier in CARRIERS
+        .iter()
+        .chain(crucible::CARRIERS)
+        .chain(&CHUNK_NETWORK_CARRIERS)
+        .chain(&[hologram_projector::CARRIER])
+    {
         let block = registrar.block_key(carrier);
-        registrar.block_part(block, Destruction(carrier));
-        if matches!(carrier, HEAD | WALL_HEAD) {
-            registrar.block_part(block, NetworkBreakEffects);
+        registrar.block_part(block, Destruction);
+        if matches!(carrier, HEAD | WALL_HEAD | hologram_projector::CARRIER) {
+            registrar.block_part(block, MarkedBreakEffects);
+        }
+    }
+    for carrier in rainbow::carriers() {
+        if !CHUNK_NETWORK_CARRIERS.contains(&carrier.as_str()) {
+            let block = registrar.block_key(&carrier);
+            registrar.block_part(block, Destruction);
         }
     }
 }
@@ -40,16 +66,18 @@ fn marked(carrier: &str, read: impl Fn(&str, &str) -> Option<Compound>) -> bool 
         DISPENSER | DROPPER | FURNACE | HOPPER => {
             network_runtime::stock_inventory_marker(carrier, read)
         }
+        HEAD | WALL_HEAD if food_machines::has_saved_marker(&read) => true,
         HEAD | WALL_HEAD | SOLAR => network_runtime::network_break_marker(carrier, read).is_some(),
+        spawner_repair::CARRIER => spawner_repair::has_saved_marker(read),
         _ => false,
     }
 }
 
-fn marked_cauldron(carrier: &str, id: Option<&str>) -> bool {
-    crucible::carrier(carrier) && matches!(id, Some("CRUCIBLE" | "COMPOSTER"))
+fn plain_network_carrier(carrier: &str) -> bool {
+    crucible::carrier(carrier) || CHUNK_NETWORK_CARRIERS.contains(&carrier)
 }
 
-struct Destruction(&'static str);
+struct Destruction;
 
 #[mod_api::horizon_part]
 impl BlockPart for Destruction {
@@ -59,21 +87,26 @@ impl BlockPart for Destruction {
         event: &mut CanDropFromExplosionEvent<'_>,
     ) -> Option<bool> {
         let pos = [event.pos.x, event.pos.y, event.pos.z];
-        if crucible::carrier(self.0) {
-            let id = network_runtime::saved_factory_identity(
-                level,
-                event.explosion.dimension,
-                pos,
-                self.0,
-            );
-            return marked_cauldron(self.0, id.as_deref()).then_some(false);
+        let carrier = level.state_block(event.state)?;
+        let dimension = event.explosion.dimension;
+        if carrier == hologram_projector::CARRIER {
+            return hologram_projector::saved_marker(level, dimension, pos).then_some(false);
+        }
+        if plain_network_carrier(carrier) {
+            let id = network_runtime::saved_factory_identity(level, dimension, pos, carrier);
+            if network_runtime::plain_break_without_shell(carrier, id.as_deref()) {
+                return Some(false);
+            }
+        }
+        if rainbow::is_carrier(carrier) {
+            return rainbow::placed::saved_marker(level, dimension, pos, carrier).then_some(false);
         }
         // Paper removes these marks from the blast list, blocking shell drops.
         // Vanilla containers still spill their contents on replacement.
         level
             .block_entity_at(pos)
             .is_some_and(|entity| {
-                marked(self.0, |namespace, name| {
+                marked(carrier, |namespace, name| {
                     level.block_entity_saved_attachment(entity, namespace, name)
                 })
             })
@@ -89,10 +122,10 @@ impl BlockPart for Destruction {
     }
 }
 
-struct NetworkBreakEffects;
+struct MarkedBreakEffects;
 
 #[mod_api::horizon_part]
-impl BlockPart for NetworkBreakEffects {
+impl BlockPart for MarkedBreakEffects {
     fn on_block_exploded(&self, host: &mut dyn ServerHost, event: &mut OnBlockExplodedEvent<'_>) {
         // Capture and retire any virtual state while the live marker is readable.
         if let Some(level) = host.level(event.explosion.dimension) {
@@ -111,9 +144,18 @@ pub(crate) fn break_without_shell(
     let Some(carrier) = level.block(host, pos).map(|block| block.id(host)) else {
         return false;
     };
-    let (filters, remove_status) = if crucible::carrier(&carrier) {
-        let id = network_runtime::placed_id(host, level, pos);
-        if !marked_cauldron(&carrier, id.as_deref()) {
+    let projector = carrier == hologram_projector::CARRIER;
+    let (filters, remove_status) = if projector {
+        if !hologram_projector::marked(host, level, pos) {
+            return false;
+        }
+        (Vec::new(), false)
+    } else if plain_network_carrier(&carrier) || rainbow::is_carrier(&carrier) {
+        let plain = plain_network_carrier(&carrier) && {
+            let id = network_runtime::placed_id(host, level, pos);
+            network_runtime::plain_break_without_shell(&carrier, id.as_deref())
+        };
+        if !plain && !(level.in_place(host) && rainbow::placed::marked(host, level, pos)) {
             return false;
         }
         (Vec::new(), false)
@@ -128,6 +170,7 @@ pub(crate) fn break_without_shell(
             host.block_entity_saved_attachment(entity, namespace, name)
         };
         match carrier.as_str() {
+            HEAD | WALL_HEAD if food_machines::has_saved_marker(&read) => (Vec::new(), false),
             HEAD | WALL_HEAD | SOLAR => match network_runtime::network_break_marker(&carrier, read)
             {
                 Some(NetworkBreak::CargoFilters(data)) => (
@@ -153,6 +196,9 @@ pub(crate) fn break_without_shell(
     }
     if remove_status {
         network_runtime::remove_network_status(host, level, pos);
+    }
+    if projector {
+        hologram_projector::remove_projection(host, level, pos);
     }
     for stack in filters {
         let [x, y, z] = crate::random::natural_drop_position(host, level, pos);
@@ -181,16 +227,191 @@ mod tests {
     }
 
     #[test]
+    fn paper_plain_stock_uses_its_exact_carrier_without_selecting_special_handlers() {
+        let cases = [
+            ("minecraft:gold_block", "GOLD_24K_BLOCK"),
+            ("minecraft:iron_block", "GPS_TELEPORTATION_MATRIX"),
+            (
+                "minecraft:stone_pressure_plate",
+                "GPS_ACTIVATION_DEVICE_SHARED",
+            ),
+            (
+                "minecraft:stone_pressure_plate",
+                "GPS_ACTIVATION_DEVICE_PERSONAL",
+            ),
+            ("minecraft:stone_pressure_plate", "ELEVATOR_PLATE"),
+            ("minecraft:purple_stained_glass", "GPS_TELEPORTER_PYLON"),
+            ("minecraft:cyan_stained_glass", "GPS_TELEPORTER_PYLON"),
+        ];
+        for &(carrier, _) in &cases {
+            assert!(!network_runtime::plain_break_without_shell(carrier, None));
+            for &(_, id) in &cases {
+                let matches = cases.contains(&(carrier, id));
+                assert_eq!(
+                    network_runtime::plain_break_without_shell(carrier, Some(id)),
+                    matches
+                );
+            }
+        }
+        assert!(!network_runtime::plain_break_without_shell(
+            "minecraft:purple_stained_glass",
+            Some("WITHER_PROOF_GLASS"),
+        ));
+        assert!(!network_runtime::plain_break_without_shell(
+            "minecraft:iron_block",
+            Some("IRON_GOLEM_ASSEMBLER"),
+        ));
+    }
+
+    #[test]
+    fn paper_food_and_spawner_markers_do_not_cover_ordinary_carriers() {
+        for product in food_machines::PRODUCE {
+            for id in [product.food.id(), product.fertilizer.id()] {
+                let attachment = Compound::from([("id".into(), Tag::String(id.into()))]);
+                for carrier in CARRIERS {
+                    assert_eq!(
+                        matches_marker(carrier, ("placed_produce", attachment.clone())),
+                        matches!(carrier, HEAD | WALL_HEAD),
+                        "{id} on {carrier}",
+                    );
+                }
+            }
+        }
+        for (flag, expected) in [
+            (Tag::Byte(1), true),
+            (Tag::Byte(0), false),
+            (Tag::Int(1), false),
+        ] {
+            let attachment = Compound::from([("repaired".into(), flag)]);
+            assert_eq!(
+                matches_marker(spawner_repair::CARRIER, ("reinforced_spawner", attachment)),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn ingredient_decorative_and_fixed_gps_heads_use_only_marked_head_carriers() {
+        for id in [
+            "CHEESE",
+            "BUTTER",
+            "POWER_CRYSTAL",
+            "STONE_CHUNK",
+            "SYNTHETIC_SAPPHIRE",
+            "CARBONADO",
+            "RAW_CARBONADO",
+            "GPS_GEO_SCANNER",
+            "GPS_CONTROL_PANEL",
+            "GPS_EMERGENCY_TRANSMITTER",
+        ] {
+            for carrier in CARRIERS {
+                assert_eq!(
+                    matches_marker(carrier, network_marker(id)),
+                    matches!(carrier, HEAD | WALL_HEAD),
+                    "{id} on {carrier}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn only_matching_chunk_records_protect_rainbow_and_projector_shells() {
+        struct Saved {
+            name: &'static str,
+            entry: Tag,
+        }
+        impl LevelHost for Saved {
+            fn chunk_saved_attachment(
+                &self,
+                chunk: [i32; 2],
+                namespace: &str,
+                name: &str,
+            ) -> Option<Compound> {
+                (chunk == [3, -2] && namespace == "slimefun" && name == self.name)
+                    .then(|| Compound::from([("49,80,-17".into(), self.entry.clone())]))
+            }
+        }
+        let pos = [49, 80, -17];
+        let dimension = "minecraft:overworld";
+        let rainbow = Saved {
+            name: "rainbow_blocks",
+            entry: Tag::String("RAINBOW_WOOL_XMAS".into()),
+        };
+        assert!(rainbow::placed::saved_marker(
+            &rainbow,
+            dimension,
+            pos,
+            "minecraft:green_wool"
+        ));
+        assert!(!rainbow::placed::saved_marker(
+            &rainbow,
+            dimension,
+            pos,
+            "minecraft:blue_wool"
+        ));
+        assert!(!rainbow::placed::saved_marker(
+            &rainbow,
+            dimension,
+            pos,
+            "minecraft:green_concrete"
+        ));
+        assert!(!rainbow::placed::saved_marker(
+            &rainbow,
+            dimension,
+            [50, 80, -17],
+            "minecraft:green_wool"
+        ));
+        assert!(!hologram_projector::saved_marker(&rainbow, dimension, pos));
+        let mut projector = Saved {
+            name: "hologram_projectors",
+            entry: Tag::compound([
+                (
+                    "owner",
+                    Tag::String("00000000000000000000000000000001".into()),
+                ),
+                ("generation", Tag::Long(1)),
+                ("text", Tag::String("Projected text".into())),
+                ("offset", Tag::Long(50)),
+            ]),
+        };
+        assert!(hologram_projector::saved_marker(&projector, dimension, pos));
+        assert!(!hologram_projector::saved_marker(
+            &projector,
+            dimension,
+            [50, 80, -17]
+        ));
+        projector.entry = Tag::String("malformed".into());
+        assert!(!hologram_projector::saved_marker(
+            &projector, dimension, pos
+        ));
+    }
+
+    #[test]
     fn only_marked_manual_devices_suppress_cauldron_shells() {
         for &carrier in crucible::CARRIERS {
-            assert!(marked_cauldron(carrier, Some("CRUCIBLE")));
-            assert!(marked_cauldron(carrier, Some("COMPOSTER")));
-            assert!(!marked_cauldron(carrier, None));
-            assert!(!marked_cauldron(carrier, Some("ELECTRIC_CRUCIBLE")));
+            assert!(network_runtime::plain_break_without_shell(
+                carrier,
+                Some("CRUCIBLE")
+            ));
+            assert!(network_runtime::plain_break_without_shell(
+                carrier,
+                Some("COMPOSTER")
+            ));
+            assert!(!network_runtime::plain_break_without_shell(carrier, None));
+            assert!(!network_runtime::plain_break_without_shell(
+                carrier,
+                Some("ELECTRIC_CRUCIBLE")
+            ));
         }
         for carrier in CARRIERS {
-            assert!(!marked_cauldron(carrier, Some("CRUCIBLE")));
-            assert!(!marked_cauldron(carrier, Some("COMPOSTER")));
+            assert!(!network_runtime::plain_break_without_shell(
+                carrier,
+                Some("CRUCIBLE")
+            ));
+            assert!(!network_runtime::plain_break_without_shell(
+                carrier,
+                Some("COMPOSTER")
+            ));
         }
     }
 

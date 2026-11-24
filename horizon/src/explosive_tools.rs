@@ -226,6 +226,7 @@ impl ExplosiveTools {
                 .unwrap_or_default();
             positions.retain(|&pos| {
                 !crate::inventory_destruction::break_without_shell(host, level, pos)
+                    && !crate::ancient_altar::break_marked_device(host, level, pos)
                     && !crate::factory::break_marked_machine(host, level, pos)
             });
             positions

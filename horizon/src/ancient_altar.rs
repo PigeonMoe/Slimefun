@@ -15,10 +15,12 @@ use std::sync::{
 };
 
 use mod_api::{
-    AttachmentCodec, AttachmentType, BlockDropsEvent, Compound, EntityUuid, GameMode, Hand, Holder,
-    Host, HostSide, HostTransaction, ITEMS, InteractionResult, ItemDrop, ItemPart, ItemPlace,
-    ItemResource, ItemStack, LevelHost, LevelRef, OnBlockPlacedByEvent, ParticleKey,
-    ParticleOptions, PlayerRef, Registrar, ServerHost, SoundSource, Tag, Text, UseOnEvent,
+    AttachmentCodec, AttachmentType, BlockDropsEvent, BlockPart, BlockUpdateFlags,
+    CanDropFromExplosionEvent, Compound, EntityUuid, GameMode, Hand, Holder, Host, HostSide,
+    HostTransaction, ITEMS, InteractionResult, ItemDrop, ItemPart, ItemPlace, ItemResource,
+    ItemStack, LevelHost, LevelRef, OnBlockExplodedEvent, OnBlockPlacedByEvent,
+    OnMobBlockBreakEvent, ParticleKey, ParticleOptions, PlayerRef, Registrar, ServerHost,
+    SoundSource, Tag, Text, UseOnEvent,
 };
 
 use crate::{
@@ -606,7 +608,72 @@ pub(crate) fn register(registrar: &mut dyn Registrar) {
     for kind in [ANCIENT_ALTAR, ANCIENT_PEDESTAL] {
         let item = registrar.item_key(kind.material());
         registrar.item_part(item, Placement(kind));
+        let block = registrar.block_key(kind.material());
+        registrar.block_part(block, Destruction(kind));
     }
+}
+
+struct Destruction(Kind);
+
+#[mod_api::horizon_part]
+impl BlockPart for Destruction {
+    fn can_drop_from_explosion(
+        &self,
+        level: &dyn LevelHost,
+        event: &mut CanDropFromExplosionEvent<'_>,
+    ) -> Option<bool> {
+        let pos = [event.pos.x, event.pos.y, event.pos.z];
+        let entity = level.block_entity_at(pos)?;
+        let marker = level.block_entity_saved_attachment(entity, DEVICE.namespace, DEVICE.name)?;
+        (id(&marker) == Some(self.0)).then_some(false)
+    }
+
+    fn on_block_exploded(&self, host: &mut dyn ServerHost, event: &mut OnBlockExplodedEvent<'_>) {
+        if let Some(level) = host.level(event.explosion.dimension) {
+            break_marked_device(host, level, [event.pos.x, event.pos.y, event.pos.z]);
+        }
+    }
+
+    fn on_mob_block_break(&self, host: &mut dyn ServerHost, event: &mut OnMobBlockBreakEvent<'_>) {
+        if matches!(event.kind, "minecraft:wither" | "minecraft:wither_skull")
+            && let Some(level) = host.level(host.dimension())
+        {
+            break_marked_device(host, level, [event.pos.x, event.pos.y, event.pos.z]);
+        }
+    }
+}
+
+pub(crate) fn break_marked_device(host: &mut dyn ServerHost, level: LevelRef, pos: Pos) -> bool {
+    let Some((kind, marker)) = device(host, level, pos) else {
+        return false;
+    };
+    let Some(air) = host.block_state_id("minecraft:air") else {
+        return false;
+    };
+    // Paper removes the carrier from the blast and returns the projected
+    // ingredient after replacing the pedestal. Read it while its marker exists.
+    let item = (kind == ANCIENT_PEDESTAL)
+        .then(|| ingredient(host, &marker))
+        .flatten();
+    let flags = BlockUpdateFlags::NEIGHBORS | BlockUpdateFlags::CLIENTS;
+    if level.set_block(host, pos, air, flags) != Ok(true) {
+        return false;
+    }
+    if kind == ANCIENT_PEDESTAL
+        && let Some(dimension) = level.dimension().id(host)
+    {
+        let (uuid, _) = display_uuid(&dimension, pos);
+        if let Some(entity) = host.entity_by_uuid(uuid)
+            && host.display(entity).is_some()
+        {
+            let _ = entity.discard(host);
+        }
+    }
+    if let Some(item) = item {
+        let [x, y, z] = pos.map(f64::from);
+        let _ = level.spawn_item(host, x, y, z, item, 10);
+    }
+    true
 }
 
 struct Placement(Kind);

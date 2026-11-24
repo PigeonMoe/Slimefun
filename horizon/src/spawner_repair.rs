@@ -25,7 +25,7 @@ use crate::{
     research,
 };
 
-const CARRIER: &str = "minecraft:spawner";
+pub(crate) const CARRIER: &str = "minecraft:spawner";
 const BLOCK_DATA: &str = "minecraft:block_entity_data";
 
 item!(
@@ -292,11 +292,11 @@ fn marker_is_repaired(data: Option<Compound>) -> bool {
 }
 
 pub(crate) fn live_marker(host: &dyn Host, entity: mod_api::BlockEntityRef) -> bool {
-    marker_is_repaired(host.block_entity_saved_attachment(
-        entity,
-        REPAIRED.namespace,
-        REPAIRED.name,
-    ))
+    has_saved_marker(|namespace, name| host.block_entity_saved_attachment(entity, namespace, name))
+}
+
+pub(crate) fn has_saved_marker(read: impl FnOnce(&str, &str) -> Option<Compound>) -> bool {
+    marker_is_repaired(read(REPAIRED.namespace, REPAIRED.name))
 }
 
 pub(crate) fn place_repaired(

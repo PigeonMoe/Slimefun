@@ -219,10 +219,27 @@ pub(crate) fn network_break_marker(
         | Component::EnergyConnector
         | Component::Capacitor(_)
         | Component::SolarGenerator { .. }
-        | Component::TrashCan => Some(NetworkBreak::NoItems),
+        | Component::TrashCan
+        | Component::IngredientHead
+        | Component::DecorativeHead
+        | Component::GeoScanner
+        | Component::GpsControlPanel
+        | Component::GpsEmergencyTransmitter => Some(NetworkBreak::NoItems),
         _ if crate::auto_crafter::is_machine(&id) => Some(NetworkBreak::NoItems),
         _ => None,
     }
+}
+
+pub(crate) fn plain_break_without_shell(material: &str, id: Option<&str>) -> bool {
+    id.and_then(Component::for_item).is_some_and(|component| {
+        matches!(
+            component,
+            Component::ManualCrucible
+                | Component::ManualComposter
+                | Component::DecorativeGold
+                | Component::GpsDevice(_)
+        ) && accepts_carrier(component, material)
+    })
 }
 
 pub(crate) fn remove_network_status(host: &mut dyn ServerHost, level: LevelRef, pos: Position) {

@@ -986,6 +986,7 @@ impl Hooks for Slimefun {
         event.blocks.retain(|&pos| {
             !(network_runtime::blast_resistant_at(host, level, pos, false)
                 || inventory_destruction::break_without_shell(host, level, pos)
+                || ancient_altar::break_marked_device(host, level, pos)
                 || factory::break_marked_machine(host, level, pos))
         });
     }

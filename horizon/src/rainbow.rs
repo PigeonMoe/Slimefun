@@ -211,6 +211,13 @@ pub(super) fn is_carrier(id: &str) -> bool {
     BLOCKS.iter().any(|family| family[0].accepts(id))
 }
 
+pub(crate) fn carriers() -> impl Iterator<Item = String> {
+    BLOCKS.iter().flat_map(|family| {
+        let block = family[0];
+        block.palette.colors().iter().map(move |color| block.material(color))
+    })
+}
+
 const fn recipe(block: Rainbow) -> CraftingRecipe {
     let white = Some(Kind::Vanilla(block.white));
     let rune = Some(ANCIENT_RUNE_RAINBOW);

@@ -266,9 +266,12 @@ pub(crate) fn protected(
     else {
         return false;
     };
-    let address = (dimension_name(dimension).into(), pos);
+    saved_marker(level, dimension_name(dimension), pos, carrier)
+}
+
+pub(crate) fn saved_marker(level: &dyn LevelHost, dimension: &str, pos: Pos, carrier: &str) -> bool {
     saved(level, pos).is_some_and(|mark| mark.accepts(carrier))
-        && !RUNTIME.lock().unwrap().retired.contains_key(&address)
+        && !RUNTIME.lock().unwrap().retired.contains_key(&(dimension.into(), pos))
 }
 
 pub(crate) fn changed(level: &dyn LevelHost, event: &BlockChangedEvent) {
