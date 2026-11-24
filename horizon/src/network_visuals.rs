@@ -169,6 +169,12 @@ pub(super) fn reconcile(
     reconcile_at(host, level, dimension, labels, None);
 }
 
+pub(super) fn remove_status(host: &mut dyn ServerHost, level: LevelRef, pos: Position) {
+    if let Some(dimension) = level.dimension().id(host) {
+        reconcile_at(host, level, &dimension, BTreeMap::new(), Some(pos));
+    }
+}
+
 pub(super) fn geo_miner_placement(
     host: &mut dyn ServerHost,
     level: LevelRef,

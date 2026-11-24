@@ -193,6 +193,58 @@ pub(crate) fn stock_inventory_marker(
         })
 }
 
+pub(crate) enum NetworkBreak {
+    CargoFilters(Compound),
+    RemoveStatus,
+    NoItems,
+}
+
+pub(crate) fn network_break_marker(
+    material: &str,
+    read: impl FnOnce(&str, &str) -> Option<Compound>,
+) -> Option<NetworkBreak> {
+    let data = read(NETWORK_STATE.namespace, NETWORK_STATE.name)?;
+    let id = read_id(&data)?;
+    let component = Component::for_item(&id)?;
+    if !accepts_carrier(component, material) {
+        return None;
+    }
+    match component {
+        Component::CargoInput | Component::CargoOutput { advanced: true } => {
+            Some(NetworkBreak::CargoFilters(data))
+        }
+        Component::CargoManager | Component::EnergyRegulator => Some(NetworkBreak::RemoveStatus),
+        Component::CargoConnector
+        | Component::CargoOutput { advanced: false }
+        | Component::EnergyConnector
+        | Component::Capacitor(_)
+        | Component::SolarGenerator { .. }
+        | Component::TrashCan => Some(NetworkBreak::NoItems),
+        _ if crate::auto_crafter::is_machine(&id) => Some(NetworkBreak::NoItems),
+        _ => None,
+    }
+}
+
+pub(crate) fn remove_network_status(host: &mut dyn ServerHost, level: LevelRef, pos: Position) {
+    network_visuals::remove_status(host, level, pos);
+}
+
+pub(crate) fn cargo_filter_items(
+    data: &Compound,
+    key: impl Fn(&str) -> Option<ItemKey>,
+) -> Vec<ItemStack> {
+    let Some(Tag::Compound(cargo)) = data.get(&"cargo".into()) else {
+        return Vec::new();
+    };
+    let Ok(cargo) = CargoSettings::load(cargo) else {
+        return Vec::new();
+    };
+    FILTER_SLOTS
+        .iter()
+        .filter_map(|slot| read_stack(cargo.filters.get(slot)?, &key))
+        .collect()
+}
+
 pub(crate) fn enhanced_furnace(
     host: &dyn mod_api::Host,
     entity: mod_api::BlockEntityRef,
@@ -416,20 +468,17 @@ pub(crate) fn restore_drop(level: &dyn LevelHost, event: &mut BlockDropsEvent<'_
     {
         item.decorate(&mut drop.stack);
     }
-    if let Some(Tag::Compound(cargo)) = data.get(&"cargo".into())
-        && let Ok(cargo) = CargoSettings::load(cargo)
-    {
+    if Component::for_item(&id).is_some_and(has_filter_slots) {
         let pos = [
             f64::from(event.pos.x) + 0.5,
             f64::from(event.pos.y) + 0.5,
             f64::from(event.pos.z) + 0.5,
         ];
-        event
-            .drops
-            .extend(cargo.filters.values().filter_map(|data| {
-                let stack = read_stack(data, |name| level.item_key_by_name(name))?;
-                Some(mod_api::ItemDrop::new(stack, pos, [0.0, 0.2, 0.0], 10))
-            }));
+        event.drops.extend(
+            cargo_filter_items(&data, |name| level.item_key_by_name(name))
+                .into_iter()
+                .map(|stack| mod_api::ItemDrop::new(stack, pos, [0.0, 0.2, 0.0], 10)),
+        );
     }
 }
 
@@ -448,12 +497,16 @@ enum Network {
     Independent,
 }
 
+fn has_filter_slots(component: Component) -> bool {
+    matches!(
+        component,
+        Component::CargoInput | Component::CargoOutput { advanced: true }
+    )
+}
+
 impl Node {
     fn filters_items(&self) -> bool {
-        matches!(
-            self.component,
-            Component::CargoInput | Component::CargoOutput { advanced: true }
-        )
+        has_filter_slots(self.component)
     }
 
     fn cargo_settings(
@@ -2137,6 +2190,38 @@ mod tests {
 
     fn node(id: &str) -> Node {
         imported(id, &toml::Table::new()).unwrap().0
+    }
+
+    #[test]
+    fn cargo_blast_filter_items_preserve_exact_slots_counts_and_components() {
+        let mut host = FakeHost::new();
+        let key = Identifier::parse("minecraft:paper").unwrap();
+        host.registries.resolve_items([key.clone()]).unwrap();
+        let mut filters = CargoSettings::legacy(0, false);
+        let mut expected = Vec::new();
+        for (index, slot) in FILTER_SLOTS.into_iter().enumerate() {
+            let item = (&host as &dyn ServerHost).item_key(&key).unwrap();
+            let mut stack = ItemStack::new(item, index as u32 + 1).unwrap();
+            stack
+                .set_components(Compound::from([(
+                    "minecraft:custom_data".into(),
+                    Tag::Compound(Compound::from([("slot".into(), Tag::Int(slot as i32))])),
+                )]))
+                .unwrap();
+            filters.filters.insert(slot, stack.to_nbt(&host).unwrap());
+            expected.push(stack);
+        }
+        let encode = |filters: &CargoSettings| {
+            Compound::from([("cargo".into(), Tag::Compound(filters.save()))])
+        };
+        let resolve = |name: &str| {
+            (&host as &dyn ServerHost).item_key(&Identifier::parse(name).ok()?)
+        };
+        assert_eq!(cargo_filter_items(&encode(&filters), resolve), expected);
+
+        // A menu decoration is outside the persisted whitelist and is never refunded.
+        filters.filters.insert(15, expected[0].to_nbt(&host).unwrap());
+        assert!(cargo_filter_items(&encode(&filters), resolve).is_empty());
     }
 
     #[test]
