@@ -831,7 +831,10 @@ pub(crate) fn open(
     let view = ViewState::read(host, storage, furnace, &data);
     let items = view.items(host, &data, furnace);
     let rows = (items.len() / 9) as u8;
-    let title = Text::literal(furnace.title);
+    let title = match furnace.family {
+        RecipeFamily::Assembler(spec) => assemblers::menu_title(spec),
+        _ => Text::literal(furnace.title),
+    };
     let opened = match entity {
         Some(entity) if !storage.plain => host.open_block_inventory_menu(
             player,

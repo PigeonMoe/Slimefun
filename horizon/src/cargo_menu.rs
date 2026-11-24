@@ -8,6 +8,8 @@ use mod_api::{
     ServerHost, Tag, Text, Transaction,
 };
 
+use crate::hologram_projector::colored_lore;
+
 use super::{
     Component, FILTER_SLOTS, NETWORK_STATE, Networks, Node, Position, block_data,
     cargo_topology::{CargoSettings, item_key},
@@ -372,15 +374,52 @@ fn settings_click(node: &Node, cargo: &mut CargoSettings, slot: usize) -> bool {
     true
 }
 
-fn icon(host: &dyn ServerHost, id: &str, name: &str) -> Option<ItemStack> {
+fn icon(
+    host: &dyn ServerHost,
+    id: &str,
+    name: &str,
+    lore: &[&str],
+    head: Option<PaperHead>,
+) -> Option<ItemStack> {
     let mut stack = ItemStack::of(item_key(host, id)?);
-    stack
-        .set_components(Compound::from([(
-            "minecraft:custom_name".into(),
-            Tag::String(name.into()),
-        )]))
-        .ok()?;
+    let mut components = Compound::from([("minecraft:custom_name".into(), colored_lore(name))]);
+    if !lore.is_empty() {
+        components.insert(
+            "minecraft:lore".into(),
+            Tag::List(lore.iter().map(|line| colored_lore(line)).collect()),
+        );
+    }
+    if let Some((profile, texture)) = head {
+        components.insert(
+            "minecraft:profile".into(),
+            Tag::compound([
+                ("id", Tag::IntArray(profile.to_vec())),
+                ("name", Tag::String("".into())),
+                (
+                    "properties",
+                    Tag::List(vec![Tag::compound([
+                        ("name", Tag::String("textures".into())),
+                        ("value", Tag::String(texture.into())),
+                    ])]),
+                ),
+            ]),
+        );
+    }
+    if id == "minecraft:written_book" {
+        components.insert(
+            "minecraft:written_book_content".into(),
+            empty_book_content(),
+        );
+    }
+    stack.set_components(components).ok()?;
     Some(stack)
+}
+
+fn empty_book_content() -> Tag {
+    Tag::compound([
+        ("author", Tag::String("".into())),
+        ("title", Tag::compound([("raw", Tag::String("".into()))])),
+    ])
 }
 
 const COLORS: [&str; 16] = [
@@ -513,12 +552,7 @@ pub(super) fn paper_control(
     // Paper serializes its empty written-book button with default book data.
     let book = parts.get(&"minecraft:written_book_content".into());
     if let Some(book) = book
-        && (material != "minecraft:written_book"
-            || book
-                != &Tag::compound([
-                    ("author", Tag::String("".into())),
-                    ("title", Tag::compound([("raw", Tag::String("".into()))])),
-                ]))
+        && (material != "minecraft:written_book" || *book != empty_book_content())
     {
         return false;
     }
@@ -572,53 +606,131 @@ fn paper_channel_wool(material: &str, name: &str) -> bool {
 
 fn view(host: &dyn ServerHost, node: &Node, cargo: &CargoSettings) -> Vec<Option<ItemStack>> {
     let mut items = vec![
-        icon(host, "minecraft:cyan_stained_glass_pane", " ");
+        icon(host, "minecraft:cyan_stained_glass_pane", " ", &[], None);
         if node.filters_items() { 54 } else { 27 }
     ];
     let channel = if node.filters_items() { 42 } else { 13 };
-    items[channel - 1] = icon(host, "minecraft:arrow", "Previous Channel");
-    items[channel + 1] = icon(host, "minecraft:arrow", "Next Channel");
-    let wool = COLORS.get(usize::from(cargo.channel)).map_or_else(
-        || "minecraft:chest".to_owned(),
-        |color| format!("minecraft:{color}_wool"),
+    items[channel - 1] = icon(
+        host,
+        "minecraft:player_head",
+        "&bPrevious Channel",
+        &["", "&e> Click to decrease the Channel ID by 1"],
+        Some(PREVIOUS_CHANNEL_HEAD),
     );
-    items[channel] = icon(host, &wool, &format!("Channel ID {}", cargo.channel + 1));
+    items[channel + 1] = icon(
+        host,
+        "minecraft:player_head",
+        "&bNext Channel",
+        &["", "&e> Click to increase the Channel ID by 1"],
+        Some(NEXT_CHANNEL_HEAD),
+    );
+    let selected = usize::from(cargo.channel).min(COLORS.len());
+    let name = format!("&bChannel ID: &3{}", selected + 1);
+    items[channel] = match COLORS.get(selected) {
+        Some(color) => icon(host, &format!("minecraft:{color}_wool"), &name, &[], None),
+        None => icon(
+            host,
+            "minecraft:player_head",
+            &name,
+            &[],
+            Some(TERMINAL_CHANNEL_HEAD),
+        ),
+    };
     if node.filters_items() {
+        items[2] = icon(
+            host,
+            "minecraft:paper",
+            "&3Items",
+            &[
+                "",
+                "&bPut in all Items you want to",
+                "&bblacklist/whitelist",
+            ],
+            None,
+        );
         for slot in FILTER_SLOTS {
             items[slot] = cargo
                 .filters
                 .get(&slot)
                 .and_then(|data| read_stack(data, |id| item_key(host, id)));
         }
-        items[15] = if cargo.blacklist {
-            icon(host, "minecraft:black_wool", "Type: Blacklist")
+        let (wool, name, toggle) = if cargo.blacklist {
+            (
+                "minecraft:black_wool",
+                "&7Type: &8Blacklist",
+                "&e> Click to change it to Whitelist",
+            )
         } else {
-            icon(host, "minecraft:white_wool", "Type: Whitelist")
+            (
+                "minecraft:white_wool",
+                "&7Type: &rWhitelist",
+                "&e> Click to change it to Blacklist",
+            )
         };
+        items[15] = icon(host, wool, name, &["", toggle], None);
         items[25] = icon(
             host,
             "minecraft:map",
             if cargo.lore {
-                "Include Lore: On"
+                "&7Include Lore: &2✔"
             } else {
-                "Include Lore: Off"
+                "&7Include Lore: &4✘"
             },
+            &["", "&e> Click to toggle whether the Lore has to match"],
+            None,
         );
     }
     if node.component == Component::CargoInput {
-        items[16] = if cargo.smart_fill {
-            icon(host, "minecraft:written_book", "Smart-Filling Mode: On")
+        let (book, name, toggle) = if cargo.smart_fill {
+            (
+                "minecraft:written_book",
+                "&7\"Smart-Filling\" Mode: &2✔",
+                "&e> Click to disable \"Smart-Filling\" Mode",
+            )
         } else {
-            icon(host, "minecraft:writable_book", "Smart-Filling Mode: Off")
+            (
+                "minecraft:writable_book",
+                "&7\"Smart-Filling\" Mode: &4✘",
+                "&e> Click to enable \"Smart-Filling\" Mode",
+            )
+        };
+        items[16] = icon(
+            host,
+            book,
+            name,
+            &[
+                "",
+                toggle,
+                "",
+                "&fIn this mode, the Cargo node will attempt",
+                "&fto keep a constant amount of items",
+                "&fin the inventory. This is not perfect",
+                "&fand will still fill in empty slots that",
+                "&fcome before a stack of a configured item.",
+            ],
+            None,
+        );
+        let (name, toggle) = if cargo.round_robin {
+            (
+                "&7Round-Robin Mode: &2✔",
+                "&e> Click to disable Round Robin Mode",
+            )
+        } else {
+            (
+                "&7Round-Robin Mode: &4✘",
+                "&e> Click to enable Round Robin Mode",
+            )
         };
         items[24] = icon(
             host,
             "minecraft:player_head",
-            if cargo.round_robin {
-                "Round-Robin Mode: On"
-            } else {
-                "Round-Robin Mode: Off"
-            },
+            name,
+            &[
+                "",
+                toggle,
+                "&e(Items will be equally distributed on the Channel)",
+            ],
+            Some(ROUND_ROBIN_HEAD),
         );
     }
     items
@@ -664,6 +776,116 @@ mod paper_archive_tests {
         }
         stack.set_components(parts).unwrap();
         stack
+    }
+
+    #[test]
+    fn cargo_menu_renders_paper_controls_without_rewriting_filter_items() {
+        let mut host = FakeHost::new();
+        host.registries
+            .resolve_items(
+                [
+                    "minecraft:cyan_stained_glass_pane",
+                    "minecraft:paper",
+                    "minecraft:player_head",
+                    "minecraft:light_blue_wool",
+                    "minecraft:white_wool",
+                    "minecraft:black_wool",
+                    "minecraft:map",
+                    "minecraft:writable_book",
+                    "minecraft:written_book",
+                    "minecraft:iron_ingot",
+                ]
+                .map(|material| Identifier::parse(material).unwrap()),
+            )
+            .unwrap();
+        let filter_parts = Compound::from([
+            ("minecraft:custom_name".into(), colored_lore("&b纸服铁锭")),
+            (
+                "minecraft:lore".into(),
+                Tag::List(vec![colored_lore("&7存档过滤样本")]),
+            ),
+        ]);
+        let filter = Compound::from([
+            ("id".into(), Tag::String("minecraft:iron_ingot".into())),
+            ("count".into(), Tag::Int(7)),
+            ("components".into(), Tag::Compound(filter_parts.clone())),
+        ]);
+        for component in [
+            Component::CargoInput,
+            Component::CargoOutput { advanced: true },
+            Component::CargoOutput { advanced: false },
+        ] {
+            let node = Node {
+                id: String::new(),
+                component,
+                channel: 16,
+                passes_unfiltered: true,
+            };
+            let mut cargo = CargoSettings::legacy(16, true);
+            cargo.filters.insert(19, filter.clone());
+            let channel = if node.filters_items() { 42 } else { 13 };
+            let mut controls = vec![channel - 1, channel, channel + 1];
+            if node.filters_items() {
+                controls.extend([15, 25]);
+            }
+            if component == Component::CargoInput {
+                controls.extend([16, 24]);
+            }
+            for enabled in [false, true] {
+                cargo.blacklist = !enabled;
+                cargo.lore = enabled;
+                cargo.round_robin = enabled;
+                cargo.smart_fill = enabled;
+                cargo.channel = if enabled { 3 } else { 16 };
+                let menu = view(&host, &node, &cargo);
+                assert_eq!(menu.len(), if node.filters_items() { 54 } else { 27 });
+                for &slot in &controls {
+                    assert!(
+                        paper_control(&host, component, slot as u32, menu[slot].as_ref().unwrap()),
+                        "nonstock cargo control in slot {slot}"
+                    );
+                }
+                let parts =
+                    |slot: usize| menu[slot].as_ref().unwrap().components().unwrap().as_nbt();
+                let name = parts(channel);
+                let channel_name = super::super::paper_text(&name[&"minecraft:custom_name".into()]);
+                assert_eq!(
+                    channel_name.as_deref(),
+                    Some(if enabled {
+                        "§bChannel ID: §34"
+                    } else {
+                        "§bChannel ID: §317"
+                    })
+                );
+                let selector = parts(channel - 1);
+                let Some(Tag::List(lore)) = selector.get(&"minecraft:lore".into()) else {
+                    panic!("missing selector lore");
+                };
+                assert_eq!(
+                    super::super::paper_text(&lore[1]).as_deref(),
+                    Some("§e> Click to decrease the Channel ID by 1")
+                );
+                if node.filters_items() {
+                    let name = parts(2);
+                    assert_eq!(
+                        super::super::paper_text(&name[&"minecraft:custom_name".into()]).as_deref(),
+                        Some("§3Items")
+                    );
+                    assert_eq!(menu[19].as_ref().unwrap().count(), 7);
+                    assert_eq!(parts(19), &filter_parts);
+                    assert!(menu[20].is_none());
+                } else {
+                    assert_eq!(
+                        menu[2].as_ref().unwrap().item().id(&host).as_str(),
+                        "minecraft:cyan_stained_glass_pane"
+                    );
+                    assert_eq!(
+                        menu[19].as_ref().unwrap().item().id(&host).as_str(),
+                        "minecraft:cyan_stained_glass_pane"
+                    );
+                }
+            }
+        }
     }
 
     #[test]

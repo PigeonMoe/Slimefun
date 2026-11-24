@@ -2,11 +2,12 @@
 
 use mod_api::{
     Compound, Host, ItemResource, ItemStack, LevelRef, ServerHost, SoundSource, SpawnReason, Tag,
-    Transaction,
+    Text, Transaction,
 };
 
 use crate::{
     enchantment_machines::WITHER_PROOF_OBSIDIAN,
+    hologram_projector::colored_lore,
     items::{ADVANCED_CIRCUIT_BOARD, ELECTRIC_MOTOR, Kind, REINFORCED_ALLOY_INGOT, item},
     network_recipes::{ANDROID_MEMORY_CORE, BLISTERING_INGOT_3, CARBONADO_EDGED_CAPACITOR},
     recipes::{CraftingRecipe, Research, Stack},
@@ -25,6 +26,14 @@ item!(
     "obsidian",
     "Wither Assembler",
     "dark_purple",
+    None,
+    None
+);
+item!(
+    _UI_BACKGROUND,
+    "gray_stained_glass_pane",
+    " ",
+    "white",
     None,
     None
 );
@@ -84,6 +93,12 @@ const COOLDOWN: i64 = 600;
 const ENABLED: &str = "assembler_enabled";
 const OFFSET: &str = "assembler_offset_tenths";
 const PAPER_CONTROLS: &str = "paper_assembler_controls";
+const ENABLED_TITLE: &str = "§7Enabled: §2✔";
+const ENABLED_LORE: &[&str] = &["", "§e> Click to disable this Machine"];
+const DISABLED_TITLE: &str = "§7Enabled: §4✘";
+const DISABLED_LORE: &[&str] = &["", "§e> Click to enable this Machine"];
+const OFFSET_TITLE: &str = "§7Offset: §3";
+const OFFSET_LORE: &[&str] = &["", "§fLeft Click: §7+0.1", "§fRight Click: §7-0.1"];
 
 pub(super) fn only_controls(data: &Compound) -> bool {
     data.len()
@@ -101,6 +116,8 @@ pub(crate) struct Assembler {
     pub cost: u32,
     pub head: Stack,
     pub body: Stack,
+    head_preview: (&'static str, &'static str),
+    body_preview: (&'static str, &'static str),
     mob: &'static str,
     head_colour: &'static str,
     body_colour: &'static str,
@@ -120,6 +137,8 @@ const ASSEMBLERS: &[Assembler] = &[
             kind: IRON,
             count: 4,
         },
+        head_preview: ("§7Pumpkin Slot", "§fThis Slot accepts Pumpkins"),
+        body_preview: ("§7Iron Block Slot", "§fThis Slot accepts Iron Blocks"),
         mob: "minecraft:iron_golem",
         head_colour: "minecraft:orange_stained_glass_pane",
         body_colour: "minecraft:white_stained_glass_pane",
@@ -137,6 +156,11 @@ const ASSEMBLERS: &[Assembler] = &[
             kind: Kind::Vanilla("minecraft:soul_sand"),
             count: 4,
         },
+        head_preview: (
+            "§7Wither Skeleton Skull Slot",
+            "§fThis Slot accepts Wither Skeleton Skulls",
+        ),
+        body_preview: ("§7Soul Sand Slot", "§fThis Slot accepts Soul Sand"),
         mob: "minecraft:wither",
         head_colour: "minecraft:black_stained_glass_pane",
         body_colour: "minecraft:brown_stained_glass_pane",
@@ -238,19 +262,16 @@ pub(super) fn paper_control(host: &dyn Host, slot: u32, item: &ItemStack) -> boo
     let Some(Tag::List(lore)) = parts.get(&"minecraft:lore".into()) else {
         return false;
     };
-    let Some(title) = parts.get(&"minecraft:custom_name".into()).and_then(paper_text) else {
+    let Some(title) = parts
+        .get(&"minecraft:custom_name".into())
+        .and_then(paper_text)
+    else {
         return false;
     };
     let expected: &[&str] = match (slot, item.item().id(host).as_str()) {
-        (22, "minecraft:gunpowder") if title == "§7Enabled: §4✘" => {
-            &["", "§e> Click to enable this Machine"]
-        }
-        (22, "minecraft:redstone") if title == "§7Enabled: §2✔" => {
-            &["", "§e> Click to disable this Machine"]
-        }
-        (31, "minecraft:piston") if paper_offset(&title) => {
-            &["", "§fLeft Click: §7+0.1", "§fRight Click: §7-0.1"]
-        }
+        (22, "minecraft:gunpowder") if title == DISABLED_TITLE => DISABLED_LORE,
+        (22, "minecraft:redstone") if title == ENABLED_TITLE => ENABLED_LORE,
+        (31, "minecraft:piston") if paper_offset(&title) => OFFSET_LORE,
         _ => return false,
     };
     parts.len() == 2
@@ -270,14 +291,16 @@ fn paper_text(tag: &Tag) -> Option<String> {
             Tag::String(_) => true,
             Tag::List(children) => children.iter().all(|child| literal(child, depth + 1)),
             Tag::Compound(parts) => {
-                parts.iter().all(|(name, value)| match name.to_string().as_deref() {
-                    Ok("text" | "color") => matches!(value, Tag::String(_)),
-                    Ok("bold" | "italic" | "underlined" | "strikethrough" | "obfuscated") => {
-                        matches!(value, Tag::Byte(0))
-                    }
-                    Ok("extra") => literal(value, depth + 1),
-                    _ => false,
-                })
+                parts
+                    .iter()
+                    .all(|(name, value)| match name.to_string().as_deref() {
+                        Ok("text" | "color") => matches!(value, Tag::String(_)),
+                        Ok("bold" | "italic" | "underlined" | "strikethrough" | "obfuscated") => {
+                            matches!(value, Tag::Byte(0))
+                        }
+                        Ok("extra") => literal(value, depth + 1),
+                        _ => false,
+                    })
             }
             _ => false,
         }
@@ -290,7 +313,7 @@ fn paper_text(tag: &Tag) -> Option<String> {
 
 fn paper_offset(title: &str) -> bool {
     let Some(value) = title
-        .strip_prefix("§7Offset: §3")
+        .strip_prefix(OFFSET_TITLE)
         .and_then(|title| title.strip_suffix(" Block(s)"))
     else {
         return false;
@@ -311,23 +334,83 @@ fn paper_offset(title: &str) -> bool {
         && value.parse::<f64>().is_ok_and(f64::is_finite)
 }
 
-pub(super) fn menu(host: &dyn Host, data: &Compound, spec: &Assembler) -> Vec<Option<ItemStack>> {
-    let mut items = vec![super::display_item(host, "minecraft:gray_stained_glass_pane", " "); 45];
-    let controls = Controls::read(data);
-    let (toggle, label) = if controls.enabled {
-        ("minecraft:redstone", "Enabled: ✔")
+pub(super) fn menu_title(spec: &Assembler) -> Text {
+    let mut title = Text::literal(spec.title);
+    if let Kind::Slimefun(item) = spec.item {
+        title.style.color = Some(item.color.to_owned());
+    }
+    title
+}
+
+fn paper_icon(
+    host: &dyn Host,
+    kind: Kind,
+    count: u32,
+    name: &str,
+    lore: &[&str],
+) -> Option<ItemStack> {
+    let mut item = kind.stack(host, count)?;
+    let mut components = Compound::from([("minecraft:custom_name".into(), colored_lore(name))]);
+    if !lore.is_empty() {
+        components.insert(
+            "minecraft:lore".into(),
+            Tag::List(lore.iter().map(|line| colored_lore(line)).collect()),
+        );
+    }
+    item.apply_components(&components).ok()?;
+    Some(item)
+}
+
+fn display_offset(tenths: i32) -> String {
+    let offset = f64::from(tenths) / 10.0;
+    if offset.abs() < 10_000_000.0 {
+        return format!("{offset:.1}");
+    }
+    // Java's Double.toString includes a fractional digit in scientific notation.
+    let scientific = format!("{offset:E}");
+    let (mantissa, exponent) = scientific.split_once('E').expect("scientific notation");
+    if mantissa.contains('.') {
+        scientific
     } else {
-        ("minecraft:gunpowder", "Enabled: ✘")
+        format!("{mantissa}.0E{exponent}")
+    }
+}
+
+pub(super) fn menu(host: &dyn Host, data: &Compound, spec: &Assembler) -> Vec<Option<ItemStack>> {
+    let mut items = vec![paper_icon(host, _UI_BACKGROUND, 1, " ", &[]); 45];
+    let controls = Controls::read(data);
+    let (toggle, label, lore) = if controls.enabled {
+        ("minecraft:redstone", ENABLED_TITLE, ENABLED_LORE)
+    } else {
+        ("minecraft:gunpowder", DISABLED_TITLE, DISABLED_LORE)
     };
-    items[1] = super::display_item(host, spec.head.kind.material(), "Head Slot");
-    items[7] = super::display_item(host, spec.body.kind.material(), "Body Slot");
-    items[13] = super::display_item(host, "minecraft:clock", "Cooldown: 30 Seconds");
-    items[22] = super::display_item(host, toggle, label);
-    let offset = f64::from(controls.offset_tenths) / 10.0;
-    items[31] = super::display_item(
+    for (slot, material, (label, hint)) in [
+        (1, spec.head, spec.head_preview),
+        (7, spec.body, spec.body_preview),
+    ] {
+        items[slot] = paper_icon(host, material.kind, material.count, label, &["", hint]);
+    }
+    items[13] = paper_icon(
         host,
-        "minecraft:piston",
-        &format!("Offset: {offset:.1} Block(s)"),
+        Kind::Vanilla("minecraft:clock"),
+        1,
+        "§7Cooldown: §b30 Seconds",
+        &[
+            "",
+            "§fThis Machine takes up to half a Minute to operate",
+            "§fso give it some Time!",
+        ],
+    );
+    items[22] = paper_icon(host, Kind::Vanilla(toggle), 1, label, lore);
+    items[31] = paper_icon(
+        host,
+        Kind::Vanilla("minecraft:piston"),
+        1,
+        &format!(
+            "{OFFSET_TITLE}{} Block(s)",
+            display_offset(controls.offset_tenths)
+        ),
+        OFFSET_LORE,
     );
     for (border, colour) in [
         (
@@ -339,7 +422,7 @@ pub(super) fn menu(host: &dyn Host, data: &Compound, spec: &Assembler) -> Vec<Op
             spec.body_colour,
         ),
     ] {
-        let pane = super::display_item(host, colour, " ");
+        let pane = paper_icon(host, Kind::Vanilla(colour), 1, " ", &[]);
         for &index in border {
             items[index] = pane.clone();
         }
@@ -424,6 +507,174 @@ impl Spawn {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mod_api::{Identifier, testing::FakeHost};
+
+    #[test]
+    fn assembler_windows_show_paper_previews_controls_and_coloured_panes() {
+        let mut host = FakeHost::new();
+        host.registries
+            .resolve_items(
+                [
+                    "minecraft:gray_stained_glass_pane",
+                    "minecraft:orange_stained_glass_pane",
+                    "minecraft:white_stained_glass_pane",
+                    "minecraft:black_stained_glass_pane",
+                    "minecraft:brown_stained_glass_pane",
+                    "minecraft:carved_pumpkin",
+                    "minecraft:iron_block",
+                    "minecraft:wither_skeleton_skull",
+                    "minecraft:soul_sand",
+                    "minecraft:redstone",
+                    "minecraft:gunpowder",
+                    "minecraft:piston",
+                    "minecraft:clock",
+                ]
+                .map(|id| Identifier::parse(id).unwrap()),
+            )
+            .unwrap();
+
+        for (id, name, color, controls, head, body, panes) in [
+            (
+                "IRON_GOLEM_ASSEMBLER",
+                "Iron Golem Assembler",
+                "gold",
+                Controls {
+                    enabled: false,
+                    offset_tenths: 27,
+                },
+                (
+                    "minecraft:carved_pumpkin",
+                    1,
+                    "§7Pumpkin Slot",
+                    "§fThis Slot accepts Pumpkins",
+                ),
+                (
+                    "minecraft:iron_block",
+                    4,
+                    "§7Iron Block Slot",
+                    "§fThis Slot accepts Iron Blocks",
+                ),
+                (
+                    "minecraft:orange_stained_glass_pane",
+                    "minecraft:white_stained_glass_pane",
+                ),
+            ),
+            (
+                "WITHER_ASSEMBLER",
+                "Wither Assembler",
+                "dark_purple",
+                Controls {
+                    enabled: true,
+                    offset_tenths: 34,
+                },
+                (
+                    "minecraft:wither_skeleton_skull",
+                    3,
+                    "§7Wither Skeleton Skull Slot",
+                    "§fThis Slot accepts Wither Skeleton Skulls",
+                ),
+                (
+                    "minecraft:soul_sand",
+                    4,
+                    "§7Soul Sand Slot",
+                    "§fThis Slot accepts Soul Sand",
+                ),
+                (
+                    "minecraft:black_stained_glass_pane",
+                    "minecraft:brown_stained_glass_pane",
+                ),
+            ),
+        ] {
+            let spec = by_id(id).unwrap();
+            let mut expected_title = Text::literal(name);
+            expected_title.style.color = Some(color.into());
+            assert_eq!(menu_title(spec), expected_title);
+
+            let mut data = Compound::new();
+            controls.write(&mut data);
+            let existing = spec.head.kind.stack(&host, 2).unwrap();
+            assert!(super::super::write_slot(
+                &host,
+                &mut data,
+                "19",
+                Some(existing.clone())
+            ));
+            let menu = menu(&host, &data, spec);
+            assert_eq!(menu.len(), 45);
+            for (slot, (material, count, name, lore)) in [(1, head), (7, body)] {
+                check_icon(
+                    &host,
+                    menu[slot].as_ref().unwrap(),
+                    material,
+                    count,
+                    name,
+                    &["", lore],
+                );
+            }
+            check_icon(
+                &host,
+                menu[13].as_ref().unwrap(),
+                "minecraft:clock",
+                1,
+                "§7Cooldown: §b30 Seconds",
+                &[
+                    "",
+                    "§fThis Machine takes up to half a Minute to operate",
+                    "§fso give it some Time!",
+                ],
+            );
+            for (slot, material) in [
+                (0, "minecraft:gray_stained_glass_pane"),
+                (9, panes.0),
+                (44, panes.1),
+            ] {
+                check_icon(&host, menu[slot].as_ref().unwrap(), material, 1, " ", &[]);
+            }
+            assert_eq!(
+                crate::items::item_id(menu[0].as_ref().unwrap()).as_deref(),
+                Some("_UI_BACKGROUND")
+            );
+            assert_eq!(menu[19], Some(existing));
+            assert!(MENU_SLOTS[1..].iter().all(|&slot| menu[slot].is_none()));
+            assert_eq!(menu.iter().filter(|slot| slot.is_none()).count(), 3);
+            assert!(paper_control(&host, 22, menu[22].as_ref().unwrap()));
+            assert!(paper_control(&host, 31, menu[31].as_ref().unwrap()));
+        }
+        assert_eq!(display_offset(-1), "-0.1");
+        assert_eq!(display_offset(100_000_000), "1.0E7");
+        assert_eq!(display_offset(i32::MIN), "-2.147483648E8");
+    }
+
+    fn check_icon(
+        host: &dyn Host,
+        item: &ItemStack,
+        material: &str,
+        count: u32,
+        name: &str,
+        lore: &[&str],
+    ) {
+        assert_eq!(item.item().id(host), material);
+        assert_eq!(item.count(), count);
+        let parts = item.components().unwrap().as_nbt();
+        assert_eq!(
+            parts
+                .get(&"minecraft:custom_name".into())
+                .and_then(paper_text)
+                .as_deref(),
+            Some(name)
+        );
+        match parts.get(&"minecraft:lore".into()) {
+            Some(Tag::List(lines)) => assert_eq!(
+                lines
+                    .iter()
+                    .map(|line| paper_text(line).unwrap())
+                    .collect::<Vec<_>>(),
+                lore,
+            ),
+            None => assert!(lore.is_empty()),
+            _ => panic!("invalid lore component"),
+        }
+    }
 
     #[test]
     fn paper_controls_survive_import_and_a_repeat_keeps_local_changes() {
