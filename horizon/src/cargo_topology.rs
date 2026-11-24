@@ -985,7 +985,11 @@ fn route_with_overflow(
     let withdrawal = input.kind.extract(size).find_map(|slot| {
         let resource = source.resource(host, slot)?;
         let stack = resource.to_stack(source.amount(host, slot))?;
-        if !input.filter.accepts(host, &stack) {
+        let accepts = input.filter.accepts(host, &stack);
+        crate::developer_commands::log(crate::developer_commands::CARGO_INPUT_TESTING, || {
+            format!("ItemFilter#test({}): {accepts}", stack.item().id(host))
+        });
+        if !accepts {
             return None;
         }
         let position = input

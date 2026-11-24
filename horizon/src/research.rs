@@ -285,7 +285,10 @@ pub(crate) fn import_legacy(host: &mut dyn ServerHost, player: PlayerRef) {
         return;
     };
     if let Some(merged) = merge_import(data, &uuid, &text) {
-        let _ = player.set_persistent_data(host, merged);
+        let stored = player.set_persistent_data(host, merged).is_ok();
+        crate::developer_commands::log(crate::developer_commands::PLAYER_PROFILE_DATA, || {
+            format!("Imported Paper research for {uuid}: stored={stored}")
+        });
     }
 }
 
@@ -308,7 +311,10 @@ pub(crate) fn import_synchronized_profile(host: &mut dyn ServerHost, player: Pla
         }
     };
     if let Some(data) = merge_synchronized_profile(data, guide_issued, &researches) {
-        let _ = player.set_persistent_data(host, data);
+        let stored = player.set_persistent_data(host, data).is_ok();
+        crate::developer_commands::log(crate::developer_commands::PLAYER_PROFILE_DATA, || {
+            format!("Imported synchronized profile for {:032x}: stored={stored}", player.uuid())
+        });
     }
 }
 

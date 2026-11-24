@@ -27,7 +27,7 @@ const DEFAULT_LABEL: &str = "Edit me via the Projector";
 const DEFAULT_OFFSET: i64 = 50;
 const PROJECTOR_TAG: &str = "slimefun.projector.";
 static NEXT_GENERATION: AtomicU64 = AtomicU64::new(1);
-static STATES: AttachmentType<Compound> = AttachmentType {
+pub(crate) static STATES: AttachmentType<Compound> = AttachmentType {
     namespace: "slimefun",
     name: "hologram_projectors",
     default: Compound::new,

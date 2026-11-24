@@ -10,7 +10,7 @@ use std::{
 
 use mod_api::{
     Compound, Hand, Host, HostTransaction, ItemPlace, ItemResource, ItemStack, MenuClickedEvent,
-    MenuClosedEvent, MenuReplace, PermissionLevel, PlayerRef, ServerHost, SoundSource, Tag, Text,
+    MenuClosedEvent, MenuReplace, PlayerRef, ServerHost, SoundSource, Tag, Text,
     Transaction,
     text::{TextClick, TextStyle},
 };
@@ -30,11 +30,13 @@ mod learning;
 mod locale;
 mod processing;
 mod vanilla;
-use catalog::{Entry, GROUPS, Group, group_entries, lookup, named_group_entries};
+use catalog::{Entry, GROUPS, Group, MultiblockItem, group_entries, lookup, named_group_entries};
 use learning::Preference;
 pub(crate) use learning::launch_random_fireworks;
 pub(crate) use locale::{Language, localize_item_components};
 pub(crate) use locale::research_name;
+
+const DEFAULT_CHAT_PREFIX: &str = "&a&lSlimefun 5&7> ";
 
 const DASHBOARD_STYLE: &str = "pigeonmoe:life_skills_menu";
 const BOOK_LORE: &[&str] = &[
@@ -42,8 +44,16 @@ const BOOK_LORE: &[&str] = &[
     "&e右键 &8⇨ &7浏览物品",
     "&e潜行并右键 &8⇨ &7打开设置与关于",
 ];
+const CHEAT_BOOK_LORE: &[&str] = &[
+    "&4&l仅管理员可使用",
+    "&e右键 &8⇨ &7浏览物品",
+    "&e潜行并右键 &8⇨ &7打开设置与关于",
+];
+const BOOK_NAME: &str = "&a远古工艺之书";
+const CHEAT_BOOK_NAME: &str = "&c远古工艺之书 &4（作弊模式）";
 const GUIDE_KEY: &str = "slimefun:slimefun_guide_mode";
 const SURVIVAL: &str = "SURVIVAL_MODE";
+const CHEAT: &str = "CHEAT_MODE";
 const DISCOVERY_SLOTS: usize = 36;
 const INGREDIENT_SLOTS: [usize; 9] = [3, 4, 5, 12, 13, 14, 21, 22, 23];
 const RECIPE_METHOD_SLOT: usize = 10;
@@ -54,7 +64,7 @@ fn book(host: &dyn Host) -> Option<ItemStack> {
     let mut item = icon(
         host,
         "minecraft:enchanted_book",
-        "&a远古工艺之书",
+        BOOK_NAME,
         BOOK_LORE,
     )?;
     item.apply_components(&Compound::from([(
@@ -80,41 +90,81 @@ fn book_mode(host: &dyn Host, item: &ItemStack) -> Option<&'static str> {
         .get(GUIDE_KEY)?
     {
         Tag::String(mode) if mode.to_string_lossy() == SURVIVAL => Some(SURVIVAL),
-        Tag::String(mode) if mode.to_string_lossy() == "CHEAT_MODE" => Some("CHEAT_MODE"),
+        Tag::String(mode) if mode.to_string_lossy() == CHEAT => Some(CHEAT),
         _ => None,
     }
 }
 
+#[cfg(test)]
 fn is_book(host: &dyn Host, item: &ItemStack) -> bool {
     book_mode(host, item) == Some(SURVIVAL)
 }
 
-fn rename_old_book(host: &mut dyn ServerHost, player: PlayerRef, hand: Hand, stack: &ItemStack) {
+fn held_book_slot(
+    host: &mut dyn ServerHost,
+    player: PlayerRef,
+    hand: Hand,
+    stack: &ItemStack,
+) -> Option<u32> {
+    let held = ItemPlace::PlayerHand { player: player.uuid(), hand };
+    if held.stack(host).as_ref() != Some(stack) {
+        return None;
+    }
+    match hand {
+        Hand::Main => player
+            .selected_slot(host)
+            .and_then(|slot| u32::try_from(slot).ok())
+            .filter(|slot| *slot < 9),
+        Hand::Off => Some(40),
+    }
+}
+
+fn book_in_slot(host: &dyn Host, player: PlayerRef, slot: u32) -> Option<ItemStack> {
+    player
+        .inventory_slots(host)?
+        .into_iter()
+        .find_map(|(index, stack)| (index == slot && is_guide_book(host, &stack)).then_some(stack))
+}
+
+fn rename_old_book(host: &mut dyn ServerHost, player: PlayerRef, slot: u32, stack: &ItemStack) {
     let name = stack
         .components()
         .and_then(|parts| parts.as_nbt().get(&"minecraft:custom_name".into()));
     if name != Some(&colored_lore("&aSlimefun Guide &7(Chest GUI)")) {
         return;
     }
-    let held = ItemPlace::PlayerHand { player: player.uuid(), hand };
-    if held.stack(host).as_ref() != Some(stack) {
-        return;
-    }
-    let slot = match hand {
-        Hand::Main => player
-            .selected_slot(host)
-            .and_then(|slot| u32::try_from(slot).ok())
-            .filter(|slot| *slot < 9),
-        Hand::Off => Some(40),
-    };
-    let Some(slot) = slot else { return };
     let mut updated = stack.clone();
     if updated.apply_components(&Compound::from([
-        ("minecraft:custom_name".into(), colored_lore("&a远古工艺之书")),
+        ("minecraft:custom_name".into(), colored_lore(BOOK_NAME)),
         ("minecraft:lore".into(), Tag::List(BOOK_LORE.iter().map(|line| colored_lore(line)).collect())),
     ])).is_ok() {
         let _ = player.set_inventory_slot(host, slot, Some(updated));
     }
+}
+
+fn switched_book(host: &dyn Host, mut stack: ItemStack) -> Option<ItemStack> {
+    let (mode, name, lore) = if book_mode(host, &stack)? == SURVIVAL {
+        (CHEAT, CHEAT_BOOK_NAME, CHEAT_BOOK_LORE)
+    } else {
+        (SURVIVAL, BOOK_NAME, BOOK_LORE)
+    };
+    let custom_data_key = "minecraft:custom_data".into();
+    let mut data = stack.components()?.as_nbt().get(&custom_data_key)?.clone();
+    let Tag::Compound(values) = &mut data else {
+        return None;
+    };
+    let Some(Tag::Compound(bukkit)) = values.get_mut(&"PublicBukkitValues".into()) else {
+        return None;
+    };
+    bukkit.insert(GUIDE_KEY.into(), Tag::String(mode.into()));
+    stack
+        .apply_components(&Compound::from([
+            (custom_data_key, data),
+            ("minecraft:custom_name".into(), colored_lore(name)),
+            ("minecraft:lore".into(), Tag::List(lore.iter().map(|line| colored_lore(line)).collect())),
+        ]))
+        .ok()?;
+    Some(stack)
 }
 
 pub(crate) fn is_guide_book(host: &dyn Host, item: &ItemStack) -> bool {
@@ -144,7 +194,7 @@ pub(crate) fn command_item(id: &str) -> Option<Result<Kind, &'static str>> {
         return None;
     }
     let entry = lookup(id)?;
-    Some(if entry.label.is_some() {
+    Some(if entry.multiblock.is_some() {
         Err("多方块机器需现场搭建，无法发放。")
     } else {
         Ok(entry.item.kind)
@@ -209,7 +259,7 @@ fn insert_guide(
 fn give_cheat_item(host: &mut dyn ServerHost, player: PlayerRef, stack: &ItemStack, full_stack: bool) -> bool {
     let resource = ItemResource::of(stack);
     let limit = crate::items::stack_limit(host, stack);
-    let count = if full_stack { limit } else { 1 };
+    let count = if full_stack { limit } else { stack.count() };
     host.transaction(|host, tx| {
         let mut remaining = count;
         for slot in 0..36 {
@@ -236,9 +286,7 @@ fn give_cheat_item(host: &mut dyn ServerHost, player: PlayerRef, stack: &ItemSta
 }
 
 fn can_cheat(host: &dyn Host, player: PlayerRef) -> bool {
-    player
-        .permission_level(host)
-        .is_some_and(|level| level >= PermissionLevel::Gamemasters.level())
+    crate::admin_commands::operator(host, player)
 }
 
 #[derive(Clone)]
@@ -257,6 +305,7 @@ enum Page {
 #[derive(Clone, Copy)]
 enum Presentation {
     Book,
+    HeldBook(u32),
     Dashboard,
 }
 
@@ -269,7 +318,7 @@ enum Action {
     TogglePreference(Preference),
     SelectLanguage(Option<Language>),
     EnterCheat,
-    LeaveCheat,
+    SwitchBookMode(u32),
     Grant(&'static Entry),
     SearchPrompt,
     FollowVanilla,
@@ -297,6 +346,7 @@ pub(crate) struct Guide {
     show_hidden_groups_in_search: AtomicBool,
     show_vanilla_recipes: AtomicBool,
     languages: Mutex<locale::Settings>,
+    chat_prefix: Mutex<String>,
     learning: learning::Learning,
     machine_settings: Mutex<crate::machine::Settings>,
     machine_recipes: Mutex<Arc<MachineRecipes>>,
@@ -310,6 +360,7 @@ impl Default for Guide {
             show_hidden_groups_in_search: AtomicBool::new(false),
             show_vanilla_recipes: AtomicBool::new(true),
             languages: Mutex::default(),
+            chat_prefix: Mutex::new(DEFAULT_CHAT_PREFIX.into()),
             learning: learning::Learning::default(),
             machine_settings: Mutex::default(),
             machine_recipes: Mutex::default(),
@@ -352,11 +403,60 @@ impl Guide {
 
     pub(crate) fn configure_languages(&self, options: Option<&toml::Value>) {
         *self.languages.lock().unwrap() = locale::Settings::from_config(options);
+        *self.chat_prefix.lock().unwrap() = options
+            .and_then(|options| options.get("chat-prefix"))
+            .and_then(toml::Value::as_str)
+            .unwrap_or(DEFAULT_CHAT_PREFIX)
+            .into();
     }
 
-    fn player_language(&self, host: &dyn Host, player: PlayerRef) -> Language {
+    pub(crate) fn player_language(&self, host: &dyn Host, player: PlayerRef) -> Language {
         let settings = *self.languages.lock().unwrap();
         settings.player(host, player)
+    }
+
+    pub(crate) fn command_language(
+        &self,
+        host: &dyn Host,
+        source: &mod_api::CommandSource,
+    ) -> Language {
+        match *source {
+            mod_api::CommandSource::Player { player, .. } => self.player_language(host, player),
+            _ => self.languages.lock().unwrap().default,
+        }
+    }
+
+    pub(crate) fn chat_prefix(&self) -> String {
+        self.chat_prefix.lock().unwrap().clone()
+    }
+
+    pub(crate) fn refuses_multiblock_item_use(
+        &self,
+        host: &mut dyn ServerHost,
+        player: PlayerRef,
+        stack: &ItemStack,
+    ) -> bool {
+        let Some(id) = crate::items::item_id(stack) else {
+            return false;
+        };
+        let Some(entry) = lookup(&id).filter(|entry| entry.id == id && entry.multiblock.is_some())
+        else {
+            return false;
+        };
+        let Some(topic) = entry.research else {
+            return false;
+        };
+        let saved = player.persistent_data(host);
+        if saved.as_ref().is_some_and(|saved| research::unlocked(saved, topic)) {
+            return false;
+        }
+        if saved.is_some() {
+            let language = self.player_language(host, player);
+            let name = entry_name(entry, language);
+            let message = language.command_message("not-researched").replace("%item%", &name);
+            let _ = player.tell(host, colored_label(&format!("{}{message}", self.chat_prefix())));
+        }
+        true
     }
 
     pub(crate) fn first_join(&self, host: &mut dyn ServerHost, uuid: u128) {
@@ -443,6 +543,10 @@ impl Guide {
         self.show(host, player, path, Presentation::Book);
     }
 
+    pub(crate) fn open_cheat(&self, host: &mut dyn ServerHost, player: PlayerRef) {
+        self.show(host, player, vec![Page::Cheat], Presentation::Book);
+    }
+
     pub(crate) fn open_dashboard(&self, host: &mut dyn ServerHost, player: PlayerRef) {
         let path = self.last_path(player.uuid());
         self.show(host, player, path, Presentation::Dashboard);
@@ -478,15 +582,32 @@ impl Guide {
         hand: Hand,
         stack: &ItemStack,
     ) -> bool {
-        if !is_book(host, stack) {
+        let Some(mode) = book_mode(host, stack) else {
             return false;
+        };
+        if !availability::world_enabled(host.dimension()) {
+            availability::Denied::World.tell(host, player);
+            return true;
         }
-        rename_old_book(host, player, hand, stack);
+        let slot = held_book_slot(host, player, hand, stack);
+        if let Some(slot) = slot
+            && mode == SURVIVAL
+        {
+            rename_old_book(host, player, slot, stack);
+        }
         let mut path = self.last_path(player.uuid());
         if player.entity().is_shift_key_down(host) == Some(true) {
             path.push(Page::Info);
+        } else if mode == CHEAT {
+            self.open_cheat(host, player);
+            return true;
         }
-        self.show(host, player, path, Presentation::Book);
+        self.show(
+            host,
+            player,
+            path,
+            slot.map_or(Presentation::Book, Presentation::HeldBook),
+        );
         true
     }
 
@@ -497,13 +618,13 @@ impl Guide {
         mut path: Vec<Page>,
         presentation: Presentation,
     ) {
-        if !availability::world_enabled(host.dimension()) {
+        let cheat = matches!(path.first(), Some(Page::Cheat));
+        if !cheat && !availability::world_enabled(host.dimension()) {
             availability::Denied::World.tell(host, player);
             return;
         }
-        let cheat = matches!(path.first(), Some(Page::Cheat));
         if cheat && !can_cheat(host, player) {
-            let _ = player.tell(host, colored_label("&c只有二级及以上管理员可以使用作弊模式。"));
+            let _ = player.tell(host, colored_label("&c你没有权限使用此命令。"));
             return;
         }
         let language_settings = *self.languages.lock().unwrap();
@@ -520,7 +641,7 @@ impl Guide {
             show_vanilla_recipes: self.show_vanilla_recipes.load(Ordering::Relaxed),
             ..Availability::for_dimension(host.dimension())
         };
-        if matches!(path.last(), Some(Page::Group(group, _)) if !group.in_season(month))
+        if matches!(path.last(), Some(Page::Group(group, _)) if !cheat && !group.in_season(month))
             || matches!(path.last(), Some(Page::Recipe(entry) | Page::ProcessingRecipes(entry, _))
                 if !availability.allows_search(entry))
         {
@@ -536,7 +657,7 @@ impl Guide {
             research.as_ref(),
             page,
             month,
-            show_hidden,
+            show_hidden || cheat,
             availability,
             cheat,
         );
@@ -548,16 +669,31 @@ impl Guide {
         if matches!(page, Page::Info) {
             let mut slot = 19;
             if can_cheat(host, player) {
-                let selected = language.message("modes.SURVIVAL_MODE");
+                let held_book = match presentation {
+                    Presentation::HeldBook(slot) => book_in_slot(host, player, slot)
+                        .map(|stack| (slot, book_mode(host, &stack) == Some(CHEAT))),
+                    Presentation::Book | Presentation::Dashboard => None,
+                };
+                let is_cheat = held_book.is_some_and(|(_, cheat)| cheat);
+                let survival_mode = language.message("modes.SURVIVAL_MODE");
                 let cheat_mode = language.message("modes.CHEAT_MODE");
+                let selected = if is_cheat { cheat_mode } else { survival_mode };
                 let title = format!("&7{} &e{selected}", language.message("modes.selected"));
-                let selected = format!("&a{selected}");
-                let cheat_mode = format!("&7{cheat_mode}");
+                let survival_mode = format!("{}{survival_mode}", if is_cheat { "&7" } else { "&a" });
+                let cheat_mode = format!("{}{cheat_mode}", if is_cheat { "&a" } else { "&7" });
                 let click = format!("&7⇨ &e{}", language.message("modes.change"));
+                let material = if is_cheat {
+                    "minecraft:command_block"
+                } else {
+                    "minecraft:chest"
+                };
+                let action = held_book.map_or(Action::EnterCheat, |(slot, _)| {
+                    Action::SwitchBookMode(slot)
+                });
                 menu.set(
                     slot,
-                    icon(host, "minecraft:chest", &title, &["", &selected, &cheat_mode, "", &click]),
-                    Some(Action::EnterCheat),
+                    icon(host, material, &title, &["", &survival_mode, &cheat_mode, "", &click]),
+                    Some(action),
                 );
                 slot += 1;
             }
@@ -592,7 +728,7 @@ impl Guide {
             ));
             let title = format!("&7⇦ {}", language.message("back.title"));
             let guide = format!("&7{}", language.message("back.guide"));
-            let lore = if language == Language::CHINESE {
+            let lore = if !cheat && language == Language::CHINESE {
                 &["", "&f左键：&7返回上一页", "&f潜行并左键：&7返回主页"][..]
             } else {
                 &["", guide.as_str()][..]
@@ -665,7 +801,7 @@ impl Guide {
         };
         if matches!(path.first(), Some(Page::Cheat)) && !can_cheat(host, player) {
             host.close_menu(event.uuid);
-            let _ = player.tell(host, colored_label("&c只有二级及以上管理员可以使用作弊模式。"));
+            let _ = player.tell(host, colored_label("&c你没有权限使用此命令。"));
             return;
         }
         match action {
@@ -690,8 +826,8 @@ impl Guide {
                 path.pop();
                 path.push(page);
             }
-            Action::Back if event.mode == 1
-                && !matches!(path.last(), Some(Page::Info | Page::Languages)) => {
+            Action::Back if matches!(path.first(), Some(Page::Cheat))
+                || (event.mode == 1 && !matches!(path.last(), Some(Page::Info | Page::Languages))) => {
                 path.truncate(1);
             }
             Action::Back => {
@@ -729,21 +865,34 @@ impl Guide {
                 path.pop();
             }
             Action::EnterCheat => path = vec![Page::Cheat],
-            Action::LeaveCheat => path = self.last_path(player.uuid()),
-            Action::Grant(entry) => {
-                if !availability::world_enabled(host.dimension())
-                    || !Availability::for_dimension(host.dimension()).allows(entry)
+            Action::SwitchBookMode(slot) => {
+                if can_cheat(host, player)
+                    && let Some(updated) =
+                        book_in_slot(host, player, slot).and_then(|stack| switched_book(host, stack))
                 {
+                    let _ = player.set_inventory_slot(host, slot, Some(updated));
+                }
+            }
+            Action::Grant(entry) => {
+                // Paper searches the global item registry and gives the template as-is.
+                // Category pages honor world settings and support shift-clicking a full stack.
+                let from_search = matches!(path.last(), Some(Page::Search(_)));
+                let availability = Availability::for_dimension(host.dimension());
+                let available = if from_search {
+                    availability.allows_search(entry)
+                } else {
+                    availability.allows(entry)
+                };
+                if !available {
                     return;
                 }
-                if !matches!(entry.item.kind, Kind::Slimefun(_)) {
-                    let _ = player.tell(host, colored_label("&c多方块结构需要手动搭建。"));
+                if entry.multiblock.is_some() && !from_search {
+                    let language = self.player_language(host, player);
+                    let _ = player.tell(host, colored_label(language.message("cheat.no-multiblocks")));
                     return;
                 }
-                if let Some(stack) = entry.item.kind.stack(host, 1) {
-                    if !give_cheat_item(host, player, &stack, event.mode == 1) {
-                        let _ = player.tell(host, colored_label("&c背包已满。"));
-                    }
+                if let Some(stack) = inventory_template(host, entry) {
+                    give_cheat_item(host, player, &stack, !from_search && event.mode == 1);
                 }
                 return;
             }
@@ -895,17 +1044,14 @@ fn render(
         for slot in (0..9).chain(45..54) {
             menu.slots[slot] = pane.clone();
         }
-        menu.set(
-            1,
-            if cheat {
-                let title = format!("&e{}", language.message("back.guide"));
-                icon(host, "minecraft:enchanted_book", &title, &[])
-            } else {
-                let title = format!("&e{}", language.message("title.settings"));
-                icon(host, "minecraft:comparator", &title, &[])
-            },
-            Some(if cheat { Action::LeaveCheat } else { Action::Push(Page::Info) }),
-        );
+        if !cheat {
+            let title = format!("&e{}", language.message("title.settings"));
+            menu.set(
+                1,
+                icon(host, "minecraft:comparator", &title, &[]),
+                Some(Action::Push(Page::Info)),
+            );
+        }
         let search_tip = format!("&7⇨ &b{}", language.message("search.tooltip"));
         menu.set(
             7,
@@ -917,8 +1063,8 @@ fn render(
         Page::Main | Page::Cheat => {
             for (slot, group) in GROUPS
                 .iter()
-                .filter(|group| group.in_season(month))
-                .filter(|group| group_entries(group).any(|entry| visible_entry(&entry)))
+                .filter(|group| cheat || group.in_season(month))
+                .filter(|group| cheat || group_entries(group).any(|entry| visible_entry(&entry)))
                 .enumerate()
             {
                 let locked_parent = group
@@ -954,13 +1100,16 @@ fn render(
             }
         }
         Page::Group(group, page) => {
-            let entries: Vec<_> = group_entries(group).filter(visible_entry).collect();
+            let entries: Vec<_> = group_entries(group)
+                .filter(|entry| cheat || visible_entry(entry))
+                .collect();
             let pages = entries.len().div_ceil(DISCOVERY_SLOTS).max(1);
             let page = (*page).min(pages);
             for (slot, entry) in entries
                 .into_iter()
                 .skip((page - 1) * DISCOVERY_SLOTS)
                 .take(DISCOVERY_SLOTS)
+                .filter(visible_entry)
                 .enumerate()
             {
                 if let Some(topic) = entry.research.filter(|_| !cheat && !unlocked(saved, entry)) {
@@ -1162,10 +1311,15 @@ fn search_matches(
         .filter(move |(_, _, entry)| availability.allows_search(entry))
         .filter_map(move |(group, id, entry)| {
             (id.to_ascii_lowercase().contains(&id_query)
-                || strip_colors(entry.label.unwrap_or_else(|| match entry.item.kind {
-                    Kind::Slimefun(item) => item.name,
-                    Kind::Vanilla(_) | Kind::Potion(_) => entry.id,
-                }))
+                || strip_colors(
+                    entry.multiblock.map_or_else(
+                        || match entry.item.kind {
+                            Kind::Slimefun(item) => item.name,
+                            Kind::Vanilla(_) | Kind::Potion(_) => entry.id,
+                        },
+                        |item| item.name,
+                    ),
+                )
                     .to_lowercase()
                     .contains(&query)
                 || strip_colors(&entry_name(entry, availability.language))
@@ -1400,7 +1554,7 @@ fn method_icon(host: &dyn Host, entry: &Entry, language: Language) -> Option<Ite
         return Some(stack);
     }
     if matches!(method.icon, Kind::Vanilla(_)) {
-        let lore = if entry.label.is_some() && language == Language::CHINESE {
+        let lore = if entry.multiblock.is_some() && language == Language::CHINESE {
             &["", "&a&o请在世界中搭建"][..]
         } else {
             method.lore
@@ -1450,8 +1604,9 @@ fn entry_name(entry: &Entry, language: Language) -> String {
     if let Some(name) = language.item_name(entry.id) {
         return name.to_owned();
     }
-    match entry.label {
-        Some(label) => label.to_owned(),
+    match entry.multiblock {
+        Some(item) if language == Language::CHINESE => item.localized_fallback.to_owned(),
+        Some(item) => item.name.to_owned(),
         None => match entry.item.kind {
             Kind::Slimefun(item) => item.name.to_owned(),
             Kind::Vanilla(id) | Kind::Potion(id) => {
@@ -1461,20 +1616,48 @@ fn entry_name(entry: &Entry, language: Language) -> String {
     }
 }
 
+fn multiblock_components(entry: &Entry, template: MultiblockItem) -> Compound {
+    let mut components = Compound::from([
+        ("minecraft:custom_name".into(), colored_lore(template.name)),
+        (
+            "minecraft:lore".into(),
+            Tag::List(template.lore.iter().map(|line| colored_lore(line)).collect()),
+        ),
+    ]);
+    if matches!(entry.id, "INDUSTRIAL_MINER" | "ADVANCED_INDUSTRIAL_MINER") {
+        components.insert(
+            "minecraft:tooltip_display".into(),
+            Tag::compound([(
+                "hidden_components",
+                Tag::List(vec![Tag::String("minecraft:attribute_modifiers".into())]),
+            )]),
+        );
+    }
+    components
+}
+
+fn inventory_template(host: &dyn Host, entry: &Entry) -> Option<ItemStack> {
+    let mut stack = entry.item.kind.stack(host, 1)?;
+    if let Some(template) = entry.multiblock {
+        let mut components = multiblock_components(entry, template);
+        components.insert(
+            "minecraft:custom_data".into(),
+            crate::items::paper_item_data(entry.id),
+        );
+        stack.apply_components(&components).ok()?;
+    }
+    Some(stack)
+}
+
 fn entry_icon(host: &dyn Host, entry: &Entry, count: u32, language: Language) -> Option<ItemStack> {
     let mut stack = entry.item.kind.guide_stack(host, count, language)?;
-    if entry.label.is_some() {
-        let mut components = Compound::from([(
+    if let Some(template) = entry.multiblock {
+        let mut components = multiblock_components(entry, template);
+        language.localize_components(entry.id, &mut components);
+        components.insert(
             "minecraft:custom_name".into(),
             colored_lore(&entry_name(entry, language)),
-        )]);
-        if let Some(lore) = crate::industrial_miner::guide_lore(entry.id) {
-            components.insert(
-                "minecraft:lore".into(),
-                Tag::List(lore.iter().map(|line| colored_lore(line)).collect()),
-            );
-            language.localize_components(entry.id, &mut components);
-        }
+        );
         stack.apply_components(&components).ok()?;
     }
     Some(stack)
@@ -1763,18 +1946,144 @@ mod tests {
             .unwrap();
         assert!(!is_book(&host, &counterfeit));
         assert!(!is_guide_book(&host, &counterfeit));
-        let mut wrong = book.clone();
-        wrong
+        let mut tagged = book.clone();
+        tagged
             .apply_components(&Compound::from([(
                 "minecraft:custom_data".into(),
                 Tag::compound([(
                     "PublicBukkitValues",
-                    Tag::compound([(GUIDE_KEY, Tag::String("CHEAT_MODE".into()))]),
+                    Tag::compound([
+                        (GUIDE_KEY, Tag::String(SURVIVAL.into())),
+                        ("test:preserved", Tag::Int(42)),
+                    ]),
                 )]),
             )]))
             .unwrap();
-        assert!(!is_book(&host, &wrong));
-        assert!(is_guide_book(&host, &wrong));
+        let cheat = switched_book(&host, tagged.clone()).unwrap();
+        assert_eq!(book_mode(&host, &cheat), Some(CHEAT));
+        assert!(is_guide_book(&host, &cheat));
+        let parts = cheat.components().unwrap().as_nbt();
+        assert_eq!(parts.get(&"minecraft:custom_name".into()), Some(&colored_lore(CHEAT_BOOK_NAME)));
+        assert_eq!(
+            parts.get(&"minecraft:lore".into()),
+            Some(&Tag::List(CHEAT_BOOK_LORE.iter().map(|line| colored_lore(line)).collect())),
+        );
+        assert_eq!(switched_book(&host, cheat), Some(tagged));
+    }
+
+    #[test]
+    fn the_cheat_menu_exposes_seasonal_and_research_locked_items_without_a_settings_link() {
+        let mut host = FakeHost::new();
+        host.registries
+            .resolve_items(
+                [
+                    "minecraft:gray_stained_glass_pane",
+                    "minecraft:comparator",
+                    "minecraft:player_head",
+                    "minecraft:potion",
+                    "minecraft:barrier",
+                ]
+                .map(|id| Identifier::parse(id).unwrap()),
+            )
+            .unwrap();
+        let mode = |page: &Page, cheat| render(&host, None, page, 1, cheat, available(), cheat);
+        let normal = mode(&Page::Main, false);
+        let creative = mode(&Page::Cheat, true);
+        let christmas = |menu: &Menu| {
+            menu.actions.iter().any(
+                |action| matches!(action, Some(Action::Push(Page::Group(group, 1))) if group.key == "christmas"),
+            )
+        };
+        assert!(!christmas(&normal));
+        assert!(christmas(&creative));
+        assert!(matches!(normal.actions[1], Some(Action::Push(Page::Info))));
+        assert!(creative.actions[1].is_none());
+        let search = Page::Search(Arc::from("CHRISTMAS_MILK"));
+        assert!(
+            mode(&search, true)
+                .actions
+                .iter()
+                .any(|action| matches!(action, Some(Action::Grant(entry)) if entry.id == "CHRISTMAS_MILK"))
+        );
+        let useful = GROUPS.iter().find(|group| group.key == "usefulItems").unwrap();
+        let group = Page::Group(useful, 1);
+        assert!(matches!(mode(&group, false).actions[9], Some(Action::Research(_))));
+        assert!(matches!(
+            mode(&group, true).actions[9],
+            Some(Action::Grant(entry)) if entry.id == "PORTABLE_CRAFTER"
+        ));
+    }
+
+    #[test]
+    fn multiblock_inventory_templates_keep_paper_metadata_and_stay_out_of_vanilla_crafting() {
+        mod_api::__private::initialize().unwrap();
+        let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
+        let entries: Vec<_> = GROUPS.iter()
+            .flat_map(group_entries)
+            .filter(|entry| entry.multiblock.is_some())
+            .collect();
+        assert_eq!(entries.len(), 15);
+        let mut host = FakeHost::new();
+        host.registries.resolve_items(
+            entries.iter().map(|entry| Identifier::parse(entry.item.kind.material()).unwrap()),
+        ).unwrap();
+
+        for entry in entries {
+            let template = entry.multiblock.unwrap();
+            let granted = inventory_template(&host, entry).unwrap();
+            assert_eq!(granted.item().id(&host), entry.item.kind.material());
+            assert_eq!(granted.count(), 1);
+            assert_eq!(crate::items::item_id(&granted).as_deref(), Some(entry.id));
+            let components = granted.components().unwrap().as_nbt();
+            assert_eq!(components.get(&"minecraft:custom_name".into()), Some(&colored_lore(template.name)));
+            assert_eq!(
+                components.get(&"minecraft:lore".into()),
+                Some(&Tag::List(template.lore.iter().map(|line| colored_lore(line)).collect())),
+            );
+            let preview = entry_icon(&host, entry, 1, Language::CHINESE).unwrap();
+            let localized = preview.components().unwrap().as_nbt();
+            assert_ne!(localized.get(&"minecraft:lore".into()), components.get(&"minecraft:lore".into()), "{}", entry.id);
+            assert!(
+                crate::items::item_id(&preview).is_none(),
+                "Guide previews never become inventory templates."
+            );
+            assert!(!crate::items::usable_in_workbench(&granted), "{}", entry.id);
+            assert!(blocks_vanilla_station(&granted), "{}", entry.id);
+
+            let plain = entry.item.kind.stack(&host, 1).unwrap();
+            assert!(crate::items::usable_in_workbench(&plain), "{}", entry.id);
+            assert!(!blocks_vanilla_station(&plain), "{}", entry.id);
+        }
+    }
+
+    #[test]
+    fn held_multiblock_templates_follow_their_paper_research_without_disabling_plain_materials() {
+        mod_api::__private::initialize().unwrap();
+        let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
+        let mut host = FakeHost::new();
+        host.registries.resolve_items(
+            ["minecraft:crafting_table", "minecraft:dispenser"].map(|id| Identifier::parse(id).unwrap()),
+        ).unwrap();
+        let level = host.level.level();
+        let player_id = 1;
+        host.players.join(player_id, 100, level);
+        let player = host.player(player_id).unwrap();
+        let entry = lookup("GRIND_STONE").unwrap();
+        let grinder = inventory_template(&host, entry).unwrap();
+        let plain = entry.item.kind.stack(&host, 1).unwrap();
+        let enhanced = inventory_template(&host, lookup("ENHANCED_CRAFTING_TABLE").unwrap()).unwrap();
+        let guide = Guide::default();
+        let mut without_loaded_profile = FakeHost::new();
+        assert!(guide.refuses_multiblock_item_use(&mut without_loaded_profile, player, &grinder));
+        assert!(!guide.refuses_multiblock_item_use(&mut host, player, &plain));
+        assert!(!guide.refuses_multiblock_item_use(&mut host, player, &enhanced));
+
+        let research_key = format!("slimefun:{}", entry.research.unwrap().id);
+        host.players.get_mut(player_id).unwrap().persistent_data.insert(
+            "PlayerPersisted".into(),
+            Tag::compound([(research_key.as_str(), Tag::Byte(1))]),
+        );
+        assert!(!guide.refuses_multiblock_item_use(&mut host, player, &grinder));
     }
 
     #[test]

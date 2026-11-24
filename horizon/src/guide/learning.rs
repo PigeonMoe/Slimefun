@@ -491,10 +491,10 @@ mod tests {
             sounds: 0,
             messages: 0,
             titles: vec![],
-            permission: 1,
+            permission: 0,
         };
         assert!(!super::super::can_cheat(&host, player));
-        host.permission = 2;
+        host.permission = 1;
         assert!(super::super::can_cheat(&host, player));
 
         let guide = Learning::default();

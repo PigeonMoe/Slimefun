@@ -46,10 +46,17 @@ TAPE_MEASURE:
 GOLD_PAN:
   name: '&6淘金盘'
   lore:
+  - source: '&eRight Click&7 to collect resources'
+    target: '&e右键&7'
   - source: '&7from Gravel'
-    target: '&7&e右键&7 从沙砾中淘金'
+    target: '&7从沙砾中淘金'
 NETHER_GOLD_PAN:
   name: '&4下界淘金盘'
+  lore:
+  - source: '&eRight Click&7 to collect resources'
+    target: '&e右键&7'
+  - source: '&7from Soul Sand'
+    target: '&7从灵魂沙中淘金'
 PARACHUTE:
   name: '&r&l降落伞'
 GRAPPLING_HOOK:
@@ -122,10 +129,33 @@ VITAMINS:
     target: '&r治愈中毒/凋零/辐射的负面效果'
 MEDICINE:
   name: '&c药物'
+  lore:
+  - source: '&aLevel III - Medical Supply'
+    target: '&a3级医疗供给'
+  - source: '&fRestores 4 Hearts'
+    target: '&f恢复 4 颗心'
+  - source: '&fExtinguishes Fire'
+    target: '&r可以熄灭身上的火'
+  - source: '&fCures Poison/Wither/Radiation'
+    target: '&r治愈中毒、凋零和辐射'
 MAGICAL_ZOMBIE_PILLS:
   name: '&6还魂丹'
+  lore:
+  - source: '&eRight Click &7a Zombified Villager'
+    target: '&e右键 &7点击僵尸村民'
+  - source: '&eor &7a Zombified Piglin to'
+    target: '&e或 &7僵尸猪灵，'
+  - source: '&7instantly cure it from its curse'
+    target: '&7即可解除它的诅咒'
 FLASK_OF_KNOWLEDGE:
   name: '&c学识之瓶'
+  lore:
+  - source: '&fAllows you to store some of'
+    target: '&f可以将部分经验'
+  - source: '&fyour Experience in a Bottle'
+    target: '&f储存在瓶中'
+  - source: '&7Cost: &a1 Level'
+    target: '&7消耗: &a1 级'
 FILLED_FLASK_OF_KNOWLEDGE:
   name: '&a学识之瓶'
 SMALL_BACKPACK:
@@ -757,10 +787,23 @@ PURE_ORE_CLUSTER:
   name: '&6纯矿簇'
 SMALL_URANIUM:
   name: '&c一小块铀'
+  lore:
+  - source: '&a☢&7 Radiation level: &eMODERATE'
+    target: '&a☢&7 辐射等级: &e中等'
+  - source: '&8⇨ &4Hazmat Suit required!'
+    target: '&8⇨ &4需要穿戴防化服！'
 TINY_URANIUM:
   name: '&c一小撮铀'
+  lore:
+  - source: '&a☢&7 Radiation level: &eLOW'
+    target: '&a☢&7 辐射等级: &e低'
 SOLAR_PANEL:
   name: '&b光伏电池'
+  lore:
+  - source: '&7Important component for'
+    target: '&7用于合成'
+  - source: '&7crafting a &bSolar Generator'
+    target: '&b太阳能发电机&7的重要部件'
 PLASTIC_SHEET:
   name: '&r塑料纸'
 MAGNET:
@@ -771,6 +814,13 @@ ESSENCE_OF_AFTERLIFE:
   name: '&4来世精华'
 STRANGE_NETHER_GOO:
   name: '&5奇怪的下界粘液'
+  lore:
+  - source: '&fA strange bio matter that'
+    target: '&f一种奇特的生物质，'
+  - source: '&fcan be acquired from'
+    target: '&f可通过与猪灵'
+  - source: '&fbartering with Piglins'
+    target: '&f以物易物获得'
 ELECTRO_MAGNET:
   name: '&c电磁铁'
 HEATING_COIL:
@@ -781,6 +831,11 @@ ELECTRIC_MOTOR:
   name: '&c电动马达'
 CARGO_MOTOR:
   name: '&3货运马达'
+  lore:
+  - source: '&7Important ingredient for items'
+    target: '&7用于制作'
+  - source: '&7related to Cargo Management'
+    target: '&7货运管理设备的重要部件'
 SCROLL_OF_DIMENSIONAL_TELEPOSITION:
   name: '&6维度传送卷轴'
   lore:
@@ -798,6 +853,13 @@ SCROLL_OF_DIMENSIONAL_TELEPOSITION:
     target: '&r就是说: 让实体转180°'
 TOME_OF_KNOWLEDGE_SHARING:
   name: '&6学识巨著'
+  lore:
+  - source: '&eRight Click&7 to bind this Tome to yourself'
+    target: '&e右键&7 将此巨著绑定到自己'
+  - source: '&eRight Click&7 to obtain all Researches by'
+    target: '&e右键&7 获取之前绑定的'
+  - source: '&7the previously assigned Owner'
+    target: '&7所有者的全部研究'
 HARDENED_GLASS:
   name: '&7钢化玻璃'
   lore:
@@ -985,8 +1047,18 @@ GOLD_24K_BLOCK:
   name: '&r&r金块 &7(24克拉)'
 SYNTHETIC_DIAMOND:
   name: '&b人造钻石'
+  lore:
+  - source: '&fThis item can be used in a'
+    target: '&f可以在工作台中'
+  - source: '&fworkbench and acts like a normal Diamond'
+    target: '&f当作普通钻石使用'
 SYNTHETIC_EMERALD:
   name: '&b人造绿宝石'
+  lore:
+  - source: '&fThis item can be used to'
+    target: '&f可以用来'
+  - source: '&ftrade with Villagers'
+    target: '&f与村民交易'
 SYNTHETIC_SAPPHIRE:
   name: '&b人造蓝宝石'
 CARBONADO:
@@ -998,12 +1070,32 @@ RAW_CARBONADO:
   name: '&b黑金刚石原矿'
 URANIUM:
   name: '&4铀'
+  lore:
+  - source: '&a☢&7 Radiation level: &6HIGH'
+    target: '&a☢&7 辐射等级: &6高'
+  - source: '&8⇨ &4Hazmat Suit required!'
+    target: '&8⇨ &4需要穿戴防化服！'
 NEPTUNIUM:
   name: '&a镎'
+  lore:
+  - source: '&a☢&7 Radiation level: &6HIGH'
+    target: '&a☢&7 辐射等级: &6高'
+  - source: '&8⇨ &4Hazmat Suit required!'
+    target: '&8⇨ &4需要穿戴防化服！'
 PLUTONIUM:
   name: '&7钚'
+  lore:
+  - source: '&a☢&7 Radiation level: &cVERY HIGH'
+    target: '&a☢&7 辐射等级: &c极高'
+  - source: '&8⇨ &4Hazmat Suit required!'
+    target: '&8⇨ &4需要穿戴防化服！'
 BOOSTED_URANIUM:
   name: '&2钚铀混合氧化物核燃料'
+  lore:
+  - source: '&a☢&7 Radiation level: &cVERY HIGH'
+    target: '&a☢&7 辐射等级: &c极高'
+  - source: '&8⇨ &4Hazmat Suit required!'
+    target: '&8⇨ &4需要穿戴防化服！'
 COMMON_TALISMAN:
   name: '&6普通护身符'
 ENDER_TALISMAN:
@@ -1248,8 +1340,22 @@ ARMOR_FORGE:
     target: '&a&o给你创造强大防具的力量'
 MAKESHIFT_SMELTERY:
   name: '&e简易冶炼炉'
+  lore:
+  - source: '&fImprovised version of the Smeltery'
+    target: '&f冶炼炉的简易版本'
+  - source: '&fthat only allows you to'
+    target: '&f只能将矿粉'
+  - source: '&fsmelt dusts into ingots'
+    target: '&f冶炼成金属锭'
 SMELTERY:
   name: '&6冶炼炉'
+  lore:
+  - source: '&fA high-temperature furnace'
+    target: '&f一台高温熔炉'
+  - source: '&fthat allows you to smelt dusts'
+    target: '&f可将矿粉冶炼成金属锭'
+  - source: '&finto ingots and create alloys.'
+    target: '&f并制造合金。'
 ORE_CRUSHER:
   name: '&b矿石粉碎机'
   lore:
@@ -1291,6 +1397,11 @@ JUICER:
     target: '&a让你创造美味的果汁'
 AUTOMATED_PANNING_MACHINE:
   name: '&a自动淘金机'
+  lore:
+  - source: '&fA MultiBlock Version of the Gold Pan'
+    target: '&f淘金盘和下界淘金盘的多方块版本'
+  - source: '&fand Nether Gold Pan combined in one machine.'
+    target: '&f将两种淘金盘的功能集成在一台机器中。'
 INDUSTRIAL_MINER:
   name: '&b工业矿机'
   lore:
@@ -1336,6 +1447,13 @@ OUTPUT_CHEST:
     target: '&c&o放入此箱子。'
 IGNITION_CHAMBER:
   name: '&4自动点火机'
+  lore:
+  - source: '&fPrevents the Smeltery from using up fire.'
+    target: '&f防止冶炼炉的火熄灭。'
+  - source: '&fJust fill it up with "Flint and Steel"'
+    target: '&f放入打火石，'
+  - source: '&fand place it adjacent to the Smeltery''s dispenser'
+    target: '&f再将点火机放到冶炼炉的发射器旁'
 HOLOGRAM_PROJECTOR:
   name: '&b全息投影仪'
   lore:
@@ -1823,6 +1941,15 @@ GPS_TELEPORTER_PYLON:
     target: '&7传送器组件'
 GPS_TELEPORTATION_MATRIX:
   name: '&bGPS 传送矩阵'
+  lore:
+  - source: '&fThis is your Teleporter''s Main Component'
+    target: '&f传送器的核心部件'
+  - source: '&fThis Matrix allows Players to choose from all'
+    target: '&f此矩阵允许玩家选择'
+  - source: '&fWaypoints made by the Player who has placed'
+    target: '&f放置者设置的'
+  - source: '&fthis Device.'
+    target: '&f任意路径点。'
 GPS_ACTIVATION_DEVICE_SHARED:
   name: '&rGPS 激活设备 &3(公共)'
   lore:
@@ -1902,10 +2029,25 @@ CARBON_PRESS_3:
   name: '&c碳压机 &7- &eIII'
 BLISTERING_INGOT:
   name: '&6起泡锭 &7(33%)'
+  lore:
+  - source: '&a☢&7 Radiation level: &6HIGH'
+    target: '&a☢&7 辐射等级: &6高'
+  - source: '&8⇨ &4Hazmat Suit required!'
+    target: '&8⇨ &4需要穿戴防化服！'
 BLISTERING_INGOT_2:
   name: '&6起泡锭 &7(66%)'
+  lore:
+  - source: '&a☢&7 Radiation level: &cVERY HIGH'
+    target: '&a☢&7 辐射等级: &c极高'
+  - source: '&8⇨ &4Hazmat Suit required!'
+    target: '&8⇨ &4需要穿戴防化服！'
 BLISTERING_INGOT_3:
   name: '&6起泡锭'
+  lore:
+  - source: '&a☢&7 Radiation level: &cVERY HIGH'
+    target: '&a☢&7 辐射等级: &c极高'
+  - source: '&8⇨ &4Hazmat Suit required!'
+    target: '&8⇨ &4需要穿戴防化服！'
 ENERGY_REGULATOR:
   name: '&6能源调节器'
   lore:
@@ -1935,8 +2077,18 @@ DEBUG_FISH:
     target: '&eShift + 右键 &r放置一个占位符方块'
 NETHER_ICE:
   name: '&e下界冰'
+  lore:
+  - source: '&a☢&7 Radiation level: &eMODERATE'
+    target: '&a☢&7 辐射等级: &e中等'
+  - source: '&8⇨ &4Hazmat Suit required!'
+    target: '&8⇨ &4需要穿戴防化服！'
 ENRICHED_NETHER_ICE:
   name: '&e浓缩下界冰'
+  lore:
+  - source: '&a☢&7 Radiation level: &cVERY HIGH'
+    target: '&a☢&7 辐射等级: &c极高'
+  - source: '&8⇨ &4Hazmat Suit required!'
+    target: '&8⇨ &4需要穿戴防化服！'
 NETHER_ICE_COOLANT_CELL:
   name: '&6下界冰冷却剂'
 CARGO_MANAGER:
@@ -2182,6 +2334,11 @@ SOULBOUND_ELYTRA:
   name: '&c鞘翅 (灵魂绑定)'
 MAGNESIUM_SALT:
   name: '&c镁盐'
+  lore:
+  - source: '&7A special type of fuel that can be'
+    target: '&7一种特殊的燃料'
+  - source: '&7used in a Magnesium-powered Generator'
+    target: '&7可用于镁发电机'
 MAGNESIUM_GENERATOR:
   name: '&c镁发电机'
 ENDER_ANVIL_TALISMAN:

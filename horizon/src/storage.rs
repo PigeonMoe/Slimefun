@@ -473,7 +473,7 @@ fn record_id(row: &toml::Table) -> Option<&str> {
     row.get("metadata")?.as_table()?.get("id")?.as_str()
 }
 
-fn has_restorable_menu(component: Option<Component>) -> bool {
+pub(crate) fn has_restorable_menu(component: Option<Component>) -> bool {
     matches!(
         component,
         Some(

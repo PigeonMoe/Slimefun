@@ -248,6 +248,16 @@
       "name": "&6盔甲锻造台"
     },
     "AUTOMATED_PANNING_MACHINE": {
+      "lore": [
+        {
+          "source": "&fA MultiBlock Version of the Gold Pan",
+          "target": "&f淘金盘和下界淘金盘的多方块版本"
+        },
+        {
+          "source": "&fand Nether Gold Pan combined in one machine.",
+          "target": "&f将两种淘金盘的功能集成在一台机器中。"
+        }
+      ],
       "name": "&a自动淘金机"
     },
     "AUTO_ANVIL": {
@@ -427,12 +437,42 @@
       "name": "&8空白符文"
     },
     "BLISTERING_INGOT": {
+      "lore": [
+        {
+          "source": "&a☢&7 Radiation level: &6HIGH",
+          "target": "&a☢&7 辐射等级: &6高"
+        },
+        {
+          "source": "&8⇨ &4Hazmat Suit required!",
+          "target": "&8⇨ &4需要穿戴防化服！"
+        }
+      ],
       "name": "&6起泡锭 &7(33%)"
     },
     "BLISTERING_INGOT_2": {
+      "lore": [
+        {
+          "source": "&a☢&7 Radiation level: &cVERY HIGH",
+          "target": "&a☢&7 辐射等级: &c极高"
+        },
+        {
+          "source": "&8⇨ &4Hazmat Suit required!",
+          "target": "&8⇨ &4需要穿戴防化服！"
+        }
+      ],
       "name": "&6起泡锭 &7(66%)"
     },
     "BLISTERING_INGOT_3": {
+      "lore": [
+        {
+          "source": "&a☢&7 Radiation level: &cVERY HIGH",
+          "target": "&a☢&7 辐射等级: &c极高"
+        },
+        {
+          "source": "&8⇨ &4Hazmat Suit required!",
+          "target": "&8⇨ &4需要穿戴防化服！"
+        }
+      ],
       "name": "&6起泡锭"
     },
     "BLOCK_PLACER": {
@@ -458,6 +498,16 @@
       "name": "&6附魔书整合机"
     },
     "BOOSTED_URANIUM": {
+      "lore": [
+        {
+          "source": "&a☢&7 Radiation level: &cVERY HIGH",
+          "target": "&a☢&7 辐射等级: &c极高"
+        },
+        {
+          "source": "&8⇨ &4Hazmat Suit required!",
+          "target": "&8⇨ &4需要穿戴防化服！"
+        }
+      ],
       "name": "&2钚铀混合氧化物核燃料"
     },
     "BOOTS_OF_THE_STOMPER": {
@@ -618,6 +668,16 @@
       "name": "&6货运管理器"
     },
     "CARGO_MOTOR": {
+      "lore": [
+        {
+          "source": "&7Important ingredient for items",
+          "target": "&7用于制作"
+        },
+        {
+          "source": "&7related to Cargo Management",
+          "target": "&7货运管理设备的重要部件"
+        }
+      ],
       "name": "&3货运马达"
     },
     "CARGO_NODE": {
@@ -1945,6 +2005,16 @@
       "name": "&7强化熔炉 - &eIX"
     },
     "ENRICHED_NETHER_ICE": {
+      "lore": [
+        {
+          "source": "&a☢&7 Radiation level: &cVERY HIGH",
+          "target": "&a☢&7 辐射等级: &c极高"
+        },
+        {
+          "source": "&8⇨ &4Hazmat Suit required!",
+          "target": "&8⇨ &4需要穿戴防化服！"
+        }
+      ],
       "name": "&e浓缩下界冰"
     },
     "ESSENCE_OF_AFTERLIFE": {
@@ -2082,6 +2152,20 @@
       "name": "&6鱼干"
     },
     "FLASK_OF_KNOWLEDGE": {
+      "lore": [
+        {
+          "source": "&fAllows you to store some of",
+          "target": "&f可以将部分经验"
+        },
+        {
+          "source": "&fyour Experience in a Bottle",
+          "target": "&f储存在瓶中"
+        },
+        {
+          "source": "&7Cost: &a1 Level",
+          "target": "&7消耗: &a1 级"
+        }
+      ],
       "name": "&c学识之瓶"
     },
     "FLUID_PUMP": {
@@ -2300,8 +2384,12 @@
     "GOLD_PAN": {
       "lore": [
         {
+          "source": "&eRight Click&7 to collect resources",
+          "target": "&e右键&7"
+        },
+        {
           "source": "&7from Gravel",
-          "target": "&7&e右键&7 从沙砾中淘金"
+          "target": "&7从沙砾中淘金"
         }
       ],
       "name": "&6淘金盘"
@@ -2405,6 +2493,24 @@
       "name": "&bGPS 设置路径点工具"
     },
     "GPS_TELEPORTATION_MATRIX": {
+      "lore": [
+        {
+          "source": "&fThis is your Teleporter's Main Component",
+          "target": "&f传送器的核心部件"
+        },
+        {
+          "source": "&fThis Matrix allows Players to choose from all",
+          "target": "&f此矩阵允许玩家选择"
+        },
+        {
+          "source": "&fWaypoints made by the Player who has placed",
+          "target": "&f放置者设置的"
+        },
+        {
+          "source": "&fthis Device.",
+          "target": "&f任意路径点。"
+        }
+      ],
       "name": "&bGPS 传送矩阵"
     },
     "GPS_TELEPORTER_PYLON": {
@@ -2533,6 +2639,20 @@
       "name": "&b冰封之弓"
     },
     "IGNITION_CHAMBER": {
+      "lore": [
+        {
+          "source": "&fPrevents the Smeltery from using up fire.",
+          "target": "&f防止冶炼炉的火熄灭。"
+        },
+        {
+          "source": "&fJust fill it up with \"Flint and Steel\"",
+          "target": "&f放入打火石，"
+        },
+        {
+          "source": "&fand place it adjacent to the Smeltery's dispenser",
+          "target": "&f再将点火机放到冶炼炉的发射器旁"
+        }
+      ],
       "name": "&4自动点火机"
     },
     "INDUSTRIAL_MINER": {
@@ -2725,6 +2845,20 @@
       "name": "&6魔法玻璃"
     },
     "MAGICAL_ZOMBIE_PILLS": {
+      "lore": [
+        {
+          "source": "&eRight Click &7a Zombified Villager",
+          "target": "&e右键 &7点击僵尸村民"
+        },
+        {
+          "source": "&eor &7a Zombified Piglin to",
+          "target": "&e或 &7僵尸猪灵，"
+        },
+        {
+          "source": "&7instantly cure it from its curse",
+          "target": "&7即可解除它的诅咒"
+        }
+      ],
       "name": "&6还魂丹"
     },
     "MAGICIAN_TALISMAN": {
@@ -2816,15 +2950,57 @@
       "name": "&b镁锭"
     },
     "MAGNESIUM_SALT": {
+      "lore": [
+        {
+          "source": "&7A special type of fuel that can be",
+          "target": "&7一种特殊的燃料"
+        },
+        {
+          "source": "&7used in a Magnesium-powered Generator",
+          "target": "&7可用于镁发电机"
+        }
+      ],
       "name": "&c镁盐"
     },
     "MAGNET": {
       "name": "&c磁铁"
     },
     "MAKESHIFT_SMELTERY": {
+      "lore": [
+        {
+          "source": "&fImprovised version of the Smeltery",
+          "target": "&f冶炼炉的简易版本"
+        },
+        {
+          "source": "&fthat only allows you to",
+          "target": "&f只能将矿粉"
+        },
+        {
+          "source": "&fsmelt dusts into ingots",
+          "target": "&f冶炼成金属锭"
+        }
+      ],
       "name": "&e简易冶炼炉"
     },
     "MEDICINE": {
+      "lore": [
+        {
+          "source": "&aLevel III - Medical Supply",
+          "target": "&a3级医疗供给"
+        },
+        {
+          "source": "&fRestores 4 Hearts",
+          "target": "&f恢复 4 颗心"
+        },
+        {
+          "source": "&fExtinguishes Fire",
+          "target": "&r可以熄灭身上的火"
+        },
+        {
+          "source": "&fCures Poison/Wither/Radiation",
+          "target": "&r治愈中毒、凋零和辐射"
+        }
+      ],
       "name": "&c药物"
     },
     "MEDIUM_BACKPACK": {
@@ -2912,6 +3088,16 @@
       "name": "&c坏死颅骨"
     },
     "NEPTUNIUM": {
+      "lore": [
+        {
+          "source": "&a☢&7 Radiation level: &6HIGH",
+          "target": "&a☢&7 辐射等级: &6高"
+        },
+        {
+          "source": "&8⇨ &4Hazmat Suit required!",
+          "target": "&8⇨ &4需要穿戴防化服！"
+        }
+      ],
       "name": "&a镎"
     },
     "NETHERSTAR_REACTOR": {
@@ -2936,9 +3122,29 @@
       "name": "&r下界之星反应堆"
     },
     "NETHER_GOLD_PAN": {
+      "lore": [
+        {
+          "source": "&eRight Click&7 to collect resources",
+          "target": "&e右键&7"
+        },
+        {
+          "source": "&7from Soul Sand",
+          "target": "&7从灵魂沙中淘金"
+        }
+      ],
       "name": "&4下界淘金盘"
     },
     "NETHER_ICE": {
+      "lore": [
+        {
+          "source": "&a☢&7 Radiation level: &eMODERATE",
+          "target": "&a☢&7 辐射等级: &e中等"
+        },
+        {
+          "source": "&8⇨ &4Hazmat Suit required!",
+          "target": "&8⇨ &4需要穿戴防化服！"
+        }
+      ],
       "name": "&e下界冰"
     },
     "NETHER_ICE_COOLANT_CELL": {
@@ -3113,6 +3319,16 @@
       "name": "&r塑料纸"
     },
     "PLUTONIUM": {
+      "lore": [
+        {
+          "source": "&a☢&7 Radiation level: &cVERY HIGH",
+          "target": "&a☢&7 辐射等级: &c极高"
+        },
+        {
+          "source": "&8⇨ &4Hazmat Suit required!",
+          "target": "&8⇨ &4需要穿戴防化服！"
+        }
+      ],
       "name": "&7钚"
     },
     "PORK_JERKY": {
@@ -3833,6 +4049,16 @@
       "name": "&a小型储能电容"
     },
     "SMALL_URANIUM": {
+      "lore": [
+        {
+          "source": "&a☢&7 Radiation level: &eMODERATE",
+          "target": "&a☢&7 辐射等级: &e中等"
+        },
+        {
+          "source": "&8⇨ &4Hazmat Suit required!",
+          "target": "&8⇨ &4需要穿戴防化服！"
+        }
+      ],
       "name": "&c一小块铀"
     },
     "SMELTERS_PICKAXE": {
@@ -3849,6 +4075,20 @@
       "name": "&6熔炉镐"
     },
     "SMELTERY": {
+      "lore": [
+        {
+          "source": "&fA high-temperature furnace",
+          "target": "&f一台高温熔炉"
+        },
+        {
+          "source": "&fthat allows you to smelt dusts",
+          "target": "&f可将矿粉冶炼成金属锭"
+        },
+        {
+          "source": "&finto ingots and create alloys.",
+          "target": "&f并制造合金。"
+        }
+      ],
       "name": "&6冶炼炉"
     },
     "SOLAR_GENERATOR": {
@@ -3873,6 +4113,16 @@
       "name": "&b太阳能头盔"
     },
     "SOLAR_PANEL": {
+      "lore": [
+        {
+          "source": "&7Important component for",
+          "target": "&7用于合成"
+        },
+        {
+          "source": "&7crafting a &bSolar Generator",
+          "target": "&b太阳能发电机&7的重要部件"
+        }
+      ],
       "name": "&b光伏电池"
     },
     "SOLDER_INGOT": {
@@ -4027,6 +4277,20 @@
       "name": "&6石块"
     },
     "STRANGE_NETHER_GOO": {
+      "lore": [
+        {
+          "source": "&fA strange bio matter that",
+          "target": "&f一种奇特的生物质，"
+        },
+        {
+          "source": "&fcan be acquired from",
+          "target": "&f可通过与猪灵"
+        },
+        {
+          "source": "&fbartering with Piglins",
+          "target": "&f以物易物获得"
+        }
+      ],
       "name": "&5奇怪的下界粘液"
     },
     "SULFATE": {
@@ -4053,9 +4317,29 @@
       "name": "&6处决之剑"
     },
     "SYNTHETIC_DIAMOND": {
+      "lore": [
+        {
+          "source": "&fThis item can be used in a",
+          "target": "&f可以在工作台中"
+        },
+        {
+          "source": "&fworkbench and acts like a normal Diamond",
+          "target": "&f当作普通钻石使用"
+        }
+      ],
       "name": "&b人造钻石"
     },
     "SYNTHETIC_EMERALD": {
+      "lore": [
+        {
+          "source": "&fThis item can be used to",
+          "target": "&f可以用来"
+        },
+        {
+          "source": "&ftrade with Villagers",
+          "target": "&f与村民交易"
+        }
+      ],
       "name": "&b人造绿宝石"
     },
     "SYNTHETIC_SAPPHIRE": {
@@ -4101,6 +4385,12 @@
       "name": "&6卷尺"
     },
     "TINY_URANIUM": {
+      "lore": [
+        {
+          "source": "&a☢&7 Radiation level: &eLOW",
+          "target": "&a☢&7 辐射等级: &e低"
+        }
+      ],
       "name": "&c一小撮铀"
     },
     "TIN_DUST": {
@@ -4110,6 +4400,20 @@
       "name": "&b锡锭"
     },
     "TOME_OF_KNOWLEDGE_SHARING": {
+      "lore": [
+        {
+          "source": "&eRight Click&7 to bind this Tome to yourself",
+          "target": "&e右键&7 将此巨著绑定到自己"
+        },
+        {
+          "source": "&eRight Click&7 to obtain all Researches by",
+          "target": "&e右键&7 获取之前绑定的"
+        },
+        {
+          "source": "&7the previously assigned Owner",
+          "target": "&7所有者的全部研究"
+        }
+      ],
       "name": "&6学识巨著"
     },
     "TOTEM_OF_UNDYING": {
@@ -4166,6 +4470,16 @@
       "name": "三叉戟"
     },
     "URANIUM": {
+      "lore": [
+        {
+          "source": "&a☢&7 Radiation level: &6HIGH",
+          "target": "&a☢&7 辐射等级: &6高"
+        },
+        {
+          "source": "&8⇨ &4Hazmat Suit required!",
+          "target": "&8⇨ &4需要穿戴防化服！"
+        }
+      ],
       "name": "&4铀"
     },
     "VANILLA_AUTO_CRAFTER": {

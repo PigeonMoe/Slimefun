@@ -131,6 +131,10 @@ const TICKING_ITEMS: &[&str] = &[
     "XP_COLLECTOR",
 ];
 
+pub(crate) fn has_block_ticker(id: &str) -> bool {
+    TICKING_ITEMS.binary_search(&id).is_ok()
+}
+
 static ENABLED: AtomicBool = AtomicBool::new(true);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -161,7 +165,7 @@ impl Tickers {
     }
 
     pub(crate) fn allows(self, id: &str) -> bool {
-        self.enabled || TICKING_ITEMS.binary_search(&id).is_err()
+        self.enabled || !has_block_ticker(id)
     }
 
     pub(crate) fn blocks_stack(self, stack: &ItemStack) -> bool {

@@ -49,7 +49,7 @@ use network_visuals::Status;
 pub(crate) use network_visuals::paper_hologram_id;
 pub(crate) use plain_network::{
     CARRIERS as PLAIN_CARRIERS, dimension as dimension_name, is_carrier as is_plain_carrier,
-    observe_plain_change,
+    NODES as PLAIN_NODES, observe_plain_change,
 };
 
 type Position = [i32; 3];
@@ -1358,6 +1358,17 @@ pub(crate) fn energy_buffer(
         _ => return None,
     };
     (capacity > 0).then_some((state.charge.min(capacity), capacity))
+}
+
+pub(crate) fn debug_energy(id: &str) -> Option<(&'static str, u32)> {
+    Some(match Component::for_item(id)? {
+        Component::EnergyConnector => ("CONNECTOR", 0),
+        Component::Capacitor(capacity) => ("CAPACITOR", capacity),
+        Component::FuelGenerator { capacity, .. } => ("GENERATOR", capacity),
+        Component::SolarGenerator { .. } => ("GENERATOR", 0),
+        Component::ElectricMachine { capacity, .. } | Component::GpsTransmitter { capacity } => ("CONSUMER", capacity),
+        _ => return None,
+    })
 }
 
 pub(crate) fn charge(host: &mut dyn ServerHost, level: LevelRef, pos: Position) -> Option<u32> {

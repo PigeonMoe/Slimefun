@@ -38,6 +38,8 @@ mod climbing_pick;
 mod composter;
 mod compressor;
 mod crucible;
+mod debug_fish;
+mod developer_commands;
 mod electric_processing;
 mod elevator;
 mod explosive_tools;
@@ -155,6 +157,7 @@ struct Slimefun {
     networks: Arc<Mutex<network_runtime::Networks>>,
     gps: gps_controls::Controls,
     guide: guide::Guide,
+    debug_fish: debug_fish::Fish,
     research_ranks: admin_commands::ResearchRanks,
     versions: versions::Versions,
     profiler: timings::Profiler,
@@ -204,6 +207,7 @@ impl Default for Slimefun {
             networks: Arc::default(),
             gps: gps_controls::Controls::default(),
             guide: guide::Guide::default(),
+            debug_fish: debug_fish::Fish::default(),
             research_ranks: admin_commands::ResearchRanks::default(),
             versions: versions::Versions::default(),
             profiler: timings::Profiler::default(),
@@ -473,6 +477,7 @@ impl Hooks for Slimefun {
     fn register(&self, registrar: &mut dyn mod_api::Registrar, context: &mod_api::RegistrationContext) {
         lifeskills::register(context);
         self.versions.register(context);
+        registrar.register_command_argument("debug_case", developer_commands::DebugCaseArgument);
         let dispenser = registrar.item_key("minecraft:dispenser");
         registrar.item_part(dispenser, block_placer::Placement);
         let chest = registrar.item_key("minecraft:chest");
@@ -524,7 +529,7 @@ impl Hooks for Slimefun {
             "slimefun",
             ConfigKind::Server,
             &format!("{}{}{}{}{}{}{}{}{}{}",
-            "double-ores = true\ncrucible-allow-water-in-nether = false\nlegacy-ore-washer = false\nlegacy-dust-washer = false\nlegacy-ore-grinder = true\nelectric-gold-pan-override-output-limit = [false, false, false]\nfreezer-use-vanilla-ratios = [false, false, false]\nfire-breaking-chance = 34\noutput-chest-enabled = true\ndrop-from-golems = true\ngolem-drop-chance = 75\n\n[options]\nlanguage = \"en\"\nenable-translations = true\nauto-detect-language = true\ndrop-excess-sf-give-items = false\n\n[guide]\nshow-vanilla-recipes = true\nreceive-on-first-join = true\nshow-hidden-item-groups-in-search = false\n\n[researches]\nfree-in-creative-mode = true\nenable-fireworks = true\ndisable-learning-animation = false\n\n[URID]\nenable-tickers = true\ncustom-ticker-delay = 10\n\n[networks]\nmax-size = 200\nenable-visualizer = true\ncargo-ticker-delay = 0\ndelete-excess-items = false\n\n[wind-staff]\npower = 4\n\n[book-binder]\nbypass-vanilla-max-level = false\nhas-custom-max-level = false\ncustom-max-level = 15\n\n[solar-generator-4]\nother-dimensions-use-night-energy = false\n\n[portable-teleporter]\nteleportation-cost = 10\n\n[produce-collector]\nrange = 2\n\n[pickaxe-of-vein-mining]\nmax-blocks = 16\n\n[pickaxe-of-the-seeker]\nmax-range = 5\n\n[blade-of-vampires]\nchance = 45\n\n[reinforced-spawner]\nallow-spawn-eggs = true\n\n[ancient-altar]\nstep-delay = 8\n\n[miner-android]\nreduced-block-updates = true\n\n[industrial-miner]\ncan-mine-ancient-debris = false\ncan-mine-deepslate-ores = true\n\n[advanced-industrial-miner]\ncan-mine-ancient-debris = false\ncan-mine-deepslate-ores = true\n",
+            "double-ores = true\ncrucible-allow-water-in-nether = false\nlegacy-ore-washer = false\nlegacy-dust-washer = false\nlegacy-ore-grinder = true\nelectric-gold-pan-override-output-limit = [false, false, false]\nfreezer-use-vanilla-ratios = [false, false, false]\nfire-breaking-chance = 34\noutput-chest-enabled = true\ndrop-from-golems = true\ngolem-drop-chance = 75\n\n[options]\nlanguage = \"en\"\nchat-prefix = \"&a&lSlimefun 5&7> \"\nenable-translations = true\nauto-detect-language = true\ndrop-excess-sf-give-items = false\n\n[guide]\nshow-vanilla-recipes = true\nreceive-on-first-join = true\nshow-hidden-item-groups-in-search = false\n\n[researches]\nfree-in-creative-mode = true\nenable-fireworks = true\ndisable-learning-animation = false\n\n[URID]\nenable-tickers = true\ncustom-ticker-delay = 10\n\n[networks]\nmax-size = 200\nenable-visualizer = true\ncargo-ticker-delay = 0\ndelete-excess-items = false\n\n[wind-staff]\npower = 4\n\n[book-binder]\nbypass-vanilla-max-level = false\nhas-custom-max-level = false\ncustom-max-level = 15\n\n[solar-generator-4]\nother-dimensions-use-night-energy = false\n\n[portable-teleporter]\nteleportation-cost = 10\n\n[produce-collector]\nrange = 2\n\n[pickaxe-of-vein-mining]\nmax-blocks = 16\n\n[pickaxe-of-the-seeker]\nmax-range = 5\n\n[blade-of-vampires]\nchance = 45\n\n[reinforced-spawner]\nallow-spawn-eggs = true\n\n[ancient-altar]\nstep-delay = 8\n\n[miner-android]\nreduced-block-updates = true\n\n[industrial-miner]\ncan-mine-ancient-debris = false\ncan-mine-deepslate-ores = true\n\n[advanced-industrial-miner]\ncan-mine-ancient-debris = false\ncan-mine-deepslate-ores = true\n",
                 enchantment_machines::default_config(),
                 beheading::DEFAULT_CONFIG,
                 explosive_tools::DEFAULT_CONFIG,
@@ -996,10 +1001,18 @@ impl Hooks for Slimefun {
         event.commands.extend([
             Command::new("slimefun"),
             Command::new("sf"),
+            Command::new("slimefun help"),
+            Command::new("sf help"),
+            Command::new("slimefun debug [test:slimefun:debug_case]"),
+            Command::new("sf debug [test:slimefun:debug_case]"),
+            Command::new("slimefun debug_fish"),
+            Command::new("sf debug_fish"),
             Command::new("slimefun guide"),
             Command::new("sf guide"),
             Command::new("slimefun open_guide"),
             Command::new("sf open_guide"),
+            Command::new("slimefun cheat"),
+            Command::new("sf cheat"),
             Command::new("sf dashboard_guide"),
             Command::op("sf life_menu <target:player>", 4),
             Command::new("slimefun search [query:text]"),
@@ -1161,10 +1174,11 @@ impl Hooks for Slimefun {
                 }
                 return Flow::Cancel;
             }
-            Some(action @ ("guide" | "open_guide" | "dashboard_guide")) => {
+            Some(action @ ("guide" | "open_guide" | "cheat" | "dashboard_guide")) => {
                 if let CommandSource::Player { player, .. } = *event.source {
                     match action {
                         "guide" => guide::give(host, player),
+                        "cheat" => self.guide.open_cheat(host, player),
                         "dashboard_guide" => self.guide.open_dashboard(host, player),
                         _ => self.guide.open(host, player),
                     }
@@ -1273,37 +1287,55 @@ impl Hooks for Slimefun {
                     _ => vec!["研究必须由玩家本人解锁。".into()],
                 }
             }
-            None => vec![
-                "Slimefun Horizon development".into(),
-                "Build a Grind Stone by putting a wooden fence above a dispenser. Load the dispenser and right-click the fence.".into(),
-                "Build an Enhanced Crafting Table by putting a crafting table on a dispenser. Arrange the recipe in its 3×3 grid and right-click the table.".into(),
-                "An Ore Crusher uses a nether brick fence over a dispenser, with iron bars on opposite sides of the dispenser. A Compressor uses pistons instead of bars.".into(),
-                "For the Pressure Chamber, put glass above a cauldron and a dispenser above the glass. Flank the cauldron and glass with pistons and the dispenser with smooth stone slabs on the same axis. Right-click the cauldron.".into(),
-                "Use a Gold Pan on gravel and a Nether Gold Pan on soul sand or soul soil.".into(),
-                "For Automated Panning, put a wooden trapdoor above a cauldron and right-click it holding gravel, soul sand or soul soil.".into(),
-                "For the Table Saw, put a stonecutter on an iron block and flank the stonecutter with smooth stone slabs. Right-click it holding a log or planks.".into(),
-                "For the Juicer, place a dispenser below a nether brick fence and glass above the fence. Put fruit in the dispenser and right-click the fence.".into(),
-                "Craft an Electric Furnace and connect it to a powered Energy Regulator. Open the furnace to load vanilla smelting ingredients.".into(),
-                "The Electric Ore Grinder uses Grind Stone and Ore Crusher recipes. The Electric Ingot Pulverizer reverses single-dust smeltery recipes.".into(),
-                "Power an Electric Gold Pan, Electric Dust Washer and Electric Ingot Factory to turn gravel into sifted ore, dust and ingots. The Electric Press compacts materials and parts.".into(),
-                "Place and power your GPS Transmitters to reach 600 complexity. Use a GPS Geo-Scanner and an Oil Pump in the same chunk to extract oil.".into(),
-                "Use a placed Slimefun Crucible while holding stone or leaves to fill the block above with lava or water.".into(),
-                "The Electric Smeltery processes multi-ingredient recipes. The Electrified Crucible fills empty buckets with water or lava, and the Refinery turns buckets of oil into fuel.".into(),
-                "The Heated Pressure Chamber uses two input slots to refine uranium, blistering ingots, and fuel ingredients. Use /sf recipe to find its inputs.".into(),
-                "Wash Sifted Ore by placing a dispenser on a wooden fence with an empty cauldron below it and right-clicking the fence.".into(),
-                "For a Makeshift Smeltery use a wooden fence above a dispenser, bricks on opposite sides of the dispenser, and fire below it. Use a nether brick fence and nether bricks for the regular Smeltery.".into(),
-                "An Electric Food Fabricator cans crops using Tin Cans. A Food Composter turns the canned food into fertilizer.".into(),
-                "The Charging Bench recharges individual Slimefun gadgets. Cargo can collect them from the output once they are fully charged.".into(),
-                "Load the Auto Brewer with a potion and one brewing ingredient. It accepts regular, splash and lingering bottles.".into(),
-                "Supply a powered Produce Collector with buckets near adult cows or goats, or bowls near adult mooshrooms.".into(),
-                "Use /sf recipe <item> to read a supported recipe, /sf research <key> to unlock research, and /sf status to view coverage.".into(),
-            ],
+            None | Some("help") => {
+                let language = self.guide.command_language(host, event.source);
+                for line in developer_commands::help(language) {
+                    let _ = host.commands().feedback(line);
+                }
+                return Flow::Cancel;
+            }
+            Some("debug_fish") => {
+                debug_fish::give(host, event.source, &self.guide);
+                return Flow::Cancel;
+            }
+            Some("debug") => {
+                let line = developer_commands::diagnostic(host, event, &self.guide);
+                let _ = host.commands().feedback(line);
+                return Flow::Cancel;
+            }
             _ => return Flow::Continue,
         };
         for line in lines {
             let _ = host.commands().feedback(Text::literal(line));
         }
         Flow::Cancel
+    }
+
+    #[listener(priority = -100)]
+    fn player_command(
+        &self,
+        host: &mut dyn ServerHost,
+        event: &mut mod_api::PlayerCommandEvent<'_>,
+    ) -> Flow {
+        if !event.command.eq_ignore_ascii_case("help slimefun") {
+            return Flow::Continue;
+        }
+        let Some(player) = host.player(event.player) else {
+            return Flow::Continue;
+        };
+        let language = self.guide.player_language(host, player);
+        event.replies.extend(developer_commands::help(language));
+        Flow::Cancel
+    }
+
+    #[listener(priority = -100)]
+    fn left_click_block(&self, host: &mut dyn ServerHost, event: &mut mod_api::LeftClickBlockEvent) -> Flow {
+        if let Some(player) = host.players().acting_player()
+            && debug_fish::left_click(host, player, event.pos, &self.guide)
+        {
+            return Flow::Cancel;
+        }
+        Flow::Continue
     }
 
     // Region/authorization hooks that veto the player's click run first.
@@ -1325,6 +1357,14 @@ impl Hooks for Slimefun {
         let Some(player) = host.player(event.click.player) else {
             return Flow::Continue;
         };
+        if debug_fish::held(host, event.click.hand, event.click.stack) {
+            self.item_clicks.record_block_use(host, event.click.player, event.click.hand, event.click.stack.unwrap());
+            if *event.use_item != TriState::False && *event.use_block != TriState::False {
+                self.debug_fish.right_click(host, player, event.click, &self.guide, &self.profiler);
+            }
+            *event.cancellation_result = InteractionResult::Consume;
+            return Flow::Cancel;
+        }
         if *event.use_item != TriState::False
             && let Some(held) = event.click.stack
             && let Some(denied) = availability::stack_denial(host.dimension(), held)
@@ -1332,6 +1372,15 @@ impl Hooks for Slimefun {
             *event.use_item = TriState::False;
             self.item_clicks.record_block_use(host, event.click.player, event.click.hand, held);
             denied.tell(host, player);
+        }
+        if *event.use_item != TriState::False
+            && let Some(held) = event.click.stack
+            && self.guide.refuses_multiblock_item_use(host, player, held)
+        {
+            // Paper's NotPlaceable skips Slimefun registration. Once the
+            // held item can be used, its material can still place normally.
+            *event.use_item = TriState::False;
+            self.item_clicks.record_block_use(host, event.click.player, event.click.hand, held);
         }
         if *event.use_item != TriState::False
             && let Some(stack) = event.click.stack
@@ -1621,6 +1670,16 @@ impl Hooks for Slimefun {
         let Some(player) = host.player(event.click.player) else {
             return Flow::Continue;
         };
+        if debug_fish::held(host, event.click.hand, Some(event.click.stack)) {
+            let blocked = self.item_clicks.consume_fallthrough(
+                host, event.click.player, event.click.hand, event.click.stack,
+            );
+            if !blocked {
+                debug_fish::in_air(host, player, &self.guide);
+            }
+            *event.cancellation_result = InteractionResult::Consume;
+            return Flow::Cancel;
+        }
         if let Some(denied) = availability::stack_denial(host.dimension(), event.click.stack) {
             if !self.item_clicks.consume_fallthrough(
                 host,
@@ -1640,6 +1699,7 @@ impl Hooks for Slimefun {
                 event.click.hand,
                 event.click.stack,
             )
+            || self.guide.refuses_multiblock_item_use(host, player, event.click.stack)
             || seasonal_gifts::open(
                 host,
                 player,
@@ -1745,6 +1805,9 @@ impl Hooks for Slimefun {
 
     fn player_logged_in(&self, host: &mut dyn ServerHost, event: &mut PlayerLoggedInEvent<'_>) {
         if let Some(player) = host.player(event.player) {
+            developer_commands::log(developer_commands::PLAYER_PROFILE_DATA, || {
+                format!("Getting PlayerProfile for {:032x}", player.uuid())
+            });
             research::import_legacy(host, player);
             research::import_synchronized_profile(host, player);
             if let Err(error) = self.guide.initialize_transferred_guide(host, player) {
@@ -2246,6 +2309,7 @@ impl Hooks for Slimefun {
             self.soulbound_rituals.tick(host, event.level);
             self.elevators.tick_pre(host, event.level);
             self.block_placers.tick(host, event.level, &self.networks);
+            self.debug_fish.tick(host, event.level);
         }
     }
 
@@ -2258,6 +2322,7 @@ impl Hooks for Slimefun {
     }
 
     fn level_unload(&self, host: &mut dyn ServerHost, event: &mut mod_api::LevelUnloadEvent<'_>) {
+        self.debug_fish.unload(host, event.dimension);
         self.soulbound_rituals.unload(host, event.dimension);
         self.elevators.unload(host, event.dimension);
         rainbow::placed::unload_level(event.dimension);
@@ -2270,6 +2335,7 @@ impl Hooks for Slimefun {
     }
 
     fn scheduled_task(&self, host: &mut dyn ServerHost, event: &mut ScheduledTaskEvent<'_>) {
+        self.debug_fish.due(host, event);
         self.snacks.due(host, event);
         self.cooler_feed.due(host, event, &self.backpacks);
         self.climbing.due(event);
@@ -2296,6 +2362,7 @@ impl Hooks for Slimefun {
     }
 
     fn server_stopping(&self, host: &mut dyn ServerHost, _: &mut ServerStoppingEvent) {
+        self.debug_fish.clear();
         self.profiler.clear();
         self.item_clicks.clear();
         self.climbing.clear();

@@ -7,6 +7,8 @@ use mod_api::{
     Identifier, ItemStack, LivingRef, PlayerRef, ServerHost, Tag, Text, text::TextStyle,
 };
 
+use crate::hologram_projector::colored_lore;
+
 const MAX_EXPOSURE: u8 = 100;
 const TICKS_PER_SECOND: u32 = 20;
 const MAX_INTERVAL_SECONDS: u32 = (i32::MAX as u32 - TICKS_PER_SECOND) / TICKS_PER_SECOND;
@@ -257,6 +259,39 @@ fn effective_exposure(before: u8, dose: u8) -> u8 {
     }
 }
 
+fn exposure_weight(id: &str) -> u32 {
+    match id {
+        "TINY_URANIUM" => 1,
+        "SMALL_URANIUM" | "NETHER_ICE" => 2,
+        "URANIUM" | "NEPTUNIUM" | "BLISTERING_INGOT" => 3,
+        "PLUTONIUM"
+        | "BOOSTED_URANIUM"
+        | "ENRICHED_NETHER_ICE"
+        | "BLISTERING_INGOT_2"
+        | "BLISTERING_INGOT_3" => 5,
+        _ => 0,
+    }
+}
+
+pub(crate) fn item_lore(id: &str) -> Option<Tag> {
+    let weight = exposure_weight(id);
+    let level = match weight {
+        1 => "&eLOW",
+        2 => "&eMODERATE",
+        3 => "&6HIGH",
+        5 => "&cVERY HIGH",
+        _ => return None,
+    };
+    let mut lore = vec![
+        colored_lore(""),
+        colored_lore(&format!("&a☢&7 Radiation level: {level}")),
+    ];
+    if weight > 1 {
+        lore.push(colored_lore("&8⇨ &4Hazmat Suit required!"));
+    }
+    Some(Tag::List(lore))
+}
+
 fn inventory_radiation(slots: &[(u32, ItemStack)]) -> (u8, bool) {
     let mut dose = 0;
     let mut pieces = 0usize;
@@ -270,17 +305,7 @@ fn inventory_radiation(slots: &[(u32, ItemStack)]) -> (u8, bool) {
         if (36..=39).contains(slot) && HAZMAT.contains(&id.as_str()) {
             pieces += 1;
         }
-        let weight = match id.as_str() {
-            "TINY_URANIUM" => 1,
-            "SMALL_URANIUM" | "NETHER_ICE" => 2,
-            "URANIUM" | "NEPTUNIUM" | "BLISTERING_INGOT" => 3,
-            "PLUTONIUM"
-            | "BOOSTED_URANIUM"
-            | "ENRICHED_NETHER_ICE"
-            | "BLISTERING_INGOT_2"
-            | "BLISTERING_INGOT_3" => 5,
-            _ => 0,
-        };
+        let weight = exposure_weight(&id);
         dose = (dose + item.count().min(u32::from(MAX_EXPOSURE)) * weight)
             .min(u32::from(MAX_EXPOSURE));
     }

@@ -4,6 +4,10 @@ use mod_api::{ComponentId, Compound, Host, Identifier, ItemResource, ItemStack, 
 
 pub(crate) const ID_KEY: &str = "slimefun:slimefun_item";
 
+pub(crate) fn paper_item_data(id: &str) -> Tag {
+    Tag::compound([("PublicBukkitValues", Tag::compound([(ID_KEY, string(id))]))])
+}
+
 pub(crate) fn stack_limit(host: &dyn Host, stack: &ItemStack) -> u32 {
     let resource = ItemResource::of(stack);
     let key = ComponentId::new("minecraft:max_stack_size").expect("built-in item component");
@@ -194,13 +198,7 @@ impl SlimefunItem {
             .unwrap_or_else(|| text(self.name, self.color, false));
         let mut components = Compound::from([
             ("minecraft:custom_name".into(), name),
-            (
-                "minecraft:custom_data".into(),
-                Tag::compound([(
-                    "PublicBukkitValues",
-                    Tag::compound([(ID_KEY, string(self.id))]),
-                )]),
-            ),
+            ("minecraft:custom_data".into(), paper_item_data(self.id)),
         ]);
         if self.id == "HOLOGRAM_PROJECTOR" {
             components.insert("minecraft:lore".into(), Tag::List(vec![
@@ -310,6 +308,105 @@ impl SlimefunItem {
             );
         }
         let component_lore: &[&str] = match self.id {
+            "DEBUG_FISH" => crate::debug_fish::LORE,
+            "FLASK_OF_KNOWLEDGE" => &[
+                "",
+                "&fAllows you to store some of",
+                "&fyour Experience in a Bottle",
+                "&7Cost: &a1 Level",
+            ],
+            "GOLD_PAN" => &["", "&eRight Click&7 to collect resources", "&7from Gravel"],
+            "NETHER_GOLD_PAN" => &["", "&eRight Click&7 to collect resources", "&7from Soul Sand"],
+            "SOLAR_PANEL" => &["", "&7Important component for", "&7crafting a &bSolar Generator"],
+            "CARGO_MOTOR" => &[
+                "",
+                "&7Important ingredient for items",
+                "&7related to Cargo Management",
+            ],
+            "COPPER_WIRE" => &["", "&6Crucial component in electric modules"],
+            "SYNTHETIC_DIAMOND" => &[
+                "",
+                "&fThis item can be used in a",
+                "&fworkbench and acts like a normal Diamond",
+            ],
+            "SYNTHETIC_EMERALD" => &["", "&fThis item can be used to", "&ftrade with Villagers"],
+            "MAGNESIUM_SALT" => &[
+                "",
+                "&7A special type of fuel that can be",
+                "&7used in a Magnesium-powered Generator",
+            ],
+            "GPS_TRANSMITTER" => &["", "&8⇨ &e⚡ &716 J Buffer", "&8⇨ &e⚡ &72 J/s"],
+            "GPS_TRANSMITTER_2" => &["", "&8⇨ &e⚡ &764 J Buffer", "&8⇨ &e⚡ &76 J/s"],
+            "GPS_TRANSMITTER_3" => &["", "&8⇨ &e⚡ &7256 J Buffer", "&8⇨ &e⚡ &722 J/s"],
+            "GPS_TRANSMITTER_4" => &["", "&8⇨ &e⚡ &71024 J Buffer", "&8⇨ &e⚡ &792 J/s"],
+            "GPS_MARKER_TOOL" => &[
+                "",
+                "&fAllows you to set a Waypoint at",
+                "&fthe Location you place this",
+            ],
+            "GPS_CONTROL_PANEL" => &[
+                "",
+                "&fAllows you to track your Satellites",
+                "&fand manage your Waypoints",
+            ],
+            "ANDROID_INTERFACE_FUEL" => &[
+                "",
+                "&fItems stored in this Interface",
+                "&fwill be inserted into an Android's Fuel Slot",
+                "&fwhen its Script tells them to do so",
+            ],
+            "ANDROID_INTERFACE_ITEMS" => &[
+                "",
+                "&fItems stored in an Android's Inventory",
+                "&fwill be inserted into this Interface",
+                "&fwhen its Script tells them to do so",
+            ],
+            "GPS_GEO_SCANNER" => &["", "&fScans a Chunk for natural Resources", "&fsuch as &8Oil"],
+            "PORTABLE_GEO_SCANNER" => &[
+                "",
+                "&fScans a Chunk for natural Resources",
+                "",
+                "&eRight Click&7 to scan",
+            ],
+            "GEO_MINER" => &[
+                "",
+                "&eMines up resources from the chunk",
+                "&eThese Resources cannot be mined with a pickaxe",
+                "",
+                "&6Advanced Machine",
+                "&8⇨ &b⚡ &7Speed: &b1.0x",
+                "&8⇨ &e⚡ &748 J/s",
+                "",
+                "&c&l! &cMake sure to Geo-Scan the Chunk first",
+            ],
+            "OIL_PUMP" => &[
+                "",
+                "&7Pumps up Oil and fills it into Buckets",
+                "",
+                "&c&l! &cMake sure to Geo-Scan the Chunk first",
+            ],
+            "GPS_TELEPORTATION_MATRIX" => &[
+                "",
+                "&fThis is your Teleporter's Main Component",
+                "&fThis Matrix allows Players to choose from all",
+                "&fWaypoints made by the Player who has placed",
+                "&fthis Device.",
+            ],
+            "GPS_ACTIVATION_DEVICE_SHARED" => &[
+                "",
+                "&fPlace this onto a Teleportation Matrix",
+                "&fand step onto this Plate to activate",
+                "&fthe Teleportation Process",
+            ],
+            "GPS_ACTIVATION_DEVICE_PERSONAL" => &[
+                "",
+                "&fPlace this onto a Teleportation Matrix",
+                "&fand step onto this Plate to activate",
+                "&fthe Teleportation Process",
+                "",
+                "&fThis Version only allows the Person who",
+                "&fplaced this Device to use it",
+            ],
             "SYNTHETIC_SHULKER_SHELL" => &[
                 "",
                 "&fThis item can be used in a",
@@ -334,6 +431,9 @@ impl SlimefunItem {
                         .collect(),
                 ),
             );
+        }
+        if let Some(lore) = crate::radiation::item_lore(self.id) {
+            components.insert("minecraft:lore".into(), lore);
         }
         crate::zombie_pills::decorate(self.id, &mut components);
         crate::nether_goo::decorate(self.id, &mut components);
@@ -741,6 +841,70 @@ mod tests {
             .set_components(lump.components().unwrap().as_nbt().clone())
             .unwrap();
         assert!(!MAGIC_LUMP_1.matches(&host, &wrong_material));
+    }
+
+    #[test]
+    fn restored_paper_lore_is_preserved_and_localized() {
+        use crate::hologram_projector::colored_lore;
+
+        let cases = [
+            (
+                GOLD_PAN,
+                &["", "&eRight Click&7 to collect resources", "&7from Gravel"][..],
+                &["", "&e右键&7", "&7从沙砾中淘金"][..],
+            ),
+            (
+                COPPER_WIRE,
+                &["", "&6Crucial component in electric modules"][..],
+                &["", "&6电子配件中的重要组成部分"][..],
+            ),
+            (
+                crate::heated_pressure::TINY_URANIUM,
+                &["", "&a☢&7 Radiation level: &eLOW"][..],
+                &["", "&a☢&7 辐射等级: &e低"][..],
+            ),
+            (
+                crate::network_recipes::BLISTERING_INGOT_3,
+                &[
+                    "",
+                    "&a☢&7 Radiation level: &cVERY HIGH",
+                    "&8⇨ &4Hazmat Suit required!",
+                ][..],
+                &["", "&a☢&7 辐射等级: &c极高", "&8⇨ &4需要穿戴防化服！"][..],
+            ),
+            (
+                crate::android_items::PROGRAMMABLE_ANDROID_2_FARMER,
+                &[
+                    "",
+                    "&8⇨ &7Function: Farming",
+                    "&8⇨ &7Fuel Efficiency: 1.5x",
+                    "&8⇨ &7Can also harvest Plants from ExoticGarden",
+                ][..],
+                &[
+                    "",
+                    "&8⇨ &7功能: 耕作",
+                    "&8⇨ &7燃料效率: 1.5x",
+                    "&8⇨ &7可以收割异域花园内的植物",
+                ][..],
+            ),
+        ];
+        for (kind, original, translated) in cases {
+            let Kind::Slimefun(item) = kind else {
+                panic!("{} is not a Slimefun item", kind.id());
+            };
+            for (components, lines) in [
+                (item.base_components(false), original),
+                (item.components(), translated),
+            ] {
+                let expected = Tag::List(lines.iter().copied().map(colored_lore).collect());
+                assert_eq!(
+                    components.get(&"minecraft:lore".into()),
+                    Some(&expected),
+                    "{}",
+                    kind.id(),
+                );
+            }
+        }
     }
 
     #[test]

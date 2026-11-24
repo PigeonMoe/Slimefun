@@ -8,7 +8,8 @@ use crate::{
     fuel_generators::{COAL_GENERATOR, COMBUSTION_REACTOR},
     geology::{GPS_TRANSMITTER, GPS_TRANSMITTER_2, GPS_TRANSMITTER_3},
     heated_pressure::PLASTIC_SHEET,
-    items::{BASIC_CIRCUIT_BOARD, ELECTRIC_MOTOR, HeadTexture, Kind, STEEL_INGOT, item, text},
+    hologram_projector::colored_lore,
+    items::{BASIC_CIRCUIT_BOARD, ELECTRIC_MOTOR, HeadTexture, Kind, STEEL_INGOT, item},
     network_recipes::{ANDROID_MEMORY_CORE, BLISTERING_INGOT_3, POWER_CRYSTAL},
     recipes::{CraftingRecipe, Research, Stack},
 };
@@ -539,15 +540,14 @@ pub(crate) fn lore(id: &str) -> Option<Tag> {
         Mode::Butcher(_) => "Slaughtering",
     };
     let mut lore = vec![
-        Tag::String("".into()),
-        text(&format!("⇨ Function: {function}"), "gray", false),
+        colored_lore(""),
+        colored_lore(&format!("&8⇨ &7Function: {function}")),
     ];
     if matches!(mode, Mode::Fisherman(_)) {
-        lore.push(text(
-            &format!("⇨ Success Rate: {}%", 10 * tier.number()),
-            "gray",
-            false,
-        ));
+        lore.push(colored_lore(&format!(
+            "&8⇨ &7Success Rate: {}%",
+            10 * tier.number()
+        )));
     }
     if matches!(mode, Mode::Butcher(_)) {
         let damage = if tier == Tier::Nuclear {
@@ -555,7 +555,7 @@ pub(crate) fn lore(id: &str) -> Option<Tag> {
         } else {
             4 * tier.number()
         };
-        lore.push(text(&format!("⇨ Damage: {damage}"), "gray", false));
+        lore.push(colored_lore(&format!("&8⇨ &7Damage: {damage}")));
     }
     let efficiency = match tier {
         Tier::Solid => "1.0",
@@ -563,10 +563,9 @@ pub(crate) fn lore(id: &str) -> Option<Tag> {
         Tier::Nuclear if matches!(mode, Mode::Fisherman(_) | Mode::Butcher(_)) => "8.0",
         Tier::Nuclear => "3.0",
     };
-    lore.push(text(
-        &format!("⇨ Fuel Efficiency: {efficiency}x"),
-        "gray",
-        false,
-    ));
+    lore.push(colored_lore(&format!("&8⇨ &7Fuel Efficiency: {efficiency}x")));
+    if mode == Mode::AdvancedFarmer {
+        lore.push(colored_lore("&8⇨ &7Can also harvest Plants from ExoticGarden"));
+    }
     Some(Tag::List(lore))
 }

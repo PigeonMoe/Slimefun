@@ -128,7 +128,7 @@ pub(crate) fn give(
     format!("已发给 {target} {stored} 个{name}，其余 {remaining} 个未发放。")
 }
 
-fn insert(
+pub(crate) fn insert(
     host: &mut dyn ServerHost,
     player: PlayerRef,
     item: &ItemStack,

@@ -140,11 +140,18 @@ const FACED_PISTONS: &[IngredientVisual] = &[
 pub(super) struct Entry {
     pub id: &'static str,
     pub item: Stack,
-    pub label: Option<&'static str>,
+    pub multiblock: Option<MultiblockItem>,
     pub ingredients: [Option<Stack>; 9],
     pub visuals: &'static [IngredientVisual],
     pub recipe_type: RecipeType,
     pub research: Option<&'static Research>,
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct MultiblockItem {
+    pub name: &'static str,
+    pub localized_fallback: &'static str,
+    pub lore: &'static [&'static str],
 }
 
 pub(super) struct Group {
@@ -288,7 +295,7 @@ pub(super) fn blocks_vanilla_station(id: &str) -> bool {
         return false;
     }
     if let Some(entry) = CATALOG.get(id) {
-        return entry.label.is_some() || matches!(entry.item.kind, Kind::Slimefun(_));
+        return entry.multiblock.is_some() || matches!(entry.item.kind, Kind::Slimefun(_));
     }
     listed_stock_item(id)
 }
@@ -358,11 +365,13 @@ const MAGIC: Research = Research {
 // Exact arrangement displayed by each Paper MultiBlockMachine. The material
 // index is the same row-major recipe index that Paper puts into the guide.
 fn multiblocks(entries: &mut BTreeMap<String, Entry>) {
-    for (id, name, icon, ingredients, research) in [
+    for (id, localized_fallback, icon, name, lore, ingredients, research) in [
         (
             "ENHANCED_CRAFTING_TABLE",
             "增强型工作台",
             "minecraft:crafting_table",
+            "&eEnhanced Crafting Table",
+            &["", "&aA regular Crafting Table cannot", "&ahold this massive Amount of Power..."][..],
             &[(4, "minecraft:crafting_table"), (7, "minecraft:dispenser")][..],
             None,
         ),
@@ -370,6 +379,8 @@ fn multiblocks(entries: &mut BTreeMap<String, Entry>) {
             "GRIND_STONE",
             "磨石",
             "minecraft:dispenser",
+            "&bGrind Stone",
+            &["", "&aGrinds items down into other items"][..],
             &[(4, "minecraft:oak_fence"), (7, "minecraft:dispenser")],
             Some(&GRIND_STONE),
         ),
@@ -377,6 +388,8 @@ fn multiblocks(entries: &mut BTreeMap<String, Entry>) {
             "ARMOR_FORGE",
             "盔甲锻造台",
             "minecraft:anvil",
+            "&6Armor Forge",
+            &["", "&aGives you the ability to create powerful armor"][..],
             &[(4, "minecraft:anvil"), (7, "minecraft:dispenser")],
             Some(&armor_forge::FORGE_RESEARCH),
         ),
@@ -384,6 +397,8 @@ fn multiblocks(entries: &mut BTreeMap<String, Entry>) {
             "ORE_CRUSHER",
             "矿石粉碎机",
             "minecraft:dispenser",
+            "&bOre Crusher",
+            &["", "&aCrushes ores to double them"][..],
             &[
                 (4, "minecraft:nether_brick_fence"),
                 (6, "minecraft:iron_bars"),
@@ -396,6 +411,8 @@ fn multiblocks(entries: &mut BTreeMap<String, Entry>) {
             "COMPRESSOR",
             "压缩机",
             "minecraft:piston",
+            "&bCompressor",
+            &["", "&aCompresses Items"][..],
             &[
                 (4, "minecraft:nether_brick_fence"),
                 (6, "minecraft:piston"),
@@ -408,6 +425,8 @@ fn multiblocks(entries: &mut BTreeMap<String, Entry>) {
             "MAKESHIFT_SMELTERY",
             "简易冶炼炉",
             "minecraft:blast_furnace",
+            "&eMakeshift Smeltery",
+            &["", "&fImprovised version of the Smeltery", "&fthat only allows you to", "&fsmelt dusts into ingots"][..],
             &[
                 (1, "minecraft:oak_fence"),
                 (3, "minecraft:bricks"),
@@ -421,6 +440,13 @@ fn multiblocks(entries: &mut BTreeMap<String, Entry>) {
             "SMELTERY",
             "冶炼炉",
             "minecraft:furnace",
+            "&6Smeltery",
+            &[
+                "",
+                "&fA high-temperature furnace",
+                "&fthat allows you to smelt dusts",
+                "&finto ingots and create alloys.",
+            ][..],
             &[
                 (1, "minecraft:nether_brick_fence"),
                 (3, "minecraft:nether_bricks"),
@@ -434,6 +460,8 @@ fn multiblocks(entries: &mut BTreeMap<String, Entry>) {
             "PRESSURE_CHAMBER",
             "压力舱",
             "minecraft:glass",
+            "&bPressure Chamber",
+            &["", "&aCompresses Items even further"][..],
             &[
                 (0, "minecraft:smooth_stone_slab"),
                 (1, "minecraft:dispenser"),
@@ -451,6 +479,8 @@ fn multiblocks(entries: &mut BTreeMap<String, Entry>) {
             "MAGIC_WORKBENCH",
             "魔法工作台",
             "minecraft:crafting_table",
+            "&6Magic Workbench",
+            &["", "&dInfuses Items with magical Energy"][..],
             &[
                 (6, "minecraft:bookshelf"),
                 (7, "minecraft:crafting_table"),
@@ -462,6 +492,8 @@ fn multiblocks(entries: &mut BTreeMap<String, Entry>) {
             "ORE_WASHER",
             "洗矿机",
             "minecraft:cauldron",
+            "&6Ore Washer",
+            &["", "&aWashes Sifted Ore to filter Ores", "&aand gives you small Stone Chunks"][..],
             &[
                 (1, "minecraft:dispenser"),
                 (4, "minecraft:oak_fence"),
@@ -473,6 +505,8 @@ fn multiblocks(entries: &mut BTreeMap<String, Entry>) {
             "TABLE_SAW",
             "台锯",
             "minecraft:stonecutter",
+            "&6Table Saw",
+            &["", "&aAllows you to get 8 planks from 1 Log", "&a(Works with all log types)"][..],
             &[
                 (3, "minecraft:smooth_stone_slab"),
                 (4, "minecraft:stonecutter"),
@@ -485,6 +519,8 @@ fn multiblocks(entries: &mut BTreeMap<String, Entry>) {
             "AUTOMATED_PANNING_MACHINE",
             "自动淘金机",
             "minecraft:bowl",
+            "&eAutomated Panning Machine",
+            &["", "&fA MultiBlock Version of the Gold Pan", "&fand Nether Gold Pan combined in one machine."][..],
             &[(4, "minecraft:oak_trapdoor"), (7, "minecraft:cauldron")],
             Some(&recipes::AUTOMATED_PANNING_MACHINE),
         ),
@@ -492,6 +528,14 @@ fn multiblocks(entries: &mut BTreeMap<String, Entry>) {
             "INDUSTRIAL_MINER",
             "工业采矿机",
             "minecraft:golden_pickaxe",
+            "&bIndustrial Miner",
+            &[
+                "",
+                "&fThis Multiblock will mine any Ores",
+                "&fin a 7x7 area underneath it.",
+                "&fPlace coal or similar in its chest",
+                "&fto fuel this machine.",
+            ][..],
             &[
                 (3, "minecraft:piston"),
                 (4, "minecraft:chest"),
@@ -506,6 +550,16 @@ fn multiblocks(entries: &mut BTreeMap<String, Entry>) {
             "ADVANCED_INDUSTRIAL_MINER",
             "高级工业采矿机",
             "minecraft:diamond_pickaxe",
+            "&cAdvanced Industrial Miner",
+            &[
+                "",
+                "&fThis Multiblock will mine any Ores",
+                "&fin a 11x11 area underneath it.",
+                "&fPlace a bucket of fuel or lava in",
+                "&fits chest to fuel this machine.",
+                "",
+                "&a+ Silk Touch",
+            ][..],
             &[
                 (3, "minecraft:piston"),
                 (4, "minecraft:chest"),
@@ -520,6 +574,8 @@ fn multiblocks(entries: &mut BTreeMap<String, Entry>) {
             "JUICER",
             "榨汁机",
             "minecraft:glass_bottle",
+            "&aJuicer",
+            &["", "&aAllows you to create delicious Juice"][..],
             &[
                 (1, "minecraft:glass"),
                 (4, "minecraft:nether_brick_fence"),
@@ -537,7 +593,7 @@ fn multiblocks(entries: &mut BTreeMap<String, Entry>) {
             Entry {
                 id,
                 item: stack_of(Kind::Vanilla(icon)),
-                label: Some(name),
+                multiblock: Some(MultiblockItem { name, localized_fallback, lore }),
                 ingredients: stacks,
                 visuals: if matches!(id, "INDUSTRIAL_MINER" | "ADVANCED_INDUSTRIAL_MINER") {
                     FACED_PISTONS
@@ -565,7 +621,7 @@ fn workbench(id: &'static str, recipe_type: RecipeType, recipe: &CraftingRecipe)
     Entry {
         id,
         item: recipe.output,
-        label: None,
+        multiblock: None,
         ingredients: recipe.inputs.map(|entry| entry.map(stack_of)),
         visuals: &[],
         recipe_type,
@@ -579,7 +635,7 @@ fn processing(recipe_type: RecipeType, recipe: &SingleRecipe) -> Entry {
     Entry {
         id: crate::availability::paper_id(recipe.output.kind),
         item: recipe.output,
-        label: None,
+        multiblock: None,
         ingredients,
         visuals: &[],
         recipe_type,
@@ -618,7 +674,7 @@ fn build() -> BTreeMap<String, Entry> {
             .or_insert(Entry {
                 id: crate::availability::paper_id(r.output.kind),
                 item: r.output,
-                label: None,
+                multiblock: None,
                 ingredients,
                 visuals: &[],
                 recipe_type: SMELTERY,
@@ -670,7 +726,7 @@ fn stock_sources(entries: &mut BTreeMap<String, Entry>) {
                     kind: output,
                     count,
                 },
-                label: None,
+                multiblock: None,
                 ingredients,
                 visuals,
                 recipe_type,

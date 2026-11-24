@@ -24,7 +24,7 @@ type Address = (String, Pos);
 
 const PANE_PROPERTIES: [&str; 5] = ["north", "east", "south", "west", "waterlogged"];
 
-const MARKERS: AttachmentType<Compound> = AttachmentType {
+pub(crate) const MARKERS: AttachmentType<Compound> = AttachmentType {
     namespace: "slimefun",
     name: "rainbow_blocks",
     default: Compound::new,

@@ -725,28 +725,6 @@ pub(crate) fn recipe_description(id: &str) -> Option<String> {
     ))
 }
 
-pub(crate) fn guide_lore(id: &str) -> Option<&'static [&'static str]> {
-    match id {
-        "INDUSTRIAL_MINER" => Some(&[
-            "",
-            "&fThis Multiblock will mine any Ores",
-            "&fin a 7x7 area underneath it.",
-            "&fPlace coal or similar in its chest",
-            "&fto fuel this machine.",
-        ]),
-        "ADVANCED_INDUSTRIAL_MINER" => Some(&[
-            "",
-            "&fThis Multiblock will mine any Ores",
-            "&fin a 11x11 area underneath it.",
-            "&fPlace a bucket of fuel or lava in",
-            "&fits chest to fuel this machine.",
-            "",
-            "&a+ Silk Touch",
-        ]),
-        _ => None,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

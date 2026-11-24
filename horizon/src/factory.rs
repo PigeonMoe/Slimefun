@@ -87,7 +87,7 @@ static INVENTORY: AttachmentType<Compound> = AttachmentType {
     sync: false,
 };
 
-static PLAIN_INVENTORIES: AttachmentType<Compound> = AttachmentType {
+pub(crate) static PLAIN_INVENTORIES: AttachmentType<Compound> = AttachmentType {
     namespace: "slimefun",
     name: "machine_positions",
     default: Compound::new,
@@ -287,7 +287,7 @@ impl FactoryViewers {
         self.0.lock().unwrap().clear();
     }
 
-    fn close_at(&self, host: &mut dyn ServerHost, level: LevelRef, pos: Position) {
+    pub(crate) fn close_at(&self, host: &mut dyn ServerHost, level: LevelRef, pos: Position) {
         let viewers: Vec<_> = self
             .0
             .lock()

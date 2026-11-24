@@ -39,7 +39,7 @@ pub(crate) fn is_carrier(block: &str) -> bool {
     CARRIERS.contains(&block) || crate::crucible::carrier(block)
 }
 
-static NODES: AttachmentType<Compound> = AttachmentType {
+pub(crate) static NODES: AttachmentType<Compound> = AttachmentType {
     namespace: "slimefun",
     name: "plain_energy_nodes",
     default: Compound::new,

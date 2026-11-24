@@ -163,6 +163,20 @@ impl Profiler {
         }
     }
 
+    pub(crate) fn block_timings(&self, dimension: &str, id: &str, pos: Position) -> Option<(u64, u64, u64)> {
+        let state = self.0.lock().unwrap();
+        let cycle = state.completed.iter().find(|cycle| cycle.dimension == dimension)?;
+        let (recorded, time) = cycle.locations.get(&pos)?;
+        if recorded != id {
+            return None;
+        }
+        let chunk = |[x, _, z]: Position| (x.div_euclid(16), z.div_euclid(16));
+        let chunk_pos = chunk(pos);
+        let item_total = state.completed.iter().flat_map(|cycle| cycle.locations.values()).filter(|(item, _)| item == id).map(|(_, time)| time).sum();
+        let chunk_total = cycle.locations.iter().filter(|(address, _)| chunk(**address) == chunk_pos).map(|(_, (_, time))| time).sum();
+        Some((*time, item_total, chunk_total))
+    }
+
     pub(crate) fn clear(&self) {
         *self.0.lock().unwrap() = State::default();
     }

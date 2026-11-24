@@ -16,6 +16,7 @@ PRESETS = ROOT / (
     "src/main/java/io/github/thebusybiscuit/slimefun4/core/services/localization/LanguagePreset.java"
 )
 OUTPUT = ROOT / "horizon/src/guide/locales.json"
+COMMAND_OUTPUT = OUTPUT.with_name("command-locales.json")
 PRESET = re.compile(r'^    [A-Z_]+\("([^"]+)", (?:[^"]+)?"([0-9a-f]+)"\)[,;]$', re.M)
 
 
@@ -55,8 +56,22 @@ def main():
 
     english = set(key for content in sources["en"].values() for key in keys(content))
     packs = {}
+    command_packs = {}
     for code, files in sources.items():
         messages = files["messages"]
+        commands = messages.get("commands", {})
+        command_pack = {name: messages.get("messages", {}).get(name)
+                        for name in ("no-permission", "not-researched")}
+        for name, command in commands.items():
+            if isinstance(command, str) and name in sources["en"]["messages"]["commands"]:
+                command_pack[name] = command
+            elif isinstance(command, dict):
+                if isinstance(command.get("description"), str):
+                    command_pack[name] = command["description"]
+                if name == "debug":
+                    command_pack.update({f"debug.{key}": value for key, value in command.items()
+                                         if key != "description"})
+        command_packs[code] = command_pack
         available = set(key for content in files.values() for key in keys(content))
         packs[code] = {
             **({"flag": flag(presets[code])} if code in presets else {}),
@@ -83,6 +98,11 @@ def main():
         "help": flag("3edd20be93520949e6ce789dc4f43efaeb28c717ee6bfcbbe02780142f716"),
         "packs": packs,
     }
+    entries = [
+        f'  {json.dumps(code)}:{json.dumps(pack, ensure_ascii=False, separators=(",", ":"))}'
+        for code, pack in command_packs.items()
+    ]
+    COMMAND_OUTPUT.write_text("{\n" + ",\n".join(entries) + "\n}\n", encoding="utf-8")
     OUTPUT.write_text(json.dumps(data, ensure_ascii=False, separators=(",", ":")) + "\n", encoding="utf-8")
 
 

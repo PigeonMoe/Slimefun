@@ -15,6 +15,10 @@ static LOCALES: LazyLock<Value> = LazyLock::new(|| {
     serde_json::from_str(include_str!("locales.json")).expect("generated stock guide locales")
 });
 
+static COMMANDS: LazyLock<Value> = LazyLock::new(|| {
+    serde_json::from_str(include_str!("command-locales.json")).expect("generated stock commands")
+});
+
 const KEY: &str = "slimefun:language";
 const PERSISTED: &str = "PlayerPersisted";
 
@@ -34,7 +38,7 @@ impl PartialEq for Language {
 impl Eq for Language {}
 
 impl Language {
-    pub(super) const ENGLISH: Self = Self::new("en");
+    pub(crate) const ENGLISH: Self = Self::new("en");
     pub(crate) const CHINESE: Self = Self::new("zh-CN");
 
     const fn new(code: &'static str) -> Self {
@@ -91,6 +95,14 @@ impl Language {
                 }
             })
             .or_else(|| descend(keys, Self::ENGLISH.pack()))
+    }
+
+    pub(crate) fn command_message(self, key: &str) -> &'static str {
+        COMMANDS[self.code][key]
+            .as_str()
+            .or_else(|| self.fallback.and_then(|code| COMMANDS[code][key].as_str()))
+            .or_else(|| COMMANDS[Self::ENGLISH.code][key].as_str())
+            .unwrap_or("")
     }
 
     pub(super) fn message(self, key: &str) -> &'static str {
