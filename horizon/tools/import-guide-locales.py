@@ -61,7 +61,7 @@ def main():
         messages = files["messages"]
         commands = messages.get("commands", {})
         command_pack = {name: messages.get("messages", {}).get(name)
-                        for name in ("no-permission", "not-researched")}
+                        for name in ("no-permission", "not-researched", "only-players")}
         for name, command in commands.items():
             if isinstance(command, str) and name in sources["en"]["messages"]["commands"]:
                 command_pack[name] = command

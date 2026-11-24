@@ -1182,6 +1182,14 @@ impl Hooks for Slimefun {
                         "dashboard_guide" => self.guide.open_dashboard(host, player),
                         _ => self.guide.open(host, player),
                     }
+                } else if action == "cheat" {
+                    let language = self.guide.command_language(host, event.source);
+                    let message = format!(
+                        "{}{}",
+                        self.guide.chat_prefix(),
+                        language.command_message("only-players"),
+                    );
+                    let _ = host.commands().feedback(Text::literal(hologram_projector::plain_label(&message)));
                 } else {
                     let _ = host.commands().feedback(Text::literal("只有玩家可以使用此命令。"));
                 }

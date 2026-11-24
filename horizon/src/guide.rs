@@ -430,6 +430,10 @@ impl Guide {
         self.chat_prefix.lock().unwrap().clone()
     }
 
+    pub(crate) fn prefixed_message(&self, message: &str) -> Text {
+        colored_label(&format!("{}{message}", self.chat_prefix()))
+    }
+
     pub(crate) fn refuses_multiblock_item_use(
         &self,
         host: &mut dyn ServerHost,
@@ -623,12 +627,13 @@ impl Guide {
             availability::Denied::World.tell(host, player);
             return;
         }
-        if cheat && !can_cheat(host, player) {
-            let _ = player.tell(host, colored_label("&c你没有权限使用此命令。"));
-            return;
-        }
         let language_settings = *self.languages.lock().unwrap();
         let language = language_settings.player(host, player);
+        if cheat && !can_cheat(host, player) {
+            let notice = self.prefixed_message(language.command_message("no-permission"));
+            let _ = player.tell(host, notice);
+            return;
+        }
         if !language_settings.enabled && matches!(path.last(), Some(Page::Languages)) {
             path.pop();
         }
@@ -801,7 +806,9 @@ impl Guide {
         };
         if matches!(path.first(), Some(Page::Cheat)) && !can_cheat(host, player) {
             host.close_menu(event.uuid);
-            let _ = player.tell(host, colored_label("&c你没有权限使用此命令。"));
+            let language = self.player_language(host, player);
+            let notice = self.prefixed_message(language.command_message("no-permission"));
+            let _ = player.tell(host, notice);
             return;
         }
         match action {
@@ -888,7 +895,8 @@ impl Guide {
                 }
                 if entry.multiblock.is_some() && !from_search {
                     let language = self.player_language(host, player);
-                    let _ = player.tell(host, colored_label(language.message("cheat.no-multiblocks")));
+                    let notice = self.prefixed_message(language.message("cheat.no-multiblocks"));
+                    let _ = player.tell(host, notice);
                     return;
                 }
                 if let Some(stack) = inventory_template(host, entry) {
@@ -1969,6 +1977,30 @@ mod tests {
             Some(&Tag::List(CHEAT_BOOK_LORE.iter().map(|line| colored_lore(line)).collect())),
         );
         assert_eq!(switched_book(&host, cheat), Some(tagged));
+    }
+
+    #[test]
+    fn cheat_denial_uses_the_players_paper_language_and_the_configured_prefix() {
+        let mut host = FakeHost::new();
+        let guide = Guide::default();
+        let options = toml::from_str::<toml::Value>("chat-prefix = \"&aTest &7> \"").unwrap();
+        guide.configure_languages(Some(&options));
+        let level = host.level.level();
+        for (uuid, code, expected) in [
+            (1, "en", "&aTest &7> &4You do not have the required permission to do this"),
+            (2, "zh-CN", "&aTest &7> &4你没有足够的权限这么做"),
+        ] {
+            let profile = host.players.join(uuid, uuid as u32, level);
+            profile.persistent_data.insert(
+                "PlayerPersisted".into(),
+                Tag::compound([("slimefun:language", Tag::String(code.into()))]),
+            );
+            let language = guide.player_language(&host, host.player(uuid).unwrap());
+            assert_eq!(
+                guide.prefixed_message(language.command_message("no-permission")),
+                colored_label(expected),
+            );
+        }
     }
 
     #[test]
