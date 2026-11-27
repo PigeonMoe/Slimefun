@@ -26,6 +26,7 @@ use crate::{
 mod catalog;
 mod learning;
 mod locale;
+pub(crate) mod recipe_catalog;
 use catalog::{Entry, GROUPS, Group, group_entries, lookup, named_group_entries};
 use learning::Preference;
 pub(crate) use learning::launch_random_fireworks;
@@ -916,7 +917,7 @@ pub(crate) fn strip_colors(input: &str) -> String {
     let mut chars = input.chars().peekable();
     let mut plain = String::new();
     while let Some(c) = chars.next() {
-        if c == '§'
+        if matches!(c, '§' | '&')
             && chars.peek().is_some_and(|code| {
                 matches!(
                     code.to_ascii_lowercase(), '0'..='9' | 'a'..='f' | 'k'..='o' | 'r' | 'x'
@@ -1664,6 +1665,7 @@ mod tests {
                 view: Some(View {
                     window: 3,
                     path: history,
+                    presentation: Presentation::Book,
                     actions: std::array::from_fn(|_| None),
                 }),
                 waiting_for_search: None,

@@ -1,12 +1,12 @@
 [package]
 name = "slimefun-horizon"
-version = "0.1.0-dev.12"
+version = "0.1.0-dev.13"
 edition = "2024"
 license = "GPL-3.0-only"
 publish = false
 
 [package.metadata.horizon]
-sdk = "053686991951d06df8a94a7da89915330002f460"
+sdk = "5dc6ee0bf53a203d0da37adae7188e4352330215"
 
 [lib]
 crate-type = ["rlib", "cdylib"]

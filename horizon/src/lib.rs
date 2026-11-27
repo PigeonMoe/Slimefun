@@ -447,6 +447,7 @@ impl Slimefun {
 impl Hooks for Slimefun {
     fn register(&self, registrar: &mut dyn mod_api::Registrar, context: &mod_api::RegistrationContext) {
         lifeskills::register(context);
+        guide::recipe_catalog::register(registrar);
         let dispenser = registrar.item_key("minecraft:dispenser");
         registrar.item_part(dispenser, block_placer::Placement);
         let chest = registrar.item_key("minecraft:chest");
